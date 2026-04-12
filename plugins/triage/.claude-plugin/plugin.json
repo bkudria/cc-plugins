@@ -1,0 +1,8 @@
+{
+  "name": "triage",
+  "description": "Assess a scope to produce findings, then address them one-by-one.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Benjamin Kudria"
+  }
+}

@@ -3,5 +3,11 @@
   "owner": {
     "name": "Benjamin Kudria"
   },
-  "plugins": []
+  "plugins": [
+    {
+      "name": "triage",
+      "source": "./plugins/triage",
+      "description": "Assess a scope to produce findings, then address them one-by-one."
+    }
+  ]
 }
