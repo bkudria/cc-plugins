@@ -1,7 +1,6 @@
 ---
 name: assess
 description: "Investigate a scope for problems and opportunities. Use when investigating a codebase, reviewing a feature, auditing configuration, assessing for problems, or exploring and reporting findings."
-disable-model-invocation: true
 argument-hint: "[scope to investigate, e.g. 'this codebase' or 'the auth module']"
 ---
 
