@@ -35,11 +35,19 @@ Apply both when present. Ask the user to clarify ambiguous arguments. When no ar
 
 ---
 
-## Step 0: Initialize Progress Tracking
+## Phase 0: Initialize Progress Tracking
 
 **CRITICAL — Do this before any other work.**
 
-**Identify the list.** Scan the conversation for the most recent list of actionable items. If the conversation lacks a recognizable list (e.g., after a compaction), check for a persisted assessment at `/tmp/assessment-${CLAUDE_SESSION_ID}.md` — read it and use its findings as the source list. If neither source is available, ask the user to provide or re-generate the list. Before creating any tasks, briefly state what was found and where — e.g., "I found 5 items from the audit's Prioritized Remediation section" or "Recovered 8 findings from the persisted assessment file." If multiple candidate lists exist or the source is ambiguous, ask the user which list to process.
+**Identify the list.** Locate the source list by checking in order:
+
+1. **Conversation**: Scan for the most recent list of actionable items earlier in this conversation.
+2. **Persisted assessment**: If no list is in the conversation (e.g., after compaction), check the session-specific assessment file at `/tmp/assessment-${CLAUDE_SESSION_ID}.md` and use its findings.
+3. **Ask the user**: If neither source is available, ask the user to provide or re-generate the list.
+
+If multiple candidate lists exist or the source is ambiguous, ask the user which one to process.
+
+Before creating any tasks, state what was found and where — e.g., "I found 5 items from the audit's Prioritized Remediation section" or "Recovered 8 findings from the persisted assessment file."
 
 Run `TaskList` to check for existing progress from a previous invocation or compaction recovery:
 
@@ -51,7 +59,7 @@ Run `TaskList` to check for existing progress from a previous invocation or comp
 
 ---
 
-## Step 1: Process Items One-by-One
+## Phase 1: Process Items One-by-One
 
 Then for each pending item (run `TaskList` first if resuming after a compaction or previous invocation, otherwise proceed directly):
 
@@ -87,7 +95,7 @@ Then for each pending item (run `TaskList` first if resuming after a compaction 
 
 ---
 
-## Step 2: Final Summary
+## Phase 2: Final Summary
 
 After all tasks are `completed`, run `TaskList` one final time and summarize:
 - Which items were **implemented** (completed without [DECLINED] prefix)
