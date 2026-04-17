@@ -122,7 +122,7 @@ current state, and why this is noteworthy. Includes specific evidence.]
 
 ## Summary
 
-[N] findings. [Brief overall assessment.]
+[N] findings. [Brief overall assessment — describe the concentration of problems, recurring root causes, and severity. The filter-for-actionability rule applies here too: do not include positive observations or working-as-designed notes.]
 ```
 
 ### Finding format rules
