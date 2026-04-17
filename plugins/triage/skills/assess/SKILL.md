@@ -111,14 +111,14 @@ Produce an assessment with this structure:
 
 ## Findings
 
-1. **[Short descriptive title]**
+### 1. [Short descriptive title]
 
-   [Detailed observation. What was found, where (file paths, line numbers),
-   current state, and why this is noteworthy. Includes specific evidence.]
+[Detailed observation. What was found, where (file paths, line numbers),
+current state, and why this is noteworthy. Includes specific evidence.]
 
-2. **[Short descriptive title]**
+### 2. [Short descriptive title]
 
-   [...]
+[...]
 
 ## Summary
 
@@ -127,9 +127,9 @@ Produce an assessment with this structure:
 
 ### Finding format rules
 
-- Each finding is a single numbered item in a flat list under `## Findings`
-- Title is bold, on its own line — no em dash, no body text on the title line
-- Body is a separate indented paragraph after a blank line — no sub-bullets, no nested structure
+- Each finding is an h3 subsection under `## Findings`, numbered in the heading text (e.g., `### 1. Title`)
+- The heading contains the finding number and a short descriptive title — no bold markers, no em dash, no body text on the heading line
+- Body is a regular paragraph after the heading — no sub-bullets, no nested structure
 - Body includes concrete evidence: file paths, values, patterns observed
 - Body describes WHAT and WHY it is noteworthy — never HOW to fix it
 - Each finding stands alone without requiring context from other findings
