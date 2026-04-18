@@ -15,12 +15,12 @@ argument-hint: "[filter or guidance, e.g. '1,3,5' or 'only security-related']"
 
 ## Dependencies
 
-| Tool | Purpose |
-|------|---------|
-| `TaskCreate`, `TaskUpdate`, `TaskList` | Progress tracking and resume after compaction |
-| `AskUserQuestion` | Per-item approval gate |
-| `EnterPlanMode` / `ExitPlanMode` | Design approach before implementing complex items |
-| `Agent` | Sub-agents for investigation and research |
+| Capability | Purpose |
+|------------|---------|
+| Task tracking | Persist tasks and their status across turns; resume after compaction |
+| User prompts with options | Per-item approval gate |
+| Plan mode | Design approach before implementing complex items |
+| Sub-agents | Investigation and research |
 
 ---
 
@@ -49,10 +49,10 @@ If multiple candidate lists exist or the source is ambiguous, ask the user which
 
 Before creating any tasks, state what was found and where — e.g., "I found 5 items from the audit's Prioritized Remediation section" or "Recovered 8 findings from the persisted assessment file."
 
-Run `TaskList` to check for existing progress from a previous invocation or compaction recovery:
+Check the task list for existing progress from a previous invocation or compaction recovery:
 
-- **Tasks already exist**: Resume from the first `pending` task. Skip all `completed` tasks. Do NOT re-create tasks.
-- **No tasks exist**: Create a `TaskCreate` for **every item** to process (after applying any argument filters). Each task needs:
+- **Tasks already exist**: Resume from the first pending task. Skip all completed tasks. Do NOT re-create tasks.
+- **No tasks exist**: Create a task for **every item** to process (after applying any argument filters). Each task needs:
   - `subject`: A concise description of the item/improvement
   - `description`: Full context including the problem, proposed improvement, and any user-provided guidance
   - `activeForm`: Present-continuous description (e.g., "Implementing X improvement")
@@ -61,35 +61,35 @@ Run `TaskList` to check for existing progress from a previous invocation or comp
 
 ## Phase 1: Process Items One-by-One
 
-Then for each pending item (run `TaskList` first if resuming after a compaction or previous invocation, otherwise proceed directly):
+Then for each pending task (check the task list first if resuming after a compaction or previous invocation, otherwise proceed directly):
 
-1. **Mark in-progress**: `TaskUpdate` the task to `in_progress`
+1. **Mark in-progress**: Update the task's status to in-progress
 2. **Investigate the item** — Do NOT present to the user or ask how to proceed until investigation is complete.
-   - **Required**: Use at least one investigative tool (Read, Grep, Bash, or sub-agent) to check the current state of what the item concerns. No exceptions for "simple" items or items already analyzed earlier in the conversation.
+   - **Required**: Actively investigate the current state — read files, search for patterns, run commands, or delegate to a sub-agent. No exceptions for "simple" items or items already analyzed earlier in the conversation.
    - **Artifact rule**: The presentation (step 3) must reference specific findings from this investigation — file paths, current values, concrete state discovered. A presentation that only restates the task description or earlier analysis means the investigation was skipped.
    - **Decomposition**: If investigation reveals the item has 3+ independently-implementable parts, split it — narrow the current task to the first part (update its subject/description), create new tasks for the rest, and note the split in the presentation.
    - **Red flags — restart investigation if any of these occur**:
-     - Presenting without any tool calls since marking in-progress
+     - Presenting without any investigation since marking in-progress
      - No file paths or line numbers from investigation in the presentation
      - Phrases like "From my earlier review", "As noted above", "I already analyzed this"
      - Paraphrasing the task description instead of reporting current findings
 3. **Present the item** — Summarize what was found: the current state, what the proposed change involves concretely, any complications or trade-offs discovered, and an assessment of complexity. This gives the user enough context to make an informed decision.
-4. **Ask the user how to proceed** — use `AskUserQuestion` with these options for **every** item, regardless of complexity:
+4. **Ask the user how to proceed** — prompt the user with these options for **every** item, regardless of complexity:
 
    | Option | Action | When appropriate |
    |--------|--------|-----------------|
    | **Implement** | Proceed directly | Straightforward items with clear path |
    | **Plan first, then implement** | Enter plan mode, design approach, get approval, then implement | Items needing design decisions or exploration |
-   | **Skip** | `TaskUpdate` subject to `[DECLINED] <original subject>`, mark `completed` | Item not worth pursuing |
-5. **If scope changes**: When planning or implementation reveals the item is larger or different than originally described, update the task's subject and description via `TaskUpdate` to reflect the actual scope before proceeding.
+   | **Skip** | Update the task's subject to `[DECLINED] <original subject>`, mark the task completed | Item not worth pursuing |
+5. **If scope changes**: When planning or implementation reveals the task is larger or different than originally described, update the task's subject and description to reflect the actual scope before proceeding.
 6. **If "Implement"**: Implement the change directly
 7. **If "Plan first"**:
    - Enter plan mode and plan the proposed improvement, incorporating user-provided context
    - Use sub-agents as needed to explore, research, or otherwise support planning
-   - Use `AskUserQuestion` as many times as needed for questions, design decisions, or other choices
+   - Ask the user as many times as needed for questions, design decisions, or other choices
    - Exit plan mode and implement
-8. **Mark completed**: `TaskUpdate` the task to `completed` (immediately — never batch updates)
-9. **Repeat** from step 1 for the next pending item
+8. **Mark completed**: Update the task's status to completed (immediately — never batch updates)
+9. **Repeat** from step 1 for the next pending task
 
 **IMPORTANT**: Process exactly one item per cycle through steps 1-9. Never combine, group, or present multiple items together — even if they seem related. Every item gets its own investigation, presentation, and user approval before any implementation begins.
 
@@ -97,9 +97,9 @@ Then for each pending item (run `TaskList` first if resuming after a compaction 
 
 ## Phase 2: Final Summary
 
-After all tasks are `completed`, run `TaskList` one final time and summarize:
-- Which items were **implemented** (completed without [DECLINED] prefix)
-- Which items were **declined** (completed with [DECLINED] prefix)
+After all tasks are completed, check the task list one final time and summarize:
+- Which items were **implemented** (tasks completed without the `[DECLINED]` prefix)
+- Which items were **declined** (tasks completed with the `[DECLINED]` prefix)
 - Which items were **filtered out** by arguments (never created as tasks)
 
 Follow this procedure exactly. Do not propose alternative strategies, comment on the number of remaining items, or suggest changing the approach mid-session.
