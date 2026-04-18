@@ -18,24 +18,34 @@ Investigate a scope and produce a structured, numbered findings assessment. Each
 
 ## Dependencies
 
-Tools used: `AskUserQuestion`, `Agent` (sub-agents), `TaskCreate`, `TaskUpdate`, `Read`, `Grep`, `Glob`, `Bash` (read-only), and `Write` (for the assessment file only).
+| Tool | Purpose |
+|------|---------|
+| `Read`, `Grep`, `Glob`, `Bash` (read-only) | Investigation and evidence gathering |
+| `Agent` | Sub-agents for deep-area investigation |
+| `AskUserQuestion` | Phase 1 scope interview |
+| `TaskCreate`, `TaskUpdate` | Progress tracking across areas |
+| `Write` | Persist the assessment file |
 
 ---
 
-## Arguments: `$ARGUMENTS`
+## Phase 0: Scope Resolution
 
-If arguments were provided, treat them as the investigation scope and proceed to Phase 2.
+Determine the investigation scope before any work begins. Check in order:
 
-If no arguments were provided, check the conversation for context that implies a scope. If inferable, confirm it with the user. If not, proceed to Phase 1.
+1. **`$ARGUMENTS` is populated** — treat it as the scope and proceed to Phase 2.
+2. **Arguments empty but conversation implies a scope** — confirm the inferred scope with the user, then proceed to Phase 2.
+3. **Neither source available** — proceed to Phase 1 (Scope Interview) to gather scope, focus, and depth from the user.
+
+Phase 1 is the fallback path, not the default entry point.
 
 ---
 
-## Phase 1: Scope Interview
+## Phase 1: Scope Interview (fallback)
 
 Determine what to investigate. Use `AskUserQuestion` to gather:
 
 1. **Scope** — What area to investigate (codebase, feature, skill, session, configuration, etc.)
-2. **Focus** — What to look for (problems, opportunities, trade-offs, architecture concerns, etc.)
+2. **Focus** — What to look for (problems, gaps, risks, or opportunities for improvement)
 3. **Depth** — How deep to go (quick scan, standard review, comprehensive analysis)
 
 If the scope is broad (entire codebase, "everything"), ask for priority areas or known pain points.
@@ -52,13 +62,11 @@ Break the scope into areas that can be explored semi-independently and assess co
 
 If the investigation has 4+ areas, create a task (via `TaskCreate`) for each to track progress.
 
-### Sub-agent strategy
+### Sub-agent prompts
 
-Dispatch sub-agents when 3+ areas need moderate or deep exploration. Each sub-agent explores one area independently. Every sub-agent prompt must include: (1) the observation-only constraint — no fixes or solutions, (2) the output format — numbered observations, each a single paragraph with a short title and specific evidence, and (3) a one-line note of the other areas being investigated.
+When a Deep area warrants a sub-agent, the prompt must include: (1) the observation-only constraint — no fixes or solutions, (2) the output format — numbered observations, each a single paragraph with a short title and specific evidence, and (3) a one-line list of the other areas in the overall scope for context (these areas may be investigated by the main agent directly or by other sub-agents — do not assert parallelism that does not exist).
 
-> Investigate [AREA] within [SCOPE]. Look for problems, inconsistencies, surprising patterns, missing pieces, and opportunities for improvement. Do NOT suggest fixes or solutions — only describe what is found. Report as numbered observations, each a single paragraph with a short title. Include specific evidence (file paths, line numbers, values) in every observation.
-
-For fewer or simpler areas, investigate directly without sub-agents.
+> Investigate [AREA] within [SCOPE]. Other areas in this investigation: [LIST OF OTHER AREAS]. Look for problems, inconsistencies, surprising patterns, missing pieces, and opportunities for improvement. Do NOT suggest fixes or solutions — only describe what is found. Report as numbered observations, each a single paragraph with a short title. Include specific evidence (file paths, line numbers, values) in every observation.
 
 ---
 
@@ -81,7 +89,7 @@ Execute the exploration plan. For each area:
 
 When sub-agents were dispatched, complete these checks before proceeding to Phase 4:
 
-1. **Cross-reference claims between sub-agents** — If one sub-agent's findings depend on or contradict another's, investigate the discrepancy directly.
+1. **Cross-reference claims between sub-agents** — If any two sub-agents' areas overlap on a shared file, value, or claim, verify the shared element independently before synthesis. If their domains are fully disjoint, state that explicitly and move on.
 2. **Spot-check numerical claims** — Counts, frequencies, and statistics are especially error-prone. Run one independent check on the most significant number.
 3. **Test tool reliability** — If a sub-agent relied on a tool that could have timed out, truncated, or silently failed, verify the tool produced complete results.
 
@@ -93,8 +101,10 @@ If a check does not apply (e.g., no numerical claims), note why and move on — 
 
 ### Organize findings
 
+The numbered observations returned by sub-agents are an input, not the final form. Sub-agent numbering is discarded; each finding's number comes from significance order after merging, splitting, and filtering. A single sub-agent observation may become zero findings (filtered out), one finding (preserved or rewritten), or multiple findings (split). A finding may also aggregate observations from several sub-agents.
+
 1. Group related observations into discrete findings
-2. **Filter for actionability** — Drop observations that are purely informational (neutral descriptions of working-as-designed behavior, positive observations with no implied problem or opportunity). A finding belongs in the assessment only if it identifies a problem, a gap, a risk, or a concrete opportunity for improvement. "X works correctly" is not a finding.
+2. **Filter for actionability** — Drop observations that are purely informational (neutral descriptions of working-as-designed behavior, positive observations with no implied problem or opportunity). A finding belongs in the assessment only if it identifies a problem, a gap, a risk, or a concrete opportunity for improvement. "X works correctly" is not a finding, but "X works correctly and is undocumented" is a documentation gap and qualifies.
 3. Order by significance — most impactful first
 4. **Merge overlapping observations** — If two findings share a root cause or near-identical concluding clause, they describe the same issue. Keep the stronger framing; fold the other's unique evidence into it.
 5. Split compound issues into separate findings
