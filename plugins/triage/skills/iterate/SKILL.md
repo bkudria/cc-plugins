@@ -65,7 +65,7 @@ Check the task list for existing progress from a previous invocation or compacti
 
 ## Phase 1: Process Items One-by-One
 
-Then for each pending task (check the task list first if resuming after a compaction or previous invocation, otherwise proceed directly):
+For each pending task:
 
 1. **Mark in-progress**: Update the task's status to in-progress
 2. **Investigate the item** — Do NOT present to the user or ask how to proceed until investigation is complete.
