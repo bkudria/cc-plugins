@@ -1,6 +1,6 @@
 ---
 name: iterate
-description: "Process a list of actionable items one-by-one with individual approval. Use when iterating through findings, working through review items, processing improvements one by one, or implementing changes from an assessment."
+description: "Use when iterating through findings, working through review items, processing improvements one by one, or implementing changes from an assessment."
 argument-hint: "[filter or guidance, e.g. '1,3,5' or 'only security-related']"
 ---
 
