@@ -93,7 +93,7 @@ For each pending task:
    - Ask the user as many times as needed for questions, design decisions, or other choices
    - Exit plan mode and implement
 8. **Mark completed**: Update the task's status to completed (immediately — never batch updates)
-9. **Repeat** from step 1 for the next pending task
+9. **Next task**: Move to the next pending task and restart at step 1 (Mark in-progress).
 
 **IMPORTANT**: Process exactly one item per cycle through steps 1-9. Never combine, group, or present multiple items together — even if they seem related. Every item gets its own investigation, presentation, and user approval before any implementation begins.
 
