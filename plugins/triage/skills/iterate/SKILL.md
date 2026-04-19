@@ -17,7 +17,7 @@ argument-hint: "[filter or guidance, e.g. '1,3,5' or 'only security-related']"
 
 | Capability | Purpose |
 |------------|---------|
-| Task tracking | Persist tasks and their status across turns; resume after compaction |
+| Task tracking (TaskCreate or TodoWrite) | Persist tasks and their status across turns; resume after compaction |
 | User prompts with options | Per-item approval gate |
 | Plan mode | Design approach before implementing complex items |
 | Sub-agents | Investigation and research |
