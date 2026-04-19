@@ -13,6 +13,10 @@ argument-hint: "[filter or guidance, e.g. '1,3,5' or 'only security-related']"
 - Working through review feedback item-by-item
 - Implementing a series of enhancements where each may be accepted or declined independently
 
+## Discipline
+
+Follow this procedure exactly. Do not propose alternative strategies, comment on the number of remaining items, or suggest changing the approach mid-session.
+
 ## Dependencies
 
 | Capability | Purpose |
@@ -101,5 +105,3 @@ After all tasks are completed, check the task list one final time and summarize:
 - Which items were **implemented** (tasks completed without the `[DECLINED]` prefix)
 - Which items were **declined** (tasks completed with the `[DECLINED]` prefix)
 - Which items were **filtered out** by arguments (never created as tasks)
-
-Follow this procedure exactly. Do not propose alternative strategies, comment on the number of remaining items, or suggest changing the approach mid-session.
