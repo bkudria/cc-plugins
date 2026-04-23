@@ -1,0 +1,17 @@
+model: claude-sonnet-4-5
+tools:
+  - Read
+  - Write
+  - Edit
+  - Bash
+  - Glob
+  - Grep
+  - AskUserQuestion
+  - Skill
+  - TodoWrite
+project:
+  skills:
+    - /Users/bkudria/code/cc-plugins/plugins/triage/skills/iterate
+user:
+  oracle_model: claude-haiku-4-5
+  max_turns: 15

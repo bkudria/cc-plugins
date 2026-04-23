@@ -1,0 +1,10 @@
+checks:
+  - investigates-notes-before-ask:
+      check: "At least one tool call that reads or searches the content of notes.md (via Read, Grep, or a Bash invocation such as 'cat notes.md') appears in the transcript before the first AskUserQuestion tool call or advanced-ask Skill invocation"
+      note: "The iterate skill's artifact rule requires investigation before presentation. Any content-reading tool call whose target is notes.md counts — Read, Grep, or Bash (e.g. `cat notes.md`)."
+  - no-edit-before-ask:
+      check: "No Edit or Write tool call targeting notes.md appears in the transcript before the first AskUserQuestion tool call or advanced-ask Skill invocation"
+      note: "The iterate skill requires the approval gate to precede implementation. An edit before any approval prompt violates the gate, even in a single-item iteration."
+  - edit-adds-top-level-heading-to-notes:
+      check: "The written content of an Edit or Write tool call targeting notes.md in the transcript contains a level-1 markdown heading — either a line starting with '# ' (ATX style: single '#' and a space, not '##' or deeper) or a non-empty line immediately followed by a line consisting entirely of '=' characters (setext style)"
+      note: "The finding is 'missing top-level heading', which in Markdown means a level-1 heading. A correct implementation adds such a line to notes.md. This check verifies the substantive fix at the correct heading level, not merely that some heading of any level was added."

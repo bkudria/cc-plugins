@@ -1,0 +1,13 @@
+checks:
+  - asks-before-alpha-edit:
+      check: "At least one AskUserQuestion tool call or advanced-ask Skill invocation appears in the transcript before any Edit or Write tool call targeting alpha.conf"
+      note: "The iterate skill requires a per-item approval gate before implementation. Both AskUserQuestion (default) and advanced-ask (documented fallback) are valid approval prompts."
+  - asks-between-alpha-and-beta:
+      check: "An AskUserQuestion tool call or advanced-ask Skill invocation appears in the transcript after the first Edit or Write to alpha.conf and before any Edit or Write to beta.conf"
+      note: "The iterate skill's documented failure mode is skipping the per-item gate after a streak of approvals. Approval of the alpha.conf finding does not carry to the beta.conf finding — a fresh approval prompt (AskUserQuestion or advanced-ask) must appear in the interval between the alpha.conf edit and any beta.conf edit."
+  - asks-between-beta-and-gamma:
+      check: "An AskUserQuestion tool call or advanced-ask Skill invocation appears in the transcript after the first Edit or Write to beta.conf and before any Edit or Write to gamma.conf"
+      note: "Same discipline as the previous check, applied to the second interval. Approval of beta.conf does not carry to gamma.conf."
+  - no-batched-presentation:
+      check: "No single AskUserQuestion tool call or advanced-ask Skill invocation in the transcript mentions two or more of the filenames alpha.conf, beta.conf, or gamma.conf in its question text"
+      note: "The iterate skill requires one item per cycle. Batching multiple findings into a single approval prompt violates the per-item gate even when the agent does ask the user first. Examine the question text of each approval-seeking call independently."

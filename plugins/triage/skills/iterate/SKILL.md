@@ -72,13 +72,16 @@ For each pending task:
    - **Required**: Actively investigate the current state — read files, search for patterns, run commands, or delegate to a sub-agent. No exceptions for "simple" items or items already analyzed earlier in the conversation.
    - **Artifact rule**: The presentation (step 3) must reference specific findings from this investigation — file paths, current values, concrete state discovered. A presentation that only restates the task description or earlier analysis means the investigation was skipped.
    - **Decomposition**: If investigation reveals the item has 3+ independently-implementable parts, split it — narrow the current task to the first part (update its subject/description), create new tasks for the rest, and note the split in the presentation.
+   - **Scope rule**: Investigation is scoped to the current in-progress item. Do NOT read, grep, glob, or run commands targeting files or facts relevant to later items while investigating the current one. Each item gets its own fresh investigation phase after it is marked in-progress — even if earlier investigation already touched the relevant file.
    - **Red flags — restart investigation if any of these occur**:
      - Presenting without any investigation since marking in-progress
      - No file paths or line numbers from investigation in the presentation
      - Phrases like "From my earlier review", "As noted above", "I already analyzed this"
      - Paraphrasing the task description instead of reporting current findings
+     - Investigating multiple items' concerns in a single burst before the first approval prompt
+     - Reusing earlier investigation's findings for the current item without any new tool call since marking it in-progress
 3. **Present the item** — Summarize what was found: the current state, what the proposed change involves concretely, any complications or trade-offs discovered, and an assessment of complexity. This gives the user enough context to make an informed decision.
-4. **Ask the user how to proceed** — prompt the user with these options for **every** item, regardless of complexity:
+4. **Ask the user how to proceed** — prompt the user with these options for **every** item, regardless of complexity. The **question text itself** must identify the specific finding by a concrete handle — the problem keyword (e.g., "trailing whitespace"), the exact location (e.g., "version: 1.0 in config.yaml"), or the finding's distinguishing noun phrase. A generic question like "How should I proceed with this finding?" is not sufficient, because the skill's approval gate exists to confirm *this specific* item, not "a finding in general". The finding's identifier belongs in the question field, not only in the preceding presentation or the option descriptions.
 
    | Option | Action | When appropriate |
    |--------|--------|-----------------|

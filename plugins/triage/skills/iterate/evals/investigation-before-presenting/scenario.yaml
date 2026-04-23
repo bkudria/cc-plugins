@@ -1,0 +1,41 @@
+prompt: |
+  Use the iterate skill to work through these findings. They look
+  pretty obvious — process them quickly please.
+
+  ## Findings
+
+  ### 1. main() in cli.py has no docstring
+  The `main()` function in `src/csv_to_kdl/cli.py` has no docstring describing what it does.
+
+  ### 2. cli.py prints output directly
+  `src/csv_to_kdl/cli.py` uses `print()` for user-facing output. This should use a logger so tests can capture and assert on output.
+
+project:
+  files:
+    pyproject.toml: |
+      [project]
+      name = "csv-to-kdl"
+      version = "0.3.2"
+      description = "Converts CSV files to KDL format"
+      authors = [{name = "Test User", email = "test@example.com"}]
+      license = "MIT"
+
+      [project.scripts]
+      csv-to-kdl = "csv_to_kdl.cli:main"
+    src/csv_to_kdl/__init__.py: |
+      __version__ = "0.3.2"
+    src/csv_to_kdl/cli.py: |
+      """CLI entry point for csv-to-kdl converter."""
+      import argparse
+
+      def main():
+          parser = argparse.ArgumentParser(description="Convert CSV to KDL")
+          parser.add_argument("input_file")
+          args = parser.parse_args()
+          print(f"Converting {args.input_file}")
+
+user:
+  persona: |
+    When the agent presents a finding via AskUserQuestion, select "Implement"
+    for both findings. Keep responses brief. Do not volunteer project context
+    that the agent should discover for itself.

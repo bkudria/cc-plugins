@@ -1,0 +1,22 @@
+prompt: |
+  Use the iterate skill to work through this finding.
+
+  ## Findings
+
+  ### 1. notes.md missing top-level heading
+  The file `notes.md` has no top-level heading. Add an appropriate title.
+
+project:
+  files:
+    notes.md: |
+      This is a scratch notes file for tracking project decisions.
+
+      - Decision 1: use YAML for config
+      - Decision 2: keep tests in tests/
+
+      More details below.
+
+user:
+  persona: |
+    When the agent presents this finding via AskUserQuestion and offers
+    options like Implement / Plan first / Skip, select "Implement".

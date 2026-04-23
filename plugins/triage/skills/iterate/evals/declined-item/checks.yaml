@@ -1,0 +1,10 @@
+checks:
+  - declined-prefix-applied:
+      check: "A TodoWrite, TaskCreate, or TaskUpdate tool call in the transcript has a content or subject field whose value begins with the literal string '[DECLINED]'"
+      note: "The iterate skill's declined-item convention: when the user picks Skip, update the task's subject (TaskCreate/TaskUpdate) or content (TodoWrite) to '[DECLINED] <original subject>' before marking it completed. Examine whichever tracking mechanism the agent chose — both are supported by the skill. The Rust rewrite finding is the one the oracle will decline."
+  - flow-investigates-between-asks:
+      check: "At least one Read, Grep, Glob, or Bash tool call appears in the transcript between the first AskUserQuestion tool call or advanced-ask Skill invocation and the second AskUserQuestion tool call or advanced-ask Skill invocation"
+      note: "The iterate skill requires investigation per item. Between the first and second approval prompts, the agent should investigate the second finding."
+  - approval-prompt-for-whitespace-finding:
+      check: "An AskUserQuestion tool call or advanced-ask Skill invocation whose question text specifically identifies the trailing-whitespace finding — by containing either the substring 'whitespace', the substring 'trailing', or the exact location 'version: 1.0' — appears in the transcript"
+      note: "The iterate skill requires a per-item approval prompt for each finding. For the trailing-whitespace finding to go through the gate, the approval prompt must specifically identify it by the problem ('trailing whitespace') or the exact location ('version: 1.0'), not just mention the filename. Inspect the question text of each AskUserQuestion/advanced-ask call."

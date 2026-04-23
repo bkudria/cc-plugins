@@ -1,0 +1,23 @@
+prompt: |
+  Use the iterate skill to work through these findings.
+
+  ## Findings
+
+  ### 1. This project should be rewritten in Rust
+  The current Python implementation is slow. Rewriting in Rust would improve performance significantly.
+
+  ### 2. config.yaml has trailing whitespace
+  The file `config.yaml` has trailing whitespace after "1.0" on the version line.
+
+project:
+  files:
+    config.yaml: |
+      name: test-project
+      version: 1.0
+      description: Example project
+
+user:
+  persona: |
+    For the Rust rewrite finding, select "Skip" — a full language rewrite
+    is out of scope for a minor iteration. For the trailing whitespace
+    finding, select "Implement". Keep responses brief.
