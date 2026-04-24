@@ -1,0 +1,34 @@
+prompt: |
+  Use the assess skill to investigate this small auth-service project.
+  Report what's noteworthy.
+
+project:
+  files:
+    README.md: |
+      # Auth Service
+
+      A small authentication service.
+
+      ## Install
+      pip install -r requirements.txt
+
+      See [architecture](docs/architecture.md) for details.
+
+      TODO: update config examples.
+    src/db.py: |
+      import sqlite3
+
+      def get_user(user_id):
+          conn = sqlite3.connect("app.db")
+          cursor = conn.cursor()
+          cursor.execute(f"SELECT * FROM users WHERE id = {user_id}")
+          return cursor.fetchone()
+    src/config.py: |
+      DB_PASSWORD = "admin123"
+      DEBUG = True
+      SECRET_KEY = "dev-secret-key"
+
+user:
+  persona: |
+    If the agent asks a clarifying question, answer briefly and tell it to
+    proceed with a standard review. Do not volunteer additional context.

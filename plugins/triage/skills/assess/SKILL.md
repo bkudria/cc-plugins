@@ -150,8 +150,9 @@ current state, and why this is noteworthy. Includes specific evidence.]
 - "Fix by..." / "Solution:" / "To resolve this..."
 - "Migrate to..." / "Replace with..." / "Switch to..."
 - Any imperative verb directed at future action
+- **Modal verbs of obligation or suggestion anywhere in the body** — `should`, `could`, `would`, `must`, `ought to`. Mid-sentence modals are the common slip: "debug endpoints that should not be accessible" prescribes just as clearly as "Should disable debug endpoints". Rewrite as pure description: "debug endpoints are exposed in `config.py`".
 
-These signal a solution, not a finding. Strip the prescription and keep only the observation.
+These signal a solution, not a finding. Strip the prescription and keep only the observation — describe the current state and what makes it noteworthy, not what the system should be.
 
 ### Persist and present
 

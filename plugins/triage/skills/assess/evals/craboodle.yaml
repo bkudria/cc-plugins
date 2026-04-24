@@ -1,0 +1,3 @@
+version: "1"
+min_pass_rate: 0.67
+repeats: 3

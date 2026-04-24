@@ -1,0 +1,19 @@
+prompt: |
+  /assess config/auth.yaml for misconfigurations
+
+project:
+  files:
+    config/auth.yaml: |
+      auth:
+        secret: "changeme"
+        session_timeout_seconds: 999999
+        allow_anonymous: true
+        require_ssl: false
+        password_min_length: 4
+        max_login_attempts: 10000
+
+user:
+  persona: |
+    If the agent asks a clarifying question, answer briefly: "The scope
+    is the auth.yaml file as stated; proceed with a standard review."
+    Do not volunteer additional context.

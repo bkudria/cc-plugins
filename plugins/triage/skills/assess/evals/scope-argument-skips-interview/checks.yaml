@@ -1,0 +1,10 @@
+checks:
+  - no-scope-focus-depth-interview:
+      check: "The transcript contains no AskUserQuestion tool call whose question text asks the user to specify the investigation's parameters — i.e., which area or scope to investigate, what categories of issue to look for, or how deep or thorough the review should be. Any equivalent ask that solicits those parameters also counts."
+      note: "The skill's Phase 0 routes populated arguments directly to Phase 2, bypassing the Phase 1 interview (which asks about Scope, Focus, and Depth). When `/assess <scope>` is invoked with a concrete scope, no Phase 1 interview should occur."
+  - investigates-named-file:
+      check: "The transcript contains at least one file-reading tool call (e.g., Read, Grep, or a Bash command such as `cat config/auth.yaml`) whose target is the fixture file `config/auth.yaml`"
+      note: "Phase 3 Investigation must actually read the scope named in the argument. Any file-reading mechanism against config/auth.yaml satisfies the intent."
+  - produces-numbered-h3-findings:
+      check: "The agent's final assessment output contains at least one level-3 markdown heading whose text begins with a number followed by a period and a space (e.g., '### 1. ')"
+      note: "Confirms Phases 2-4 ran to completion and produced the skill's prescribed output shape — numbered h3 findings under a `## Findings` section — after Phase 0 routed past the scope interview."

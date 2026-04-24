@@ -1,0 +1,13 @@
+checks:
+  - produces-numbered-h3-findings:
+      check: "The agent's final assessment output contains at least two level-3 markdown headings whose text begins with a number followed by a period and a space (e.g., '### 1. ', '### 2. ')"
+      note: "The assess skill mandates findings as `### N. Title` h3 subsections under a `## Findings` section. Look for the pattern in the final output or in the content of the written assessment file."
+  - findings-reference-source-identifier:
+      check: "The final assessment contains at least one sentence or phrase that pairs a concrete fixture identifier with its specific source location — e.g., 'the password `admin123` hardcoded in `src/config.py`', 'the SQL f-string inside the `get_user` function of `src/db.py`', or 'the broken link to `docs/architecture.md` in `README.md`'"
+      note: "The skill requires findings grounded in concrete evidence. A paired identifier-plus-location citation confirms the agent investigated the fixture rather than producing generic prose — pairs are difficult to fabricate because they must match the actual file where the identifier appears."
+  - assessment-persisted-to-tmp:
+      check: "The transcript contains a file-writing tool call (e.g., Write, or a Bash command such as `cat > /tmp/...` or `echo ... > /tmp/...`) whose target is a file path located directly under /tmp/ with a filename beginning with 'assessment-' and ending with '.md'"
+      note: "The skill's Phase 4 Persist step writes the assessment to `/tmp/assessment-${CLAUDE_SESSION_ID}.md` — the session ID substitutes to produce a concrete filename with the assessment- prefix. Any mechanism that produces such a file (Write tool or shell redirect) satisfies the intent."
+  - points-user-at-iterate:
+      check: "The agent's final message to the user contains the literal string '/iterate'"
+      note: "The skill explicitly instructs: 'State at the end: \"Assessment saved to ... — run `/iterate` to process findings.\"' The literal slash-command reference is the handoff signal."
