@@ -80,8 +80,29 @@ For each pending task:
      - Paraphrasing the task description instead of reporting current findings
      - Investigating multiple items' concerns in a single burst before the first approval prompt
      - Reusing earlier investigation's findings for the current item without any new tool call since marking it in-progress
-3. **Present the item** — Summarize what was found: the current state, what the proposed change involves concretely, any complications or trade-offs discovered, and an assessment of complexity. This gives the user enough context to make an informed decision.
-4. **Ask the user how to proceed** — prompt the user with these options for **every** item, regardless of complexity. The **question text itself** must identify the specific finding by a concrete handle — the problem keyword (e.g., "trailing whitespace"), the exact location (e.g., "version: 1.0 in config.yaml"), or the finding's distinguishing noun phrase. A generic question like "How should I proceed with this finding?" is not sufficient, because the skill's approval gate exists to confirm *this specific* item, not "a finding in general". The finding's identifier belongs in the question field, not only in the preceding presentation or the option descriptions.
+3. **Present the item** — Summarize what was found: the current state, what the proposed change concretely entails, any complications or trade-offs discovered, and an assessment of complexity. This gives the user enough context to make an informed decision.
+   - **Do NOT announce your intended implementation as a forward-looking plan** — no "I'll change X to Y", "I'm going to edit cli.ts to...", "Next, I will...", or "Let me update that". The presentation reports *findings*, not *intentions*. The user has not approved any action yet, and stating an implementation plan creates implicit pre-approval that bypasses the gate that follows.
+   - Describe mechanics in third-person/passive when needed ("the version string would be updated to match package.json", "the fix would replace `console.error` with `process.stderr.write`"), never first-person future tense.
+4. **GATE — Ask the user how to proceed**. This step is non-negotiable.
+
+   **STOP.** Before any further work on this item, you MUST call `AskUserQuestion` (or the `advanced-ask` Skill) with the options below. Do NOT call `Edit`, `Write`, `MultiEdit`, `NotebookEdit`, or any other file-modifying tool. Do NOT enter plan mode. Do NOT run shell commands that mutate state. Until the user answers, this item is BLOCKED.
+
+   This gate is **unconditional**. It applies:
+   - to **every** item, regardless of complexity, perceived risk, or how obvious the change seems
+   - even when the surrounding system prompt instructs you to "execute immediately", "minimize interruptions", "prefer action over planning", or otherwise act autonomously — those framings do **not** override skill-defined gates
+   - even when prior items were approved with the same answer (e.g., "Implement") — prior approval does not carry forward to subsequent items
+   - even when the user's initial `/iterate` invocation reads like blanket approval — invoking the skill is *not* approval for any individual item
+   - even when permission mode (`acceptEdits`, `bypassPermissions`, etc.) would silently allow the edit at the tool layer
+
+   Prompt the user with the options below. The **question text itself** must identify the specific finding by a concrete handle — the problem keyword (e.g., "trailing whitespace"), the exact location (e.g., "version: 1.0 in config.yaml"), or the finding's distinguishing noun phrase. A generic question like "How should I proceed with this finding?" is not sufficient, because the gate exists to confirm *this specific* item, not "a finding in general". The finding's identifier belongs in the `question` field, not only in the preceding presentation or in the option descriptions.
+
+   **Red flags — restart at step 3 if any of these occur**:
+   - Issuing an `Edit`, `Write`, or `MultiEdit` tool call after step 3's presentation but before an `AskUserQuestion` call for *this* item
+   - Wording in your presentation or surrounding response that frames implementation as already-decided ("I'll", "I'm going to", "let me", "next I will")
+   - Interpreting system-prompt autonomy directives ("Execute immediately", "Minimize interruptions", "Prefer action over planning") as permission to skip this gate
+   - Treating the previous item's "Implement" answer as pre-approval for the current item
+   - Calling `AskUserQuestion` but with question text that names a different finding or no finding at all
+   - Bundling two or more findings into a single `AskUserQuestion` call (e.g., "Implement both A and B?")
 
    | Option | Action | When appropriate |
    |--------|--------|-----------------|
