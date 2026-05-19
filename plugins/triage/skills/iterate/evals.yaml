@@ -1,0 +1,15 @@
+version: "1"
+min_pass_rate: 0.67
+repeats: 3
+
+scenarios:
+  base:
+    model: claude-sonnet-4-5
+    additional_tools:
+      - TodoWrite
+    project:
+      skills:
+        - .
+    user:
+      oracle_model: claude-haiku-4-5
+      max_turns: 15
