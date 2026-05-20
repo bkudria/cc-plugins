@@ -8,6 +8,11 @@
       "name": "triage",
       "source": "./plugins/triage",
       "description": "Assess a scope to produce findings, then address them one-by-one."
+    },
+    {
+      "name": "claudecraft",
+      "source": "./plugins/claudecraft",
+      "description": "Create, audit, and evaluate Claude Code skills (skillcraft + claude-code-evals)."
     }
   ]
 }
