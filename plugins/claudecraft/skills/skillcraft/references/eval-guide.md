@@ -1,6 +1,6 @@
 # Skill Eval Guide
 
-Skill-specific eval patterns for the scuttlerun/pincenez/craboodle pipeline. For generic eval mechanics — scenario schema, check design rules, anti-patterns, results interpretation, and config precedence — load the `claude-code-evals` skill or consult its reference files directly. Run `craboodle --help` for the canonical scenario.yaml and base.yaml schema reference.
+Skill-specific eval patterns for the scuttlerun/pincenez/craboodle pipeline. For generic eval mechanics — scenario schema, check design rules, anti-patterns, results interpretation, and config precedence — load the `claude-code-evals` skill or consult its reference files directly. Run `craboodle --help` for the canonical scenario.yaml and evals.yaml schema reference.
 
 ---
 

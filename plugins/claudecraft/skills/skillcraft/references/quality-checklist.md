@@ -278,7 +278,7 @@ Apply all checks when running a full audit. For lightweight mode, apply only S1,
 ## Eval Pipeline (E1-E4)
 
 ### E1: Eval Scenarios Defined
-- **Check**: Skill has evals/ directory with craboodle.yaml and ≥3 scenario dirs
+- **Check**: Skill has `evals.yaml` and an `evals/` directory with ≥3 scenario dirs
 - **Pass**: Each scenario dir has scenario.yaml and checks.yaml
 - **Fail**: No evals/ directory or <3 scenario dirs
 - **Fix**: Create scenario dirs with scenario.yaml + checks.yaml — run `craboodle --help` for schema
