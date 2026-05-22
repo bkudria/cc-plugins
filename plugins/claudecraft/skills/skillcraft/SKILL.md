@@ -136,10 +136,10 @@ Consult `references/anti-patterns.md` for 15 common problems across 4 categories
 
 ## Dependencies
 
-- **claude-code-evals** (sibling skill in this plugin) — Eval schema, check design rules, and results interpretation. Required for the Bootstrap Evals workflow and the Behavioral Edit Testing gate.
 - **yq** — YAML processing (`brew install yq`). Used by `workflows/add-provenance.md` and `workflows/update-from-sources.md` for parsing `provenance.yml`.
 - **gh** — GitHub CLI (`brew install gh`). Used by source-tracking workflows that diff upstream repos.
 - **craboodle**, **scuttlerun**, **pincenez** — Eval CLIs. See `claude-code-evals` for details.
+- **claude-code-evals** (sibling skill in this plugin) — Eval schema, check design rules, and results interpretation. Required for the Bootstrap Evals workflow and the Behavioral Edit Testing gate.
 
 ## Workflows
 

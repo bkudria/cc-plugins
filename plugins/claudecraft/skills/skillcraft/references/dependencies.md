@@ -15,6 +15,8 @@ How to declare, check, and manage dependencies in Claude Code skills.
 
 Add a `## Dependencies` section near the bottom of SKILL.md.
 
+**Ordering convention** — list external CLIs (with `brew install` or equivalent install instructions) first, then skill dependencies. The rationale: external CLIs are install-layer prerequisites the user must satisfy on the host before the skill can run, while skill dependencies are resolved at use-time by Claude's skill loader. Putting installable prerequisites first matches a reader skimming "Do I have what this skill needs?" — they answer the install-time question, then the use-time question. Within each group, prefer pipeline-flow order over alphabetical when one applies (e.g. orchestrator → driver → grader).
+
 **External tools** — include install instructions:
 ```
 - **yq** — YAML processing (`brew install yq`)
