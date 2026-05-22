@@ -35,7 +35,7 @@ Arguments:
   --scripts       Create scripts/ directory with placeholder
   --assets        Create assets/ directory with placeholder
   --provenance    Create provenance.yml template for tracking upstream sources
-  --evals         Create evals/ directory with template evals.yml for behavioral testing
+  --evals         Create evals/ directory with template evals.yaml (via craboodle init)
 USAGE
   exit 1
 }
@@ -403,31 +403,13 @@ EOF
 fi
 
 if $WANT_EVALS; then
-  mkdir -p "$SKILL_DIR/evals"
-  cat > "$SKILL_DIR/evals/craboodle.yaml" <<EOF
-version: "1"
-EOF
-  cat > "$SKILL_DIR/evals/base.yaml" <<EOF
-# Shared scuttlerun defaults for ${SKILL_NAME} evals
-# model: — uncomment and pick a model. scuttlerun defaults to claude-haiku-4-5,
-# which is cheap but under-represents Sonnet/Opus user workflows. See
-# bootstrap-evals.md Step 5 "Model selection" for tradeoffs.
-tools:
-  # scuttlerun defaults — repeat them here because the array replaces, not extends
-  - Read
-  - Write
-  - Edit
-  - Bash
-  - Glob
-  - Grep
-  - AskUserQuestion
-  - Skill
-  # Add skill-specific tools below (e.g., TodoWrite, Task, mcp__*); run 'scuttlerun -n' to verify names.
-project:
-  skills:
-    - ~/.claude/skills/${SKILL_NAME}
-EOF
-  echo "Created: evals/ (craboodle.yaml, base.yaml) — add scenario directories via the bootstrap-evals workflow"
+  if ! command -v craboodle >/dev/null 2>&1; then
+    echo "scaffold.sh --evals requires the 'craboodle' CLI on PATH." >&2
+    echo "Install with: npm install -g craboodle (or skip --evals)." >&2
+    exit 1
+  fi
+  craboodle init "$SKILL_DIR/evals"
+  echo "Created: evals/evals.yaml (via craboodle init) — add scenario directories via the bootstrap-evals workflow"
 fi
 
 echo ""
