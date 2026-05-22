@@ -23,14 +23,8 @@ Mechanically, craboodle materializes `scenarios.base` into a `.craboodle-base.ya
 ### Layer Details
 
 **1. Scuttlerun defaults** (built into scuttlerun's Zod schema)
-- `model: claude-haiku-4-5`
-- `max_turns: 50`
-- `effort: high`
-- `permission_mode: bypassPermissions`
-- `user.max_turns: 0`
-- `user.oracle_model: claude-haiku-4-5`
 
-Run `scuttlerun <config> --dry-run` to see the fully resolved config after all defaults are applied.
+The defaults for `model`, `max_turns`, `effort`, `permission_mode`, `user.max_turns`, `user.oracle_model`, and the rest of the schema are owned by scuttlerun. Run `scuttlerun --help` to print the current values, or `scuttlerun <config> --dry-run` to see the fully resolved config after all defaults are applied — those are the canonical sources, not this document.
 
 **2. `scenarios.base` in evals.yaml** (shared scuttlerun config for all scenarios)
 - Nested under `scenarios.base` in `<root>/evals.yaml`

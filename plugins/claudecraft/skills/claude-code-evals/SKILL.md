@@ -73,7 +73,7 @@ scenarios:
         Always write tests before production code. Use test-driven development.
 ```
 
-> **`additional_tools:` vs `tools:`** — `additional_tools:` **adds to** scuttlerun's defaults (appended and deduped); `tools:` **replaces** them entirely. Defaults are `[Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion, Skill]`. Use `additional_tools:` when you want defaults plus extras (e.g. `TodoWrite`, `Agent`); use `tools:` when you need an exact set (e.g. dropping `Skill` if no skills are under test, or `AskUserQuestion` if no multi-turn interaction). Run `scuttlerun --help` for the live default list.
+> **`additional_tools:` vs `tools:`** — `additional_tools:` **adds to** scuttlerun's defaults (appended and deduped); `tools:` **replaces** them entirely. Use `additional_tools:` when you want defaults plus extras (e.g. `TodoWrite`, `Agent`); use `tools:` when you need an exact set (e.g. dropping `Skill` if no skills are under test, or `AskUserQuestion` if no multi-turn interaction). Run `scuttlerun --help` for the default tools list.
 
 **3. Review lint rules** (before writing checks, learn what lint looks for):
 ```bash
