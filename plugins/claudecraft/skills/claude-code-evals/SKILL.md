@@ -42,7 +42,7 @@ craboodle (orchestrator)
 ```
 
 - **scuttlerun** runs a headless Claude session with a synthetic user (LLM oracle), producing a full transcript. It handles multi-turn interactions and project scaffolding.
-- **pincenez** grades one transcript against a checks file. Each check gets an independent LLM call — binary pass/fail with evidence. No cross-contamination between verdicts.
+- **pincenez** grades one transcript against a checks file. Each check gets an independent LLM call — binary pass/fail with evidence. No cross-contamination between verdicts. The CLI has two modes: `pincenez checks.yaml output` grades (the unmarked default action, invoked positionally by craboodle), and `pincenez lint checks.yaml` lints checks for quality anti-patterns before grading.
 - **craboodle** discovers scenarios, runs each through scuttlerun N times, grades each run with pincenez, averages results, and streams YAML output.
 
 Run `<tool> --help` for CLI flags, YAML schemas, and field references.
