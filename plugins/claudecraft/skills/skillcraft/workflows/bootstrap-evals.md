@@ -10,11 +10,11 @@ Add eval coverage to an existing skill that has no `evals/` directory.
 
 If `$ARGUMENTS` specifies a skill name or path, use it. Otherwise pick a skill:
 
-1. Identify up to 4 likely candidates from: skills referenced in the current conversation; the skill currently being edited (if any); recently-touched skills (consult `git log --name-only --since="14 days ago"` filtered to skill paths under `~/.claude/skills/`, `.claude/skills/`, or plugin install dirs if those trees are under git).
+1. Identify up to 4 likely candidates from: skills referenced in the current conversation; the skill currently being edited (if any); recently-touched skills (consult `git log --name-only --since="14 days ago"` filtered to skill paths under `~/.claude/skills/`, `~/.claude/plugins/*/skills/`, or `.claude/skills/` if those trees are under git).
 2. Use `AskUserQuestion` with those candidates plus an "Other" option.
 3. If the user picks "Other", or if no plausible candidates surface, ask conversationally: "Which skill should I bootstrap evals for? Give me the skill name or path." Resolve the answer to a directory containing `SKILL.md` and continue.
 
-Check both `~/.claude/skills/` and `.claude/skills/` in the current project for candidates.
+Check `~/.claude/skills/`, `~/.claude/plugins/*/skills/`, and `.claude/skills/` (project-local) for candidates.
 
 Check the skill's `evals/` directory status:
 - **No `evals/` directory** — proceed to Step 2.
