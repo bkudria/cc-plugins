@@ -2,7 +2,7 @@
 
 Add eval coverage to an existing skill that has no `evals/` directory.
 
-> **References for this workflow:** `references/eval-guide.md` (scenario patterns by skill type), `references/testing-guide.md` § Eval Bootstrapping Protocol (tiered approach). Run `craboodle --help` for the canonical scenario.yaml and base.yaml schema reference.
+> **References for this workflow:** `references/eval-guide.md` (scenario patterns by skill type), `references/testing-guide.md` § Eval Bootstrapping Protocol (tiered approach). Run `craboodle --help` for the canonical scenario.yaml and evals.yaml schema reference.
 
 **GATE — Load `claude-code-evals` before proceeding.** This workflow depends on check design rules from the `claude-code-evals` skill. Use the Skill tool to load it now. Do NOT proceed to Step 1 until it is loaded.
 
@@ -25,7 +25,7 @@ Check the skill's `evals/` directory status:
 
 Read all files in the skill directory — SKILL.md, all references/, all scripts/. Build a complete picture.
 
-While reading, note every tool name the skill itself calls (including MCP-prefixed `mcp__*` names). This list feeds Step 5's `tools:` array. Skills that omit a needed tool will fail at smoke-run with "tool not available," and tools the SDK does not recognize will surface as `WARNING: Unknown tool name` on scuttlerun dry-run. After drafting `base.yaml` in Step 5, run `scuttlerun -n <scenario.yaml>` once to validate every tool name before proceeding; the warning output is the authoritative SDK-tool-name list.
+While reading, note every tool name the skill itself calls (including MCP-prefixed `mcp__*` names). This list feeds Step 5's `tools:` array. Skills that omit a needed tool will fail at smoke-run with "tool not available," and tools the SDK does not recognize will surface as `WARNING: Unknown tool name` on scuttlerun dry-run. After filling in `scenarios.base` in Step 5, run `scuttlerun -n <scenario.yaml>` once to validate every tool name before proceeding; the warning output is the authoritative SDK-tool-name list.
 
 For format reference, read one complete eval suite from a sibling skill of the same type. The `claude-code-evals` skill (loaded as a GATE above) is available via loaded skill context — do not spawn sub-agents to re-read its reference files.
 
@@ -87,17 +87,17 @@ Scaffold the eval directory:
 craboodle init <skill-dir>/evals
 ```
 
-This creates `craboodle.yaml` with `version: "1"` plus commented-out entries for `min_pass_rate`, `max_budget_usd`, and `repeats`. Then:
+This creates `evals.yaml` with `version: "1"`, commented pipeline knobs (`min_pass_rate`, `max_budget_usd`, `repeats`, `artifact_retention_days`), and a commented `scenarios.base` template. Then:
 
-1. **Create `base.yaml`** — add model, tools, and inject the skill under test via `project.skills`. The `tools:` array must include both scuttlerun's defaults (`Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion, Skill`) **plus** every tool you noted in Step 2 — listing your additions alone replaces the defaults rather than extending them. Run `scuttlerun --help` for the full schema. For how `base.yaml`, `scenario.yaml`, CLI flags, and scuttlerun defaults compose (deep-merge for objects, replace for arrays, defaults applied last), see `claude-code-evals/references/config-precedence.md`.
-2. **Edit `craboodle.yaml`** — uncomment `min_pass_rate` and set a reachable value. Reachable pass rates are `k/(checks × reps)`; e.g. with 3 checks × 1 rep the only reachable values are `{0, 0.33, 0.67, 1.0}`, so `0.8` would collapse to requiring a perfect `1.0`.
+1. **Fill in `scenarios.base`** — under `scenarios.base` in `evals.yaml`, add model, tools, and inject the skill under test via `project.skills`. The `tools:` array must include both scuttlerun's defaults (`Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion, Skill`) **plus** every tool you noted in Step 2 — listing your additions alone replaces the defaults rather than extending them. Run `scuttlerun --help` for the full schema. For how `scenarios.base`, `scenario.yaml`, CLI flags, and scuttlerun defaults compose (deep-merge for objects, replace for arrays, defaults applied last), see `claude-code-evals/references/config-precedence.md`.
+2. **Edit the pipeline knobs in `evals.yaml` (top level)** — uncomment `min_pass_rate` and set a reachable value. Reachable pass rates are `k/(checks × reps)`; e.g. with 3 checks × 1 rep the only reachable values are `{0, 0.33, 0.67, 1.0}`, so `0.8` would collapse to requiring a perfect `1.0`.
 
 ### If `evals/` exists from scaffolding
 
-The `scaffold.sh` script (when run with `--evals`) created `craboodle.yaml` and `base.yaml` — with model, tools, and skill injection pre-filled. No scenario directories are scaffolded (scenarios are created fresh in Step 6 for exactly the behaviors you want to test). Use what's there:
+The `scaffold.sh` script (when run with `--evals`) created `evals.yaml` (via `craboodle init`) with `version: "1"`, commented pipeline knobs, and a commented `scenarios.base` template. No scenario directories are scaffolded (scenarios are created fresh in Step 6 for exactly the behaviors you want to test). Use what's there:
 
-1. **Review `base.yaml`** — verify model, tools, and skill injection are correct. Adjust if needed.
-2. **Edit `craboodle.yaml`** — set `min_pass_rate` to a reachable value for your check count × rep count (rates are `k/(checks × reps)`; `0.8` at 3 checks × 1 rep is unreachable and acts as `1.0`).
+1. **Review `scenarios.base` in `evals.yaml`** — verify (or fill in) model and tools, and inject the skill under test via `project.skills`. Adjust if needed.
+2. **Edit pipeline knobs at the top level of `evals.yaml`** — set `min_pass_rate` to a reachable value for your check count × rep count (rates are `k/(checks × reps)`; `0.8` at 3 checks × 1 rep is unreachable and acts as `1.0`).
 
 ## Step 6: Write Scenario Files
 

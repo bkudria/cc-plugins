@@ -321,6 +321,11 @@ curation_decisions:
   scripts/scaffold.sh:
     - decision: original
       rationale: Original scaffolding script.
+    - decision: altered
+      rationale: >-
+        2026-05-21: --evals delegates to `craboodle init` instead of writing
+        evals/craboodle.yaml + evals/base.yaml inline. Source of truth for the
+        evals.yaml template now lives in craboodle itself (src/commands/init.ts).
   scripts/quick-validate.sh:
     - decision: original
       rationale: Original structural validation script.
@@ -356,3 +361,9 @@ curation_decisions:
         dropped the `~/.claude/skills/skillcraft/evals/` example path (that
         directory does not exist) and now points to the sibling claude-code-evals
         skill in the same plugin.
+    - decision: altered
+      rationale: >-
+        2026-05-21: Rewrote Step 5 for the single-file evals.yaml layout
+        (scenarios.base instead of separate craboodle.yaml + base.yaml).
+        Brought it in sync with craboodle's actual config schema (src/config.ts)
+        and with the description in claude-code-evals/references/scenario-design.md.
