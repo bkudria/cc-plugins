@@ -81,7 +81,7 @@ ${CLAUDE_SKILL_DIR}/scripts/quick-validate.sh <target>
 
 ```bash
 # Bad — hard-coded absolute path; breaks when the skill moves into a plugin
-~/.claude/skills/skillcraft/scripts/quick-validate.sh <target>
+~/.claude/skills/<skill-name>/scripts/quick-validate.sh <target>
 ```
 
 For *other skills*, prefer name-based reference in prose ("see the `claude-code-evals` skill") and let Claude load them via the Skill tool. Hard-coded paths into another skill's tree are brittle.
