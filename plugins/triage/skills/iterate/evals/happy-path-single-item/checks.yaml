@@ -1,7 +1,7 @@
 checks:
   - investigates-notes-before-ask:
-      check: "At least one tool call that reads or searches the content of notes.md (via Read, Grep, or a Bash invocation such as 'cat notes.md') appears in the transcript before the first AskUserQuestion tool call or advanced-ask Skill invocation"
-      note: "The iterate skill's artifact rule requires investigation before presentation. Any content-reading tool call whose target is notes.md counts — Read, Grep, or Bash (e.g. `cat notes.md`)."
+      check: "At least one Agent tool call whose prompt argument contains the substring 'notes.md' appears in the transcript before the first AskUserQuestion tool call or advanced-ask Skill invocation"
+      note: "The iterate skill mandates sub-agent delegation for per-item investigation (iterate/SKILL.md:72-78). The delegated sub-agent's prompt must reference notes.md so the investigation is scope-fenced to the specific finding."
   - no-edit-before-ask:
       check: "No Edit or Write tool call targeting notes.md appears in the transcript before the first AskUserQuestion tool call or advanced-ask Skill invocation"
       note: "The iterate skill requires the approval gate to precede implementation. An edit before any approval prompt violates the gate, even in a single-item iteration."
