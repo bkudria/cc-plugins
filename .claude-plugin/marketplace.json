@@ -5,14 +5,14 @@
   },
   "plugins": [
     {
+      "name": "claudecraft",
+      "source": "./plugins/claudecraft",
+      "description": "Create, audit, and publish Claude Code skills and plugins. Bundles skillcraft (skill authoring discipline), claude-code-evals (eval pipeline reference), and plugincraft (plugin authoring + marketplace lifecycle)."
+    },
+    {
       "name": "triage",
       "source": "./plugins/triage",
       "description": "Assess a scope to produce findings, then address them one-by-one."
-    },
-    {
-      "name": "claudecraft",
-      "source": "./plugins/claudecraft",
-      "description": "Create, audit, and evaluate Claude Code skills (skillcraft + claude-code-evals)."
     }
   ]
 }
