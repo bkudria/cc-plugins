@@ -1,7 +1,7 @@
 {
   "name": "claudecraft",
-  "description": "Create, audit, and evaluate Claude Code skills. Bundles skillcraft (skill authoring discipline) and claude-code-evals (eval pipeline reference).",
-  "version": "0.1.0",
+  "description": "Create, audit, and publish Claude Code skills and plugins. Bundles skillcraft (skill authoring discipline), claude-code-evals (eval pipeline reference), and plugincraft (plugin authoring + marketplace lifecycle).",
+  "version": "0.2.0",
   "author": {
     "name": "Benjamin Kudria"
   }
