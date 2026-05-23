@@ -1,8 +1,11 @@
 {
   "name": "triage",
   "description": "Assess a scope to produce findings, then address them one-by-one.",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "license": "MIT",
+  "repository": "https://github.com/bkudria/cc-plugins",
+  "homepage": "https://github.com/bkudria/cc-plugins/tree/main/plugins/triage",
+  "keywords": ["assess", "iterate", "audit", "findings", "workflow", "review"],
   "author": {
     "name": "Benjamin Kudria"
   }

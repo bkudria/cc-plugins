@@ -3,6 +3,9 @@
   "description": "Create, audit, and publish Claude Code skills and plugins. Bundles skillcraft (skill authoring discipline), claude-code-evals (eval pipeline reference), and plugincraft (plugin authoring + marketplace lifecycle).",
   "version": "0.2.0",
   "license": "MIT",
+  "repository": "https://github.com/bkudria/cc-plugins",
+  "homepage": "https://github.com/bkudria/cc-plugins/tree/main/plugins/claudecraft",
+  "keywords": ["skills", "plugins", "authoring", "marketplace", "eval", "claude-code"],
   "author": {
     "name": "Benjamin Kudria"
   }
