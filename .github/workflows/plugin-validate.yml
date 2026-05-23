@@ -1,0 +1,62 @@
+name: plugin-validate
+
+on:
+  pull_request:
+    paths:
+      - 'plugins/**'
+      - '.claude-plugin/marketplace.json'
+      - '.github/workflows/plugin-validate.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'plugins/**'
+      - '.claude-plugin/marketplace.json'
+      - '.github/workflows/plugin-validate.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install jq
+        run: |
+          if ! command -v jq >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y jq
+          fi
+          jq --version
+
+      - name: Run quick-validate (structural pre-flight)
+        run: |
+          set -e
+          for plugin in plugins/*/; do
+            echo "::group::Quick-validating $plugin"
+            ./scripts/quick-validate.sh "$plugin"
+            echo "::endgroup::"
+          done
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Validate marketplace
+        run: claude plugin validate --strict .
+
+      - name: Validate each plugin
+        run: |
+          set -e
+          for plugin in plugins/*/; do
+            echo "::group::Validating $plugin"
+            claude plugin validate --strict "$plugin"
+            echo "::endgroup::"
+          done

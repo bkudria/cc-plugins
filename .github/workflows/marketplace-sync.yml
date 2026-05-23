@@ -5,6 +5,7 @@ on:
     paths:
       - 'plugins/**/.claude-plugin/plugin.json'
       - '.claude-plugin/marketplace.json'
+      - 'scripts/marketplace-generate.sh'
       - 'plugins/claudecraft/skills/plugincraft/scripts/marketplace-generate.sh'
       - '.github/workflows/marketplace-sync.yml'
   push:
@@ -49,7 +50,7 @@ jobs:
       - name: Regenerate marketplace.json
         id: regen
         run: |
-          ./plugins/claudecraft/skills/plugincraft/scripts/marketplace-generate.sh
+          ./scripts/marketplace-generate.sh
           if git diff --quiet -- .claude-plugin/marketplace.json; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
             echo "marketplace.json already up to date"
@@ -58,6 +59,24 @@ jobs:
             echo "marketplace.json was regenerated; diff follows:"
             git --no-pager diff -- .claude-plugin/marketplace.json
           fi
+
+      # Validate the regenerated marketplace.json before pushing. Auto-commits
+      # made with the default GITHUB_TOKEN do NOT trigger plugin-validate.yml
+      # (GitHub's anti-recursion rule), so without this step a generator bug
+      # could land on main without ever being validated by --strict.
+      - name: Set up Node
+        if: steps.regen.outputs.changed == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Claude Code
+        if: steps.regen.outputs.changed == 'true'
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Validate regenerated marketplace
+        if: steps.regen.outputs.changed == 'true'
+        run: claude plugin validate --strict .
 
       - name: Commit and push
         if: steps.regen.outputs.changed == 'true'
