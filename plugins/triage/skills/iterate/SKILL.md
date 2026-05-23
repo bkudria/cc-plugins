@@ -24,7 +24,7 @@ Follow this procedure exactly. Do not propose alternative strategies, comment on
 | Task tracking (TaskCreate or TodoWrite) | Persist tasks and their status across turns; resume after compaction |
 | User prompts with options | Per-item approval gate |
 | Plan mode | Design approach before implementing complex items |
-| Sub-agents | Investigation and research |
+| Sub-agents | Mandatory delegate for per-item investigation (Phase 1, step 2) |
 
 ---
 
@@ -69,17 +69,24 @@ For each pending task:
 
 1. **Mark in-progress**: Update the task's status to in-progress
 2. **Investigate the item** — Do NOT present to the user or ask how to proceed until investigation is complete.
-   - **Required**: Actively investigate the current state — read files, search for patterns, run commands, or delegate to a sub-agent. No exceptions for "simple" items or items already analyzed earlier in the conversation.
-   - **Artifact rule**: The presentation (step 3) must reference specific findings from this investigation — file paths, current values, concrete state discovered. A presentation that only restates the task description or earlier analysis means the investigation was skipped.
-   - **Decomposition**: If investigation reveals the item has 3+ independently-implementable parts, split it — narrow the current task to the first part (update its subject/description), create new tasks for the rest, and note the split in the presentation.
-   - **Scope rule**: Investigation is scoped to the current in-progress item. Do NOT read, grep, glob, or run commands targeting files or facts relevant to later items while investigating the current one. Each item gets its own fresh investigation phase after it is marked in-progress — even if earlier investigation already touched the relevant file.
+   - **Required — delegate to a sub-agent.** Investigation MUST happen via the Agent tool. No exceptions for "simple" items, items that look obvious, or items already analyzed earlier in the conversation. Do NOT investigate via direct `Read`/`Grep`/`Glob`/`Bash` calls.
+   - **Sub-agent choice**: Use `Explore` (read-only) by default. Use `general-purpose` only when investigation must run a non-read command or script (rare). Spawn a fresh sub-agent per item — never reuse an earlier item's agent.
+   - **Sub-agent prompt requirements**:
+     - **MUST contain**: the current item's subject/description, any user-provided guidance for this item, and an explicit instruction to report findings with concrete file paths and line numbers.
+     - **MUST NOT contain**: the assessment file path (`/tmp/assessment-${CLAUDE_SESSION_ID}.md`), other items' descriptions, or framing that invites the sub-agent to investigate adjacent findings. Scope-fence the sub-agent the same way the main agent is scope-fenced.
+   - **Artifact rule**: The presentation (step 3) must reference specific findings *from the sub-agent's report* — file paths, current values, concrete state discovered. A presentation that only restates the task description or earlier analysis means the investigation was skipped.
+   - **Verification reads**: After the sub-agent returns, the main agent MAY `Read` specific files/lines the sub-agent cited, *only* to verify those citations. Do NOT initiate new exploration (no fresh `Grep`/`Glob`/`Bash`, no reading files the sub-agent did not cite). If verification reveals the sub-agent missed something material, re-delegate to a new sub-agent rather than continuing investigation directly.
+   - **Decomposition**: If the sub-agent's report reveals the item has 3+ independently-implementable parts, split it — narrow the current task to the first part (update its subject/description), create new tasks for the rest, and note the split in the presentation.
+   - **Scope rule**: Investigation is scoped to the current in-progress item. This is enforced mechanically by what the sub-agent prompt does and does not contain. Each item gets its own fresh sub-agent invocation after it is marked in-progress — even if an earlier item's investigation already touched the relevant file.
    - **Red flags — restart investigation if any of these occur**:
-     - Presenting without any investigation since marking in-progress
-     - No file paths or line numbers from investigation in the presentation
+     - Investigating the item via direct `Read`/`Grep`/`Glob`/`Bash` calls instead of delegating to a sub-agent
+     - Delegating to a sub-agent but including context about other items, the assessment file path, or earlier findings
+     - Presenting without any sub-agent investigation since marking in-progress
+     - No file paths or line numbers from the sub-agent's report in the presentation
      - Phrases like "From my earlier review", "As noted above", "I already analyzed this"
      - Paraphrasing the task description instead of reporting current findings
      - Investigating multiple items' concerns in a single burst before the first approval prompt
-     - Reusing earlier investigation's findings for the current item without any new tool call since marking it in-progress
+     - Reusing earlier investigation's findings for the current item without spawning a new sub-agent since marking it in-progress
 3. **Present the item** — Summarize what was found: the current state, what the proposed change concretely entails, any complications or trade-offs discovered, and an assessment of complexity. This gives the user enough context to make an informed decision.
    - **Do NOT announce your intended implementation as a forward-looking plan** — no "I'll change X to Y", "I'm going to edit cli.ts to...", "Next, I will...", or "Let me update that". The presentation reports *findings*, not *intentions*. The user has not approved any action yet, and stating an implementation plan creates implicit pre-approval that bypasses the gate that follows.
    - Describe mechanics in third-person/passive when needed ("the version string would be updated to match package.json", "the fix would replace `console.error` with `process.stderr.write`"), never first-person future tense.
