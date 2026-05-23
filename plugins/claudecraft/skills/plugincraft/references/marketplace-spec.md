@@ -40,8 +40,10 @@ Each entry in `plugins[]` describes one installable plugin:
 |---|---|---|
 | `name` | `plugin.json`'s `name` field | Authoritative — always rewritten from the plugin's own manifest |
 | `description` | `plugin.json`'s `description` field | Authoritative — always rewritten from the plugin's own manifest (this is what fixes drift) |
+| `homepage` | `plugin.json`'s `homepage` field | Authoritative if present in `plugin.json` — overwrites the marketplace entry. Preserved from existing entry if absent from `plugin.json`. |
+| `keywords` | `plugin.json`'s `keywords` field | Authoritative if present in `plugin.json` — overwrites the marketplace entry. Preserved from existing entry if absent from `plugin.json`. |
 | `source` | Existing marketplace entry; defaults to `"./plugins/<dirname>"` for new plugins | Preserved if present; auto-generated for plugins added since last regeneration |
-| `category`, `homepage`, `keywords`, etc. | Existing marketplace entry | Preserved verbatim — these are hand-edited metadata |
+| `category`, and any other per-entry field | Existing marketplace entry | Preserved verbatim — these are hand-edited metadata. `category` belongs in marketplace entries only (`claude plugin validate --strict` warns when it appears in plugin.json). |
 
 Plugins that exist in `plugins/*/` but not yet in `plugins[]` are added (with `source` defaulted to `./plugins/<dirname>`). Plugins in `plugins[]` whose `plugins/*/` directory no longer exists are removed.
 
@@ -70,7 +72,7 @@ The most common drift is a stale `description` on a marketplace entry — `plugi
 
 Anything **not** in the rewrite list is hand-editable in `marketplace.json` and will survive regeneration:
 
-- Per-entry: `source`, `category`, `homepage`, `keywords`, any future per-entry fields
+- Per-entry: `source`, `category`, plus any per-entry field not in the rewrite table above (e.g., a future `icon` field). Hand-edits to `homepage` or `keywords` will be overwritten on the next run if `plugin.json` defines them — edit `plugin.json` instead.
 - Top-level: everything (`name`, `owner`, `description`, any future top-level fields)
 
-If you need to override a plugin's `description` in the marketplace listing (e.g., to add marketplace-specific context the plugin's own manifest shouldn't carry), the generator currently cannot honor that — it always sources `description` from `plugin.json`. Fix this by changing the plugin's `description` instead.
+If you need to override a plugin's `description`, `homepage`, or `keywords` in the marketplace listing, the generator currently cannot honor that — it always sources these from `plugin.json`. Fix this by changing the value in `plugin.json` instead. (`category` does not have this constraint — it's hand-edited in `marketplace.json` directly.)

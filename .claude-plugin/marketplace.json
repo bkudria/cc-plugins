@@ -3,16 +3,39 @@
   "owner": {
     "name": "Benjamin Kudria"
   },
+  "description": "A Claude Code plugin marketplace",
   "plugins": [
     {
       "name": "claudecraft",
       "source": "./plugins/claudecraft",
-      "description": "Create, audit, and publish Claude Code skills and plugins. Bundles skillcraft (skill authoring discipline), claude-code-evals (eval pipeline reference), and plugincraft (plugin authoring + marketplace lifecycle)."
+      "description": "Create, audit, and publish Claude Code skills and plugins. Bundles skillcraft (skill authoring discipline), claude-code-evals (eval pipeline reference), and plugincraft (plugin authoring + marketplace lifecycle).",
+      "license": "MIT",
+      "homepage": "https://github.com/bkudria/cc-plugins/tree/main/plugins/claudecraft",
+      "category": "authoring",
+      "keywords": [
+        "skills",
+        "plugins",
+        "authoring",
+        "marketplace",
+        "eval",
+        "claude-code"
+      ]
     },
     {
       "name": "triage",
       "source": "./plugins/triage",
-      "description": "Assess a scope to produce findings, then address them one-by-one."
+      "description": "Assess a scope to produce findings, then address them one-by-one.",
+      "license": "MIT",
+      "homepage": "https://github.com/bkudria/cc-plugins/tree/main/plugins/triage",
+      "category": "workflow",
+      "keywords": [
+        "assess",
+        "iterate",
+        "audit",
+        "findings",
+        "workflow",
+        "review"
+      ]
     }
   ]
 }

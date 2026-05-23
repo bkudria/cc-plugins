@@ -10,10 +10,13 @@
 # For each plugin, build a plugins[] entry from authoritative sources:
 #   - name        from plugin.json (authoritative)
 #   - description from plugin.json (authoritative — fixes drift)
+#   - homepage    from plugin.json if present (authoritative — overwrites entry)
+#   - keywords    from plugin.json if present (authoritative — overwrites entry)
 #   - source      preserved from existing marketplace entry, or defaulted to
 #                 "./plugins/<dirname>" for new plugins
-#   - everything else (category, homepage, keywords, etc.) preserved from
-#                 existing marketplace entry as hand-edited metadata
+#   - category, and everything else preserved from existing marketplace entry as hand-edited metadata
+#                 (`category` belongs in marketplace entries only — `claude plugin validate --strict`
+#                  warns when it appears in plugin.json)
 # Top-level marketplace fields (name, owner, description, etc.) are preserved
 # verbatim. Only plugins[] is regenerated.
 #
@@ -93,6 +96,8 @@ for plugin_dir in "$PLUGINS_DIR"/*/; do
 
     name=$(jq -r '.name // empty' "$manifest")
     description=$(jq -r '.description // empty' "$manifest")
+    homepage=$(jq -r '.homepage // empty' "$manifest")
+    keywords=$(jq -c '.keywords // empty' "$manifest")
     dirname=$(basename "$plugin_dir")
 
     if [[ -z "$name" ]]; then
@@ -100,20 +105,31 @@ for plugin_dir in "$PLUGINS_DIR"/*/; do
         continue
     fi
 
+    # Semver shape check (MAJOR.MINOR.PATCH with optional prerelease/build).
+    # `claude plugin validate --strict` does not catch bad semver, so this is the only gate.
+    version=$(jq -r '.version // empty' "$manifest")
+    if [[ -n "$version" && ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+        echo "Warning: $manifest has version='$version' which doesn't match semver MAJOR.MINOR.PATCH" >&2
+    fi
+
     # Look up existing marketplace entry by name (to preserve hand-edited fields)
     existing=$(jq --arg n "$name" '.plugins // [] | map(select(.name == $n)) | first // {}' "$MARKETPLACE_PATH")
 
     # Build new entry: start from existing (preserves hand-edited fields),
-    # then overwrite name + description (authoritative from plugin.json),
+    # then overwrite authoritative fields from plugin.json,
     # then default source if missing.
     entry=$(jq -n \
         --argjson existing "$existing" \
         --arg name "$name" \
         --arg description "$description" \
         --arg default_source "./plugins/$dirname" \
+        --arg homepage "$homepage" \
+        --argjson keywords "${keywords:-null}" \
         '
         $existing
         + {name: $name, description: $description}
+        + (if $homepage != "" then {homepage: $homepage} else {} end)
+        + (if $keywords != null then {keywords: $keywords} else {} end)
         | if has("source") then . else . + {source: $default_source} end
         ')
 
