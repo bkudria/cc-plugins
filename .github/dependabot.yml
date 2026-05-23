@@ -1,0 +1,10 @@
+# Dependabot config — tracks GitHub Actions used by workflows in .github/workflows/.
+# Surfaces major-version bumps (e.g., actions/checkout@v4 -> @v5) and security
+# advisories as PRs. The npm `@anthropic-ai/claude-code` install and apt `jq`
+# install in those workflows are intentionally not tracked here.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
