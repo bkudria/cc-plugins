@@ -25,7 +25,7 @@ Create, audit, ship, and maintain Claude Code plugins.
 | Create | `/plugincraft` or `/plugincraft <name>`, or "create a plugin" | (coming in PR 3 — falls back to inline guidance) |
 | Improve | `/plugincraft --improve [path]`, or "audit/improve a plugin" | `workflows/improve-standard.md` |
 | Bulk Audit | `/plugincraft --all`, or "audit all my plugins" | `workflows/improve-bulk.md` |
-| Marketplace Generate | `/plugincraft marketplace`, or "regenerate marketplace.json" | (coming in PR 2 — falls back to inline guidance) |
+| Marketplace Generate | `/plugincraft marketplace`, or "regenerate marketplace.json" | `scripts/marketplace-generate.sh` (interactive workflow doc coming later) |
 | Publish | `/plugincraft --publish [path]`, or "is this plugin ready to publish" | (coming in PR 4 — falls back to inline guidance) |
 
 **Mode selection**: If the request mentions "audit all", "bulk", "every plugin", or "check all plugins", use **Bulk Audit**. If it mentions auditing, reviewing, or improving a specific plugin (single name), use **Improve**. If it mentions regenerating the marketplace, syncing marketplace entries, or fixing marketplace drift, use **Marketplace Generate**. If it mentions publish-readiness, "ready to ship", or release prep, use **Publish**. If it specifies a concrete edit to make on a plugin file (e.g., "add a hook to my plugin"), use **Lightweight** mode — the edit is covered by the inline checks. Otherwise default to **Create**.
@@ -95,12 +95,14 @@ For skill-level anti-patterns inside a plugin, delegate to `skillcraft/reference
 | `references/anti-patterns.md` | 14 plugin-level anti-patterns across 4 categories |
 | `references/component-coherence.md` | Detection recipes and fix shapes for the PX category |
 | `references/delegation-map.md` | What plugincraft delegates to upstream tools and what it owns directly |
+| `references/marketplace-spec.md` | `marketplace.json` schema and what `marketplace-generate.sh` preserves vs rewrites |
 
 ## Scripts
 
 | Script | Purpose |
 |--------|---------|
 | `scripts/quick-validate.sh` | Fast structural validation (PM, PS, PR1, MK1). Pre-flight before the full audit. |
+| `scripts/marketplace-generate.sh` | Regenerate `.claude-plugin/marketplace.json` from constituent `plugin.json` files. Supports `--check` (dry-run, exit 1 on drift) and default-apply. |
 
 ## Workflows
 

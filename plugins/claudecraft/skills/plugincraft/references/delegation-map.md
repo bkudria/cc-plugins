@@ -16,7 +16,7 @@ This file is the contract: what plugincraft delegates, to whom, and how.
 | Agent quality review (loose fit) | `plugin-dev`'s `skill-reviewer` agent | Optional Agent invocation | Inline PX1 coherence check (agent references existing skills) |
 | Component knowledge during Create | `plugin-dev`'s component skills (`plugin-structure`, `hook-development`, `mcp-integration`, etc.) | `Skill tool: load plugin-dev:<skill-name>` per component type | Plugin-level scaffolding, README skeleton, marketplace registration (PR 3) |
 | Agent generation during Create | `plugin-dev`'s `agent-creator` agent | `Agent tool: subagent_type: agent-creator` | Plugin-level integration after the agent is created (PR 3) |
-| Marketplace.json schema | `plugin-dev`'s `marketplace-management` skill | `Skill tool: load plugin-dev:marketplace-management` for schema reference | Generation strategy + drift prevention (PR 2's `marketplace-generate.sh`) |
+| Marketplace.json schema | `plugin-dev`'s `marketplace-management` skill | `Skill tool: load plugin-dev:marketplace-management` for schema reference | Generation strategy + drift prevention (`scripts/marketplace-generate.sh`, `references/marketplace-spec.md`, CI auto-sync in `.github/workflows/marketplace-sync.yml`) |
 | Eval pipeline for plugin's skills | `claude-code-evals` (sibling in claudecraft) | `Skill tool: load claude-code-evals` | Nothing — used unchanged for skill-level eval bootstrapping |
 
 ---
@@ -66,7 +66,7 @@ These are areas where plugincraft owns the concern because no upstream tool cove
 
 - **Cross-component coherence (PX category)**: dangling skill references, hook path resolution, MCP server reference cohesion, command tool consistency, name collisions, trigger overlap.
 - **Marketplace coherence (MK category)**: presence in `plugins[]`, description drift between `plugin.json` and `marketplace.json`, source path resolution.
-- **Marketplace generation (PR 2)**: regenerating `plugins[]` from constituent `plugin.json` files. Drift prevention by construction.
+- **Marketplace generation**: regenerating `plugins[]` from constituent `plugin.json` files (`scripts/marketplace-generate.sh`). Drift prevention by construction; CI-enforced via `.github/workflows/marketplace-sync.yml`.
 - **README quality (PR category)**: structural presence, required env var documentation, component listing matching reality.
 - **Publish readiness (PB category)**: version, license, changelog, install instructions.
 - **Bulk audit**: walking every installed plugin, producing a summary table, routing into selective fix loops.

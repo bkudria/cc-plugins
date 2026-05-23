@@ -155,7 +155,7 @@ The marketplace description is older and lacks the "Bundles ... discipline ... r
 
 **After**: Both descriptions byte-for-byte identical. Prefer regenerating the marketplace from constituent `plugin.json` files via a script so this can't drift again.
 
-**Fix**: For a one-off, manually sync the strings. For ongoing safety, regenerate `marketplace.json`'s `plugins[]` from each plugin's `plugin.json` (see `plugincraft`'s forthcoming `marketplace-generate.sh` script in PR 2). Drift becomes impossible by construction.
+**Fix**: For a one-off, manually sync the strings. For ongoing safety, regenerate `marketplace.json`'s `plugins[]` from each plugin's `plugin.json` via `plugincraft/scripts/marketplace-generate.sh`. Drift becomes impossible by construction. The companion `.github/workflows/marketplace-sync.yml` runs the generator in CI and auto-commits the regenerated file when drift is detected.
 
 ---
 
