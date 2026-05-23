@@ -196,7 +196,7 @@ These checks apply only when the plugin lives inside a marketplace (a parent or 
 - **Check**: The `description` in the marketplace entry matches the `description` in this plugin's `plugin.json` byte-for-byte
 - **Pass**: Strings are identical
 - **Fail**: Marketplace description is stale (e.g., still says "2 skills" while plugin.json says "3 skills"). Users install based on the marketplace description, then discover the plugin does more (or less) than promised.
-- **Fix**: Update the marketplace entry to match. If plugins-many, prefer regenerating `marketplace.json` from constituent `plugin.json` files via a script (see PR 2's `marketplace-generate.sh`) so this can't drift.
+- **Fix**: Run `scripts/marketplace-generate.sh` to regenerate `marketplace.json`'s `plugins[]` from each plugin's own `plugin.json`. Drift becomes impossible by construction. See `references/marketplace-spec.md` for what the generator preserves vs rewrites.
 
 ### MK3: Source Path Resolves
 - **Check**: The marketplace entry's `source` resolves to the plugin's actual location (relative path from marketplace root)
