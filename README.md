@@ -4,7 +4,7 @@ A Claude Code plugin marketplace by Benjamin Kudria.
 
 ## What this is
 
-A small marketplace bundling two plugins for Claude Code: `claudecraft` (skill, eval, and plugin authoring tooling) and `triage` (assess-then-iterate workflow for batch processing findings). Plugins live under `plugins/`; the marketplace manifest lives at `.claude-plugin/marketplace.json`.
+A marketplace for Claude Code plugins. See the catalog below for current entries. Plugins live under `plugins/`; the marketplace manifest lives at `.claude-plugin/marketplace.json`.
 
 ## Installation
 
@@ -14,7 +14,7 @@ In Claude Code:
     /plugin install <name>@bkudria-cc-plugins
     /reload-plugins
 
-Replace `<name>` with `claudecraft` or `triage`. See per-plugin sections below for the exact commands.
+Replace `<name>` with a plugin name from the catalog below. See per-plugin sections below for the exact commands.
 
 ## Plugin catalog
 
