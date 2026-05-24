@@ -1,7 +1,7 @@
 checks:
   - declined-prefix-applied:
-      check: "A TodoWrite, TaskCreate, or TaskUpdate tool call in the transcript has a content or subject field whose value begins with the literal string '[DECLINED]'"
-      note: "The iterate skill's declined-item convention: when the user picks Skip, update the task's subject (TaskCreate/TaskUpdate) or content (TodoWrite) to '[DECLINED] <original subject>' before marking it completed. Examine whichever tracking mechanism the agent chose — both are supported by the skill. The Rust rewrite finding is the one the oracle will decline."
+      check: "A TaskCreate or TaskUpdate tool call in the transcript has a subject field whose value begins with the literal string '[DECLINED]'"
+      note: "The iterate skill's declined-item convention: when the user picks Skip, update the task's subject via TaskCreate or TaskUpdate to '[DECLINED] <original subject>' before marking it completed. The Rust rewrite finding is the one the oracle will decline."
   - flow-investigates-between-asks:
       check: "At least one Agent tool call appears in the transcript between the first AskUserQuestion tool call or advanced-ask Skill invocation and the second AskUserQuestion tool call or advanced-ask Skill invocation"
       note: "The iterate skill mandates a fresh sub-agent per item (iterate/SKILL.md:72-78). Between the first and second approval prompts, a new Agent invocation must investigate the second finding — verification Reads from the prior item's sub-agent do not satisfy this gate."

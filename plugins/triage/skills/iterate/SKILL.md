@@ -21,7 +21,7 @@ Follow this procedure exactly. Do not propose alternative strategies, comment on
 
 | Capability | Purpose |
 |------------|---------|
-| Task tracking (TaskCreate or TodoWrite) | Persist tasks and their status across turns; resume after compaction |
+| Task tracking (TaskCreate, TaskUpdate) | Persist tasks and their status across turns; resume after compaction |
 | User prompts with options | Per-item approval gate |
 | Plan mode | Design approach before implementing complex items |
 | Sub-agents | Mandatory delegate for per-item investigation (Phase 1, step 2) |
