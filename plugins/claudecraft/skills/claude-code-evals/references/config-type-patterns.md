@@ -273,6 +273,42 @@ checks:
 
 ---
 
+## Plugins
+
+**What to test**: A plugin as a unit — that its bundled components (skills, hooks, sub-agents, MCP servers) load together from a single manifest and behave cohesively as shipped, not just that each component works in isolation.
+
+**Inject via**: `project.plugins: [<path-to-plugin-root>]` in scenario.yaml. The path points at the directory containing `.claude-plugin/plugin.json`. Scuttlerun translates this into an SDK plugin entry and loads the plugin's components into the session. `sdk.plugins` is the raw SDK escape hatch; prefer `project.plugins` for the common local-plugin case.
+
+**Key challenge**: A plugin-level eval can be confused with a component-level eval. Distinguish: a Plugins eval tests *the bundle as shipped* — skill A triggering hook B from the same plugin, sub-agent C using MCP D from the same plugin, plugin-wide configuration cascading correctly. Component-level concerns (does this one skill work? does this one hook fire?) belong in the Skills / Hooks / Sub-agents / MCP Servers sections above.
+
+```yaml
+# scenario.yaml
+prompt: |
+  Generate a release note for v2.3 and post it to the team channel.
+project:
+  plugins:
+    - ~/code/my-plugin     # Provides release-notes skill, slack-post hook,
+                           # and changelog-fetch MCP server in one bundle.
+```
+
+```yaml
+# checks.yaml
+checks:
+  - skill-fired:
+      check: "The release-notes skill activated and shaped the output"
+      note: "From my-plugin's skills/release-notes/"
+  - mcp-tool-used:
+      check: "Agent called the changelog-fetch MCP tool"
+      note: "From my-plugin's MCP server"
+  - hook-posted:
+      check: "Slack-post hook fired after the agent finished"
+      note: "From my-plugin's hooks; cross-component interaction with the skill above"
+```
+
+**Check strategy**: Tag each check with a `note:` that names the component responsible (mirroring the Bundled Combos pattern below). For plugin evals specifically, add at least one check that asserts a *cross-component* interaction — that is what distinguishes a plugin-as-unit eval from a series of single-component evals colocated in the same scenario.
+
+---
+
 ## Bundled Combos
 
 **What to test**: A full configuration stack (skill + CLAUDE.md + settings + MCP + ...) works together as a unit.
