@@ -123,6 +123,7 @@ Any Claude Code configuration that changes agent behavior. Each `scenario.yaml` 
 | MCP Servers | `sdk.mcp_servers` | Tool discovery and usage |
 | Sub-agents | `tools: [Agent]` + `sdk.agents` | Delegation and coordination |
 | Model/Effort | `model`, `effort` | Quality at different cost points |
+| Plugins | `project.plugins` | Plugin components compose; skills + hooks + agents + MCP load and interact as one unit |
 | Bundled Combos | Multiple fields | Combined config stack works as a unit |
 
 See `references/config-type-patterns.md` for scenario examples and design guidance for each type.
