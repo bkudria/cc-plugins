@@ -1,0 +1,199 @@
+# Bootstrap Plugin Evals
+
+Add eval coverage to an existing plugin — covering both per-component behavior (delegated to `skillcraft`'s per-skill bootstrap) and cross-component bundle behavior (the scenarios only this workflow owns).
+
+> **References for this workflow:** `claude-code-evals/references/config-type-patterns.md` § Plugins (cross-component scenario design), `claude-code-evals/references/check-design.md` § Pre-Write Checklist (mandatory before authoring any check), `references/delegation-map.md` (what plugincraft owns vs. delegates). Run `craboodle --help`, `scuttlerun --help`, and `pincenez --help` for the canonical schemas and flag references.
+
+**GATE — Load `claude-code-evals` before proceeding.** This workflow depends on check design rules and the Plugins config-type pattern that live in the `claude-code-evals` skill. Use the Skill tool to load it now. Do NOT proceed to Step 1 until it is loaded.
+
+## Step 1: Select Target Plugin
+
+If `$ARGUMENTS` specifies a plugin name or path, use it. Otherwise pick a plugin:
+
+1. Identify up to 4 likely candidates from:
+   - the plugin currently being edited (if any),
+   - plugins referenced in the current conversation,
+   - recently-touched plugins (`git log --name-only --since="14 days ago"` filtered to paths under `plugins/*/.claude-plugin/`, `~/.claude/plugins/marketplaces/*/plugins/*/`).
+2. Use `AskUserQuestion` with those candidates plus an "Other" option.
+3. If the user picks "Other", or no plausible candidates surface, ask: "Which plugin should I bootstrap evals for? Give me the name or path." Resolve the answer to a directory containing `.claude-plugin/plugin.json` and continue.
+
+Search roots for resolution: current working tree's `plugins/*/`, `~/.claude/plugins/marketplaces/*/plugins/*/`.
+
+Check the plugin's `evals/` directory status:
+- **No `evals/` directory** — proceed to Step 2.
+- **`evals/` exists but contains only `evals.yaml` (from `craboodle init`)** — proceed to Step 2; Step 6 will use the existing scaffold.
+- **`evals/` exists with real scenario directories** (`evals/<id>/scenario.yaml` files with non-placeholder prompts) — this workflow does not apply; you are extending an existing suite, not bootstrapping. Add scenarios incrementally, applying the Step 7 GATE per new scenario.
+
+## Step 2: Catalog Components
+
+Read `plugin.json` and enumerate every component the plugin ships. Build a small table — this is the universe scenarios will draw from in Steps 3 and 4.
+
+| Component type | Source | What to record |
+|---|---|---|
+| Skills | `skills/*/SKILL.md` | Name, one-line purpose, auto-trigger vs. user-invoked |
+| Hooks | `hooks/` + `hooks.json` (if present) | Hook type (PreToolUse, etc.), matcher, what the command does |
+| Sub-agents | `agents/*.md` | Name, when it's spawned, what tools it has |
+| MCP servers | `.mcp.json` | Server name, what tools it exposes |
+| Commands | `commands/*.md` | Command name, what skill or workflow it invokes |
+
+If the plugin ships only one component type and only one component, scenarios will be thin — note this and consider whether plugin-level evals add value over the per-skill suite alone. Single-component plugins may not need bundle scenarios.
+
+## Step 3: Delegate Per-Skill Bootstrap
+
+For each skill in Step 2's catalog, per-skill evals are skillcraft's responsibility. Skill eval is location-agnostic: a skill inside a plugin evaluates identically to a standalone skill.
+
+For each skill:
+
+1. Check whether the skill already has an `evals/` directory with real scenarios. If yes, skip.
+2. If not, invoke `skillcraft/workflows/bootstrap-evals.md` against the skill directory (`<plugin-root>/skills/<skill-name>`).
+3. Capture the resulting per-skill suite location for the Final Report.
+
+Per-skill suites should exist before bundle scenarios are designed — failing skill suites would mask bundle-level failures and make Step 10 diagnosis ambiguous. If the user wants to defer per-skill bootstrap (e.g., they just want plugin-bundle coverage), note this in the Final Report under "Components Exercised" so reviewers know skill-internal coverage is incomplete.
+
+## Step 4: Propose Bundle Scenarios
+
+Bundle scenarios exercise composition — the value the plugin adds over its components in isolation. Generate 3+ proposals across these buckets:
+
+| Bucket | What it tests | Example |
+|---|---|---|
+| Composition | Two or more components interacting in the same session | Skill A triggers hook B; agent C uses MCP D; command E invokes skill F |
+| Discoverability | The plugin's surface area is reachable when the plugin loads | The triggering skill auto-fires on its keywords; the slash command is registered |
+| Regression | Loading the plugin doesn't break something it shouldn't | Existing tools remain available; baseline tasks still complete |
+
+For each proposed scenario, draft: `id`, `name`, `prompt`, and 3 `checks`. At least one check per scenario must assert a *cross-component* interaction (mirrors the Plugins pattern in `claude-code-evals/references/config-type-patterns.md`); single-component scenarios belong in the per-skill suites from Step 3.
+
+Make scenarios realistic and specific to this plugin's actual components — not generic templates.
+
+Check quality is enforced in Step 7.
+
+## Step 5: Interview (when warranted)
+
+Bundle scenarios are higher-stakes than per-skill scenarios — the design space is larger (component pairs, triples, full bundles), failures are subtler (cross-component coordination), and the bar for "useful" is higher (must distinguish bundle value from per-component value).
+
+| Plugin shape | Interview? |
+|---|---|
+| Single component type (e.g., only skills) | Typically skip — there's no composition to design |
+| Two component types | Often interview — composition pattern is real but compact |
+| Three or more component types | Always interview — proposals require judgment on what compositions matter |
+
+If the scenarios are straightforward (clear composition story, well-documented interactions, obvious check targets), proceed directly to Step 6. Otherwise present proposals and ask:
+
+1. "Here are N proposed bundle scenarios for [plugin-name]. For each: approve as-is, suggest changes, or replace?"
+2. "Which cross-component interactions matter most? Anything I missed?"
+
+Revise scenarios based on feedback. Two questions is the target; three is the maximum.
+
+## Step 6: Write Pipeline Config
+
+### Model selection
+
+The agent-under-test `model:` determines what your evals measure. Haiku (scuttlerun's default) is cheap and fast but its failure modes may not reflect what the plugin does under Sonnet or Opus — the models most users run. Default to Sonnet for representative bundle evals; reserve Haiku for smoke-testing scenario design or iterating cheaply. The synthetic-user `oracle_model` (under `user:`) also defaults to Haiku — raise it when bundle scenarios depend on the oracle following nuanced multi-turn prompts.
+
+### Scaffold and inject the plugin
+
+```bash
+craboodle init <plugin-root>
+```
+
+`craboodle init` auto-detects plugin mode (presence of `.claude-plugin/plugin.json`) and writes `<plugin-root>/evals/evals.yaml` with `version: "1"`, commented pipeline knobs (`min_pass_rate`, `max_budget_usd`, `repeats`, `artifact_retention_days`), and a commented `scenarios.base` template that includes a `skills:` placeholder pointing at the first detected skill.
+
+Then:
+
+1. **Fill in `scenarios.base.project.plugins`** — add `plugins: ['.']` under `scenarios.base.project` in `evals.yaml`. This loads the entire plugin (skills + hooks + sub-agents + MCP servers + commands) into every scenario. `project.plugins` is the canonical caller surface; `sdk.plugins` is the raw SDK escape hatch. Run `scuttlerun --help` for the full field reference and for the precedence between `project.plugins` and `sdk.plugins`.
+2. **Decide on `project.skills` placement** — if every bundle scenario should also see a specific per-skill self-reference (rare), keep the auto-scaffolded `skills:` line; otherwise remove it so the plugin loads cohesively through `project.plugins` alone.
+3. **Fill in `scenarios.base.tools`** — the `tools:` array must include both scuttlerun's defaults (run `scuttlerun --help` for the current list) **plus** any tools the plugin's components require (e.g., `Agent` for plugins with sub-agents, `mcp__*` names for MCP-provided tools). Listing your additions alone replaces the defaults rather than extending them; use `additional_tools:` if you want extension semantics.
+4. **Edit the pipeline knobs in `evals.yaml` (top level)** — uncomment `min_pass_rate` and set a reachable value. Reachable pass rates are `k/(checks × reps)`; e.g. with 3 checks × 1 rep the only reachable values are `{0, 0.33, 0.67, 1.0}`, so `0.8` would collapse to requiring a perfect `1.0`.
+
+For how `scenarios.base`, `scenario.yaml`, CLI flags, and scuttlerun defaults compose (deep-merge for objects, replace for arrays, defaults applied last), see `claude-code-evals/references/config-precedence.md`.
+
+## Step 7: Write Scenario Files
+
+For each approved bundle scenario from Step 4, create:
+
+- `evals/<scenario-id>/scenario.yaml` — prompt and any per-scenario scuttlerun overrides (fixtures via `project.files`, additional tools, etc.)
+- `evals/<scenario-id>/checks.yaml` — context and checks in id-as-key format
+
+**GATE — STOP. Before writing any check, you MUST Read `claude-code-evals/references/check-design.md` § Pre-Write Checklist AND § Common Slips in this session.** The reference contains six self-tests that every check must pass before being written. Apply every self-test to every check — do not skip self-tests on checks that "look obviously fine"; over-specific and compound are the most common lint failures and they hide in checks that look concrete. Catching anti-patterns here is free; catching them via `craboodle lint` costs a lint cycle per fix.
+
+Loading the `claude-code-evals` skill (done in the top GATE) is not the same as having the Pre-Write Checklist in context. If you have not Read the § Pre-Write Checklist AND § Common Slips sections of check-design.md during this session, Read them now before continuing.
+
+For every cross-component check, add a `note:` field naming the components the check exercises (e.g., `note: "skills/release-notes + hooks/slack-post — composition"`). This mirrors the `note:` discipline in `claude-code-evals/references/config-type-patterns.md` § Plugins and makes Step 10 attribution faster.
+
+**Write incrementally**: Write the first scenario, then lint it with `craboodle lint --scenario <id> <plugin-root>/evals`. Fix any issues before writing the remaining scenarios — anti-pattern tendencies caught on the first scenario won't propagate to the rest. Then write the remaining scenarios in parallel, following the same patterns.
+
+## Step 8: Lint
+
+```bash
+craboodle lint <plugin-root>/evals
+```
+
+Confirm zero issues across the full suite. If the incremental lint in Step 7 was clean, this should pass on the first run.
+
+## Step 9: First Run
+
+**GATE — Lint validates form; run validates substance. Do NOT report completion or present a final summary until a run has completed and results are reviewed.**
+
+```bash
+craboodle run --repeats 1 <plugin-root>/evals
+```
+
+Review the output. If all scenarios pass, proceed to Final Report. If failures occur, continue to Step 10.
+
+## Step 10: Iterate
+
+| Exit Code | Meaning | Action |
+|-----------|---------|--------|
+| 0 | All scenarios at or above `min_pass_rate` | Done |
+| 3 | One or more scenarios below `min_pass_rate` | Diagnose and fix |
+| 1 | Configuration error | Fix scenario YAML |
+| 2 | Infrastructure error | Check tool installation, plugin load path |
+
+**GATE — When exit code is 3, you MUST produce a per-check diagnosis table before the Final Report. Do NOT emit "Bootstrap complete" or any final summary until every failing check has a Plugin / Component / Check attribution recorded in the Diagnosis section of the report template.**
+
+For each failing check, diagnose:
+- **Plugin problem** — The plugin's components don't compose as expected. Fix: revise the offending component (often cross-component coherence, e.g., a hook that doesn't fire when the skill triggers).
+- **Component problem** — A single component within the plugin is misbehaving (and its per-skill suite likely also fails). Fix: route into `skillcraft`'s per-skill workflow for that component.
+- **Check problem** — The plugin works but the check doesn't capture it correctly. Fix: revise the check.
+
+To distinguish: read the scuttlerun transcript at `<artifact_dir>/<scenario-id>/rep-<N>/output.yaml` (the `artifact_dir` is printed in craboodle's YAML output). Cross-component failures often show one component firing and another not — that pattern points at composition, not at either component in isolation.
+
+Iteration rules:
+1. Fix one thing at a time (plugin OR component OR check, not multiple)
+2. When a rewrite responds to a lint flag, re-apply the full Pre-Write Checklist to the rewrite before moving on — rewrites commonly reintroduce a different anti-pattern (see `claude-code-evals/references/check-design.md` § Common Slips)
+3. Re-run targeted scenarios after each fix
+4. Stop when: exit code 0, or pass rate improvement < 0.05 for 2 iterations
+
+## Final Report
+
+This template requires data from a `craboodle run` — it cannot be filled from lint results alone.
+
+**Output handling**: redirect `craboodle run` to a file; never pipe it through `grep`, `head`, or `tail` before reading for the report. Filtered streams drop scenarios silently. See `claude-code-evals/references/results-interpretation.md` § Preserving Full Output.
+
+```
+## Plugin Evals Bootstrapped: {plugin-name}
+
+Location: {plugin-root}/evals/
+Scenarios: {count} bundle scenarios
+Per-skill suites (from Step 3): {list each skill name and its evals/ location, or "deferred" if Step 3 was skipped}
+Checks: {total bundle check count}
+Lint: PASS
+Run: {PASS or FAIL} (exit code {0 or 3})
+
+### Components Exercised
+{One line per cataloged component from Step 2. Mark each as "covered" if at least one bundle check tests it, "per-skill only" if only the per-skill suite tests it, or "uncovered" if neither does. Surfaces gaps for follow-up.}
+
+### Per-Scenario Results
+{paste craboodle run YAML output: scenario id, pass_rate, cost_usd for each}
+
+### Diagnosis
+{Required when Run: FAIL. One row per failing check. Omit this section only when all scenarios passed (exit code 0).}
+
+| Scenario | Check | Pass rate | Attribution (Plugin / Component / Check) | Notes |
+|----------|-------|-----------|------------------------------------------|-------|
+| ...      | ...   | ...       | ...                                      | ...   |
+
+### Iterations
+{count} lint-fix cycles, {count} run-fix cycles
+```
+
+**Before submitting**: verify every scenario directory under `evals/` appears above with a numeric `pass_rate`. If any row shows `?`, `unknown`, or "succeeded" without a number, the run output was filtered — re-read it from the redirect file or artifact directory and re-populate that row. Verify the Components Exercised section accounts for every component cataloged in Step 2 — gaps there are valid future work, not silent omissions.
