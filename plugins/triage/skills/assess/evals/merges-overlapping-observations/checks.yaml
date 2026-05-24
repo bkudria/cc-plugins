@@ -1,0 +1,4 @@
+checks:
+  - merged-credentials-finding-spans-all-three-files:
+      check: "At least one `### N.` finding section (from its heading up to the next `### N.` heading or end of document) in the final assessment contains all three of the substrings `src/auth.py`, `src/db.py`, and `src/cache.py`, indicating the three hardcoded-credential observations were merged into a single finding."
+      note: "The assess skill's Phase 4 'Merge overlapping observations' rule (assess/SKILL.md:109) requires folding observations that share a root cause into one finding. The fixture's three files each hardcode a credential in a connection-string pattern — the same root cause. The agent should produce one merged finding referencing all three files, not three separate findings each referencing one. A merged finding section contains all three filenames within its body."
