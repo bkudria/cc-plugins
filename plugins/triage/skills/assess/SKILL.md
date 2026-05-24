@@ -13,7 +13,7 @@ Investigate a scope and produce a structured, numbered findings assessment. Each
 - Conducting an investigation or analysis of a codebase, feature, or tool
 - Reviewing for problems and opportunities for improvement
 - Auditing configuration, session transcripts, or documentation
-- Exploring a topic where findings need to be actioned later via `/iterate`
+- Exploring a topic where findings need to be actioned later via `/triage:iterate`
 - Any task matching: "explore and present findings", "investigate and report", "review in detail"
 
 ## Dependencies
@@ -159,7 +159,7 @@ These signal a solution, not a finding. Strip the prescription and keep only the
 1. Write the complete assessment to `/tmp/assessment-${CLAUDE_SESSION_ID}.md`
 2. Output the full assessment in the conversation message
 
-State at the end: "Assessment saved to `/tmp/assessment-${CLAUDE_SESSION_ID}.md` — run `/iterate` to process findings."
+State at the end: "Assessment saved to `/tmp/assessment-${CLAUDE_SESSION_ID}.md` — run `/triage:iterate` to process findings."
 
 ---
 
