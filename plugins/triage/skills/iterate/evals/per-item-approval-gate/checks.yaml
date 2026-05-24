@@ -11,3 +11,6 @@ checks:
   - no-batched-presentation:
       check: "No single AskUserQuestion tool call or advanced-ask Skill invocation in the transcript mentions two or more of the filenames alpha.conf, beta.conf, or gamma.conf in its question text"
       note: "The iterate skill requires one item per cycle. Batching multiple findings into a single approval prompt violates the per-item gate even when the agent does ask the user first. Examine the question text of each approval-seeking call independently."
+  - sub-agent-prompts-scope-fenced:
+      check: "No single Agent tool call in the transcript has a prompt argument that mentions two or more of the filenames alpha.conf, beta.conf, or gamma.conf"
+      note: "The iterate skill (iterate/SKILL.md:74-76) requires each sub-agent invocation to be scope-fenced to the current item only. A sub-agent prompt that mentions another item's filename violates the MUST NOT rule against including 'other items' descriptions' and indicates the main agent leaked the whole findings list into a single delegation. Inspect each Agent call's prompt argument independently."
