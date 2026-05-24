@@ -3,6 +3,8 @@
 Add eval coverage to an existing plugin — covering both per-component behavior (delegated to `skillcraft`'s per-skill bootstrap) and cross-component bundle behavior (the scenarios only this workflow owns).
 
 > **References for this workflow:** `claude-code-evals/references/config-type-patterns.md` § Plugins (cross-component scenario design), `claude-code-evals/references/check-design.md` § Pre-Write Checklist (mandatory before authoring any check), `references/delegation-map.md` (what plugincraft owns vs. delegates). Run `craboodle --help`, `scuttlerun --help`, and `pincenez --help` for the canonical schemas and flag references.
+>
+> **Worked example:** see `craboodle/examples/note-taker/` (one skill + one sub-agent, three scenarios mixing single-component and cross-component checks) for a complete fixture that follows this workflow end-to-end. Mirror its `<plugin-root>/{evals.yaml, evals/<id>/{scenario,checks}.yaml}` shape when bootstrapping your own plugin.
 
 **GATE — Load `claude-code-evals` before proceeding.** This workflow depends on check design rules and the Plugins config-type pattern that live in the `claude-code-evals` skill. Use the Skill tool to load it now. Do NOT proceed to Step 1 until it is loaded.
 
