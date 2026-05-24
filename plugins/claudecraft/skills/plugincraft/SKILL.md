@@ -32,7 +32,7 @@ Create, audit, ship, and maintain Claude Code plugins.
 
 ### Testing Discipline
 
-For skills contained inside a plugin, plugincraft delegates to `skillcraft` — every skill audit goes through skillcraft's `improve-standard` workflow and its Iron Law applies. Plugincraft itself does not yet ship evals; it will be bootstrapped via skillcraft once its design stabilizes.
+For skills contained inside a plugin, plugincraft delegates to `skillcraft` — every skill audit goes through skillcraft's `improve-standard` workflow and its Iron Law applies. For plugin-level (multi-component bundle) evaluation, see the Plugins entry in `claude-code-evals`' What Can Be Evaluated table. Plugincraft-the-skill itself does not yet ship its own evals; they will be bootstrapped via skillcraft once plugincraft's design stabilizes.
 
 ## Lightweight Mode (Auto-trigger)
 
