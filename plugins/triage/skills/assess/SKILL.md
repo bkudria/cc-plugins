@@ -160,9 +160,3 @@ These signal a solution, not a finding. Strip the prescription and keep only the
 2. Output the full assessment in the conversation message
 
 State at the end: "Assessment saved to `/tmp/assessment-${CLAUDE_SESSION_ID}.md` — run `/triage:iterate` to process findings."
-
----
-
-## Compaction Recovery
-
-If a compaction occurred and the assessment needs to be reconstructed, read `/tmp/assessment-${CLAUDE_SESSION_ID}.md` and output it again in conversation so `iterate` can find it.
