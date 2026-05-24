@@ -18,7 +18,7 @@ This file is the contract: what plugincraft delegates, to whom, and how.
 | Agent generation during Create | `plugin-dev`'s `agent-creator` agent | `Agent tool: subagent_type: agent-creator` | Plugin-level integration after the agent is created (PR 3) |
 | Marketplace.json schema | `plugin-dev`'s `marketplace-management` skill | `Skill tool: load plugin-dev:marketplace-management` for schema reference | Generation strategy + drift prevention (`scripts/marketplace-generate.sh`, `references/marketplace-spec.md`, CI auto-sync in `.github/workflows/marketplace-sync.yml`) |
 | Eval pipeline (skills inside a plugin) | `claude-code-evals` + `skillcraft` (both sibling in claudecraft) | `Skill tool: load claude-code-evals` for taxonomy; `skillcraft`'s `workflows/bootstrap-evals.md` for the workflow | Nothing — skill eval is location-agnostic (a skill inside a plugin evaluates identically to a standalone skill) |
-| Eval pipeline (plugin as a bundle) | `claude-code-evals` (sibling in claudecraft) | `Skill tool: load claude-code-evals`; see the Plugins row in its What Can Be Evaluated table | Nothing — plugin-bundle eval logic lives upstream in `claude-code-evals`; cross-component coherence evals are a separate concern |
+| Eval pipeline (plugin as a bundle) | `claude-code-evals` (sibling in claudecraft) | `Skill tool: load claude-code-evals`; see the Plugins row in its What Can Be Evaluated table | `workflows/bootstrap-evals.md` — 10-step bootstrap of plugin-level eval coverage (cross-component bundle scenarios; per-skill scenarios delegated to skillcraft). Behavioral eval counterparts for plugincraft's PX checks remain a separate concern. |
 
 ---
 

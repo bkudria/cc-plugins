@@ -110,3 +110,4 @@ For skill-level anti-patterns inside a plugin, delegate to `skillcraft/reference
 |------|---------|
 | `workflows/improve-standard.md` | 7-step audit of one plugin: pre-flight → plugin-validator → per-skill skillcraft → PX/PR/MK/PB → anti-patterns → report → fix loop |
 | `workflows/improve-bulk.md` | Iterate every installed plugin, produce a summary table, optionally enter fix loops for selected plugins |
+| `workflows/bootstrap-evals.md` | 10-step guided bootstrap of plugin-level eval coverage: select → catalog components → delegate per-skill bootstrap to skillcraft → bundle scenarios → interview → pipeline config → scenarios → lint → run → iterate |
