@@ -186,3 +186,75 @@ Read the output. If two skills both promise to trigger on the same verb+noun (e.
 Narrow one skill's trigger conditions so the descriptions don't promise the same scenarios.
 If the skills genuinely overlap: merge them, or split the shared concern into a third skill they both depend on.
 If you intentionally want both to load on the same trigger: document the dual-load in both descriptions so the model picks both deliberately.
+
+---
+
+## PE1: Plugin Has Eval Suite
+
+Gated on `craboodle` being installed. Run `command -v craboodle`; if absent, skip and emit the one-time warning described in `workflows/improve-standard.md` Step 4. The actual recipe here is a filesystem check and does not invoke craboodle, but PE2 below does, so the audit gates both checks on craboodle's presence to keep PE results coherent.
+
+### Detection
+
+```bash
+[[ -f "$plugin_dir/evals.yaml" ]] && \
+  ls "$plugin_dir"/evals/*/scenario.yaml 2>/dev/null | head -1
+```
+
+Empty output means no real scenarios (either `evals.yaml` is absent or no scenario directories exist). A printed path means the suite exists.
+
+### False Positives
+
+- A plugin in active bootstrap: `evals.yaml` may exist with no scenarios yet because `craboodle init` was just run. Treat this as PE1 fail in audit but note in the report that it looks mid-bootstrap.
+- A scenario file named something other than `scenario.yaml` (e.g., `scenario.yml`): adjust the glob if needed — `craboodle init` writes `scenario.yaml` by convention but both extensions are accepted.
+
+### Fix Recipe
+
+Bootstrap evals via plugincraft's `workflows/bootstrap-evals.md`. The workflow's Step 6 calls `craboodle init <plugin-root>`, which scaffolds `evals.yaml` with sensible defaults; Steps 7-9 then write scenarios, lint them, and run them.
+
+---
+
+## PE2: Every Declared Component Has Scenario Coverage
+
+Gated on `craboodle` being installed (see PE1).
+
+### Detection
+
+Per-component lists (skills, agents, commands) — craboodle's zero-fill is authoritative; trust the output:
+
+```bash
+craboodle lint "$plugin_dir" 2>/dev/null \
+  | awk '/^plugin_coverage:/,0' \
+  | yq '.plugin_coverage | (.skills, .agents, .commands) | to_entries | .[] | select(.value == 0) | .key' -
+```
+
+Each line of output is an uncovered component id. Empty output means every declared skill/agent/command has at least one scenario.
+
+Singletons (hooks, mcp_servers) — `craboodle`'s output uses `0` for both "not declared" and "declared but uncovered", so detect a real gap by combining the count with a filesystem check:
+
+```bash
+coverage=$(craboodle lint "$plugin_dir" 2>/dev/null | awk '/^plugin_coverage:/,0')
+
+if [[ -f "$plugin_dir/hooks.json" || -f "$plugin_dir/hooks/hooks.json" ]]; then
+  hooks_count=$(echo "$coverage" | yq '.plugin_coverage.hooks' -)
+  [[ "$hooks_count" == "0" ]] && echo "hooks"
+fi
+
+if [[ -f "$plugin_dir/.mcp.json" ]]; then
+  mcp_count=$(echo "$coverage" | yq '.plugin_coverage.mcp_servers' -)
+  [[ "$mcp_count" == "0" ]] && echo "mcp_servers"
+fi
+```
+
+Each printed line names a singleton with a coverage gap. Empty output means singletons are either covered or not declared.
+
+PE2 passes iff both detection blocks above produce empty output. Otherwise PE2 fails and the printed component ids are the gaps to surface in the Step 6 report.
+
+### False Positives
+
+- A component intentionally not eval-tested (e.g., a generated `agents/_index.md`): the caller may legitimately want it uncovered. In that case the right fix is to remove the component, not to add a stub scenario.
+- A scenario whose `id` does not follow the `<type>-<id>` convention: the scenario exists and tests the component but plugincraft cannot tell. Until `craboodle init` adopts the convention more broadly (separate follow-up), some hand-written scenarios will be miscategorised. Fix by renaming the scenario directory to match the convention.
+- A plugin with no components at all: PE2 passes vacuously (empty `skills`, `agents`, `commands` maps; no `hooks.json` or `.mcp.json`). Such a plugin still fails PE1 if it has no scenarios — that is the relevant signal.
+
+### Fix Recipe
+
+For each uncovered component, add a scenario named `<type>-<componentId>` (e.g., `evals/skill-foo/`) or `<type>-<componentId>-<suffix>` (e.g., `evals/skill-foo-basic/`). For singletons use `evals/hooks/` or `evals/hooks-<suffix>/`, and `evals/mcp/` or `evals/mcp-<suffix>/`. The `bootstrap-evals.md` workflow's Step 4 (Propose Bundle Scenarios) is the canonical path for designing the scenario contents. After adding scenarios, re-run `craboodle lint` and confirm the corresponding count moves above zero.

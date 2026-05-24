@@ -26,15 +26,15 @@ Capture each plugin's report in the same structure as `improve-standard.md` Step
 ```
 | Plugin | Score | Critical | Warnings | Suggestions | Anti-patterns |
 |---|---|---|---|---|---|
-| claudecraft | 28/32 | 0 | 2 | 1 | 1 (marketplace-drift) |
-| triage      | 26/32 | 0 | 4 | 2 | 0 |
-| plugin-dev  | 30/32 | 0 | 1 | 3 | 0 |
+| claudecraft | 28/34 | 0 | 2 | 1 | 1 (marketplace-drift) |
+| triage      | 26/34 | 0 | 4 | 2 | 0 |
+| plugin-dev  | 30/34 | 0 | 1 | 3 | 0 |
 ```
 
 Sort by score ascending (most-troubled first).
 
 For each row:
-- **Score**: count of passed plugincraft checks / total applicable checks for that plugin. MK1-MK3 only count when a parent marketplace.json exists; PB1-PB4 always count.
+- **Score**: count of passed plugincraft checks / total applicable checks for that plugin. MK1-MK3 only count when a parent marketplace.json exists; PB1-PB4 always count; PE1-PE2 count only when `craboodle` is on `PATH` (skipped otherwise).
 - **Critical / Warning / Suggestion**: counts from the plugin's `### Issues` section (🔴/🟡/🔵).
 - **Anti-patterns**: count + comma-separated short names of detected anti-patterns.
 
