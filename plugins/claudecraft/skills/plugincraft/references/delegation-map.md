@@ -22,15 +22,19 @@ This file is the contract: what plugincraft delegates, to whom, and how.
 
 ---
 
-## Soft Dependency: plugin-dev
+## Soft Dependencies
+
+Plugincraft is designed to function without optional external tools installed, but degrades gracefully when they are absent.
+
+### Soft dependency: plugin-dev
 
 Plugincraft is designed to function without `plugin-dev` installed, but degrades gracefully.
 
-### When plugin-dev IS installed
+#### When plugin-dev IS installed
 
-The `improve-standard` workflow invokes `plugin-validator` for manifest and component schema depth, then layers plugincraft's PX/PR/MK/PB checks on top. Reports include the plugin-validator output verbatim, then plugincraft's additions.
+The `improve-standard` workflow invokes `plugin-validator` for manifest and component schema depth, then layers plugincraft's PX/PR/MK/PB/PE checks on top. Reports include the plugin-validator output verbatim, then plugincraft's additions.
 
-### When plugin-dev is NOT installed
+#### When plugin-dev is NOT installed
 
 The workflow:
 
@@ -40,14 +44,33 @@ The workflow:
    - PM1-PM6 (already covered by plugincraft's own checklist)
    - PC1-PC4 (already covered as smoke checks)
    - No per-component deep validation
-4. Continues with PX/PR/MK/PB/anti-patterns as normal.
+4. Continues with PX/PR/MK/PB/PE/anti-patterns as normal.
 
-### When plugin-dev is partially helpful
+#### When plugin-dev is partially helpful
 
 Some `plugin-dev` skills are loose fits for plugincraft's purposes:
 
 - `skill-reviewer` is optimized for individual skill review, not coherence across a plugin's skills. Plugincraft uses it opportunistically for per-skill quality when `skillcraft` is unavailable, but the canonical path for skills inside a plugin is to delegate to `skillcraft`.
 - `marketplace-management` documents schemas but does not generate or audit cross-plugin coherence. Plugincraft uses it as a schema reference (PR 2) but layers generation and drift prevention on top.
+
+### Soft dependency: craboodle
+
+Plugincraft's PE (Plugin Evals) category gates on `craboodle` being on `PATH`.
+
+#### When craboodle IS installed
+
+The `improve-standard` workflow's Step 4 PE branch runs `craboodle lint <plugin-root>` and parses the `plugin_coverage:` block to evaluate PE1 (eval suite exists) and PE2 (every declared component has scenario coverage). PE findings appear in the Step 6 report alongside PX/PR/MK/PB findings.
+
+#### When craboodle is NOT installed
+
+The workflow:
+
+1. Detects absence by checking `command -v craboodle` (non-zero exit means absent).
+2. Warns once per workflow invocation: `craboodle is not installed; PE (eval coverage) checks skipped. Install with: npm install -g craboodle`
+3. Reports PE1 and PE2 as `SKIPPED` in Step 6 (neither pass nor fail).
+4. Continues with all other categories as normal.
+
+Plugincraft does not substitute inline checks for craboodle because PE depends on craboodle's scenario→component mapping convention, which is craboodle's contract to define and may evolve. Reimplementing the mapping inline would create drift the moment craboodle changes it.
 
 ---
 
@@ -70,5 +93,6 @@ These are areas where plugincraft owns the concern because no upstream tool cove
 - **Marketplace generation**: regenerating `plugins[]` from constituent `plugin.json` files (`scripts/marketplace-generate.sh`). Drift prevention by construction; CI-enforced via `.github/workflows/marketplace-sync.yml`.
 - **README quality (PR category)**: structural presence, required env var documentation, component listing matching reality.
 - **Publish readiness (PB category)**: version, license, changelog, install instructions.
+- **Plugin eval coverage audit (PE category)**: whether the plugin ships an eval suite and whether every declared component is exercised by at least one scenario. Plugincraft owns the audit gate; craboodle owns the underlying coverage computation (`craboodle lint`'s `plugin_coverage:` block). PE is gated on craboodle being installed — see the Soft Dependencies section above.
 - **Bulk audit**: walking every installed plugin, producing a summary table, routing into selective fix loops.
 - **Plugin-level anti-pattern catalogue**: 14 patterns covering structural, distribution, naming, coherence problems specific to plugins (not just components).

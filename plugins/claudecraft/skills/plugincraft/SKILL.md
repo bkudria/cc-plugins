@@ -86,12 +86,13 @@ For skill-level anti-patterns inside a plugin, delegate to `skillcraft/reference
 - **git** — used by `workflows/improve-standard.md` to surface recently-touched plugins as audit candidates.
 - **skillcraft** (sibling skill in this plugin) — hard dependency. Plugincraft's `improve-standard` workflow loads skillcraft for per-skill audits inside the plugin under review.
 - **plugin-dev** (Anthropic's official plugin) — soft dependency. Plugincraft's `improve-standard` invokes `plugin-dev`'s `plugin-validator` agent for manifest and component schema depth. When not installed, plugincraft warns once per workflow invocation and falls back to its own (shallower) PM/PC checks. Install with: `/plugin install plugin-dev@claude-plugins-official`.
+- **craboodle** (sibling tool in the eval pipeline) — soft dependency. Plugincraft's `improve-standard` workflow's PE (Plugin Evals) category invokes `craboodle lint` to verify eval-suite existence (PE1) and per-component scenario coverage (PE2). When not installed, plugincraft warns once per workflow invocation and reports PE1/PE2 as `SKIPPED`. Install with: `npm install -g craboodle` (requires Node ≥ 20).
 
 ## Reference Files
 
 | File | Purpose |
 |------|---------|
-| `references/quality-checklist.md` | 32-item validation checklist across 7 categories (PM/PS/PC/PX/PR/MK/PB) |
+| `references/quality-checklist.md` | 34-item validation checklist across 8 categories (PM/PS/PC/PX/PR/MK/PB/PE) |
 | `references/anti-patterns.md` | 14 plugin-level anti-patterns across 4 categories |
 | `references/component-coherence.md` | Detection recipes and fix shapes for the PX category |
 | `references/delegation-map.md` | What plugincraft delegates to upstream tools and what it owns directly |
@@ -108,6 +109,6 @@ For skill-level anti-patterns inside a plugin, delegate to `skillcraft/reference
 
 | File | Purpose |
 |------|---------|
-| `workflows/improve-standard.md` | 7-step audit of one plugin: pre-flight → plugin-validator → per-skill skillcraft → PX/PR/MK/PB → anti-patterns → report → fix loop |
+| `workflows/improve-standard.md` | 7-step audit of one plugin: pre-flight → plugin-validator → per-skill skillcraft → PX/PR/MK/PB/PE → anti-patterns → report → fix loop |
 | `workflows/improve-bulk.md` | Iterate every installed plugin, produce a summary table, optionally enter fix loops for selected plugins |
 | `workflows/bootstrap-evals.md` | 10-step guided bootstrap of plugin-level eval coverage: select → catalog components → delegate per-skill bootstrap to skillcraft → bundle scenarios → interview → pipeline config → scenarios → lint → run → iterate |
