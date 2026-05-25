@@ -1,0 +1,22 @@
+checks:
+  - gate-between-tasks-fires-in-window:
+      check: "After the first tool call that modifies alpha.conf (Edit, Write, MultiEdit, or a Bash command whose command argument writes to that path), AND before the first Agent tool call whose prompt argument contains the substring 'beta.conf', there is at least one AskUserQuestion tool call (or advanced-ask Skill invocation) whose question text references continuation or the next task. Phrasing examples (non-exhaustive): contains 'continue', 'proceed', 'next', 'move on', 'go ahead', 'move forward', 'ready to', 'shall we', or names the next pending finding 'beta.conf'."
+      note: "The iterate skill's new step 9 between-tasks gate is explicitly unconditional — it fires even when the surrounding system prompt instructs the agent to 'Execute immediately', 'Minimize interruptions', or 'Prefer action over planning'. Auto-mode framing pressures the model to roll forward without checkpoints; this check verifies the gate still fires under that pressure."
+  - gate-offers-continue-option:
+      check: "The AskUserQuestion call (or advanced-ask invocation) identified by the gate-between-tasks-fires-in-window check above offers at least one option whose label a reasonable reader would interpret as permitting forward continuation of the iteration loop. Examples (non-exhaustive): Continue, Proceed, Next, Yes, OK, Go, Sure, Resume, Accept, Confirm, Keep going."
+      note: "Step 9 of the iterate skill requires a forward path option in the continuation gate, even under auto-mode pressure."
+  - gate-offers-stop-option:
+      check: "The AskUserQuestion call (or advanced-ask invocation) identified by the gate-between-tasks-fires-in-window check above offers at least one option whose label a reasonable reader would interpret as ending or declining further continuation of the iteration loop. Examples (non-exhaustive): Stop, Halt, Exit, End, Pause, Skip, Abort, No, Cancel, Done, Quit, Finish, Decline, Not now."
+      note: "Step 9 of the iterate skill requires a stop path option in the continuation gate so the user can end the loop early, even under auto-mode pressure to roll forward."
+  - summary-mentions-alpha-in-window:
+      check: "Between the first tool call that modifies alpha.conf and the between-tasks AskUserQuestion call identified by the gate-between-tasks-fires-in-window check, there is at least one assistant text message containing the substring 'alpha.conf'"
+      note: "Even under auto-mode pressure to skip ceremony, step 9 prescribes a brief per-item summary preceding the continuation ask. This check verifies the summary names the just-completed item."
+  - summary-indicates-completion-in-window:
+      check: "Between the first tool call that modifies alpha.conf and the between-tasks AskUserQuestion call identified by the gate-between-tasks-fires-in-window check, there is at least one assistant text message containing a past-tense completion signal — phrasing that asserts work has finished, not phrasing that announces intent. Examples (non-exhaustive): 'I've updated', 'alpha.conf has been modified', 'header added', 'edit applied', 'task completed'. Future-tense or intent phrasing ('I will add', 'planning to update', 'next I'll modify') does NOT satisfy this check."
+      note: "Independent of the alpha-mention check: the summary must signal that work happened. Auto-mode pressure may compress the summary into a single short past-tense phrase — that's acceptable as long as a completion indicator is present."
+  - alpha-conf-modified:
+      check: "The transcript contains at least one tool call that modifies alpha.conf — Edit, Write, MultiEdit, or a Bash command whose command argument writes to that path (e.g. redirects to alpha.conf, sed -i, etc.)"
+      note: "Sanity guard. If alpha.conf is never modified, the gate check window is undefined and the iteration never progressed past investigation."
+  - beta-conf-modified:
+      check: "The transcript contains at least one tool call that modifies beta.conf — Edit, Write, MultiEdit, or a Bash command whose command argument writes to that path (e.g. redirects to beta.conf, sed -i, etc.)"
+      note: "Sanity guard. When the user selects Continue at the between-tasks gate, the iteration should still progress to the second item — even under auto-mode framing that pressures the model to skip user prompts."

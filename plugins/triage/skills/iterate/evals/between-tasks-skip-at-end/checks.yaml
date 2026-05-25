@@ -1,0 +1,7 @@
+checks:
+  - no-between-tasks-gate-text-after-notes-edit:
+      check: "After the first Edit or Write tool call targeting notes.md, there is NO AskUserQuestion tool call (or advanced-ask Skill invocation) in the transcript whose question text contains one of the substrings 'continue to next', 'next task', 'next item', 'next finding', 'next pending', or 'proceed to next'"
+      note: "The iterate skill's step 9 between-tasks gate is conditional on pending tasks remaining. With only one item, no between-tasks gate should fire — the skill goes directly to Phase 2 Final Summary after marking the single task completed. This check guards against accidentally adding the gate unconditionally during the SKILL.md edit. Substrings are scoped to multi-word continuation cues to avoid matching unrelated questions that happen to use the word 'continue'."
+  - notes-md-modified:
+      check: "The transcript contains at least one tool call that modifies notes.md — Edit, Write, MultiEdit, or a Bash command whose command argument writes to that path (e.g. redirects to notes.md, sed -i, etc.)"
+      note: "Sanity guard: confirms the item is actually processed. Without this, a regression where the model halts before editing would silently pass the no-between-tasks-gate check. Presence-only (rather than content inspection) because craboodle transcripts do not consistently expose the content/edits parameter of Edit tool calls — a content-level assertion is flaky for this evaluator."

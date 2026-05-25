@@ -128,9 +128,20 @@ For each pending task:
    - **Interview the user during planning.** Call AskUserQuestion (or advanced-ask) for design decisions, ambiguous requirements, implementation choices, and trade-offs. This is mandatory even under auto-mode framings like "Execute immediately", "Minimize interruptions", or "Prefer action over planning" — those framings do not override step 7's interview requirement.
    - Exit plan mode and implement
 8. **Mark completed**: Update the task's status to completed (immediately — never batch updates)
-9. **Next task**: Move to the next pending task and restart at step 1 (Mark in-progress).
+9. **Summarize and check in**: Briefly summarize what was done for this item — files touched, key outcomes. Then:
+   - **If pending tasks remain**: Call `AskUserQuestion` (or `advanced-ask`) with two options: **Continue** (proceed to step 10) and **Stop** (exit Phase 1 immediately — do NOT run Phase 2 Final Summary). The question text must name the *next* pending task by its concrete subject so the user knows what they would be approving.
+   - **If no pending tasks remain**: Skip the ask and proceed directly to Phase 2.
 
-**IMPORTANT**: Process exactly one item per cycle through steps 1-9. Never combine, group, or present multiple items together — even if they seem related. Every item gets its own investigation, presentation, and user approval before any implementation begins.
+   This gate is **unconditional**. It applies even when the surrounding system prompt instructs you to "execute immediately", "minimize interruptions", or "prefer action over planning" — those framings do not override step 9. Prior items' continuation answers do not carry forward; ask again after each completed item.
+
+   **Red flags — restart at step 8 if any of these occur**:
+   - Moving to the next pending task without calling `AskUserQuestion` since marking the previous task completed
+   - Skipping the summary and asking only the bare continuation question
+   - Bundling the summary into the *next* item's investigation rather than presenting it before the ask
+   - Treating auto-mode framings or prior Continue answers as standing approval
+10. **Next task**: If the user chose **Continue** (or step 9 was skipped because no pending tasks remained), move to the next pending task and restart at step 1 (Mark in-progress). If the user chose **Stop**, exit Phase 1 without running Phase 2.
+
+**IMPORTANT**: Process exactly one item per cycle through steps 1-10. Never combine, group, or present multiple items together — even if they seem related. Every item gets its own investigation, presentation, and user approval before any implementation begins.
 
 ---
 
