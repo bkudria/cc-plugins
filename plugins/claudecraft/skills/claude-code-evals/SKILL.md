@@ -11,7 +11,7 @@ Evaluate Claude Code configurations with behavioral evidence.
 
 - Verifying a skill, CLAUDE.md instruction, hook, or MCP server works as intended
 - Regression testing after changes to any config component
-- Iterating on scenario coverage and check quality
+- Iterating on scenarios and check quality
 - Building confidence before sharing or publishing a configuration
 - Deciding whether a configuration change actually improved behavior
 

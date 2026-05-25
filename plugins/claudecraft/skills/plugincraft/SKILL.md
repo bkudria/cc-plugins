@@ -86,13 +86,12 @@ For skill-level anti-patterns inside a plugin, delegate to `skillcraft/reference
 - **git** — used by `workflows/improve-standard.md` to surface recently-touched plugins as audit candidates.
 - **skillcraft** (sibling skill in this plugin) — hard dependency. Plugincraft's `improve-standard` workflow loads skillcraft for per-skill audits inside the plugin under review.
 - **plugin-dev** (Anthropic's official plugin) — soft dependency. Plugincraft's `improve-standard` invokes `plugin-dev`'s `plugin-validator` agent for manifest and component schema depth. When not installed, plugincraft warns once per workflow invocation and falls back to its own (shallower) PM/PC checks. Install with: `/plugin install plugin-dev@claude-plugins-official`.
-- **craboodle** (sibling tool in the eval pipeline) — soft dependency. Plugincraft's `improve-standard` workflow's PE (Plugin Evals) category invokes `craboodle lint` to verify eval-suite existence (PE1) and per-component scenario coverage (PE2). When not installed, plugincraft warns once per workflow invocation and reports PE1/PE2 as `SKIPPED`. Install with: `npm install -g craboodle` (requires Node ≥ 20).
 
 ## Reference Files
 
 | File | Purpose |
 |------|---------|
-| `references/quality-checklist.md` | 34-item validation checklist across 8 categories (PM/PS/PC/PX/PR/MK/PB/PE) |
+| `references/quality-checklist.md` | 33-item validation checklist across 8 categories (PM/PS/PC/PX/PR/MK/PB/PE) |
 | `references/anti-patterns.md` | 14 plugin-level anti-patterns across 4 categories |
 | `references/component-coherence.md` | Detection recipes and fix shapes for the PX category |
 | `references/delegation-map.md` | What plugincraft delegates to upstream tools and what it owns directly |

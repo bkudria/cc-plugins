@@ -86,11 +86,11 @@ After delegations, run only the checklist categories not already covered. From `
 | Plugin README | PR1-PR4 | Existence (covered by pre-flight), sections, env vars, component listing | PR1 from pre-flight; PR2-PR4 here |
 | Marketplace | MK1-MK3 | Listed in `plugins[]` (covered by pre-flight), description matches, source resolves | MK1 from pre-flight; MK2-MK3 here, only when parent marketplace exists |
 | Publish Readiness | PB1-PB4 | Version, license, changelog, install instructions | Plugincraft only |
-| Plugin Evals | PE1-PE2 | Eval suite exists, every declared component has scenario coverage | Plugincraft only — see `references/component-coherence.md` for detection recipes; gated on `craboodle` availability |
+| Plugin Evals | PE1 | Eval suite exists | Plugincraft only — see `references/component-coherence.md` § PE1 for the detection recipe |
 
 For PX, walk every check using the detection recipes in `references/component-coherence.md`. For MK2 specifically, compare the marketplace entry's `description` field byte-for-byte with `plugin.json`'s `description` field.
 
-For PE, first check whether `craboodle` is on `PATH` (`command -v craboodle`). If absent, emit one warning per workflow invocation — `craboodle is not installed; PE (eval coverage) checks skipped. Install with: npm install -g craboodle` — and skip both PE1 and PE2. Report them as `SKIPPED` in Step 6 (neither pass nor fail). When craboodle is installed, walk PE1 then PE2 using the detection recipes in `references/component-coherence.md`. PE2 may report multiple gaps (one per uncovered component); list each as a Warning unless the plugin ships no evals at all, in which case PE1 has already failed Critically and PE2 results are redundant.
+For PE, walk PE1 using the detection recipe in `references/component-coherence.md`. PE1 is a filesystem check — no external tool dependency. A PE1 failure is Critical (the plugin ships no eval suite at all).
 
 ## Step 5: Anti-Pattern Scan
 

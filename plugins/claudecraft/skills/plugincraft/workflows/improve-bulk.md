@@ -34,7 +34,7 @@ Capture each plugin's report in the same structure as `improve-standard.md` Step
 Sort by score ascending (most-troubled first).
 
 For each row:
-- **Score**: count of passed plugincraft checks / total applicable checks for that plugin. MK1-MK3 only count when a parent marketplace.json exists; PB1-PB4 always count; PE1-PE2 count only when `craboodle` is on `PATH` (skipped otherwise).
+- **Score**: count of passed plugincraft checks / total applicable checks for that plugin. MK1-MK3 only count when a parent marketplace.json exists; PB1-PB4 always count; PE1 always counts (filesystem check, no external dependency).
 - **Critical / Warning / Suggestion**: counts from the plugin's `### Issues` section (🔴/🟡/🔵).
 - **Anti-patterns**: count + comma-separated short names of detected anti-patterns.
 
