@@ -39,7 +39,7 @@ Scenario IDs are the directory names under `evals/`. Use descriptive kebab-case 
 
 The scenarios subdirectory is named `evals/` by default. Override with `scenarios.path: <dirname>` in evals.yaml if you need a different name (single directory name only — no slashes, no `.`/`..`).
 
-At run time craboodle stages a filtered view of `<root>` into `$TMPDIR` (excluding the scenarios subdirectory) and points scuttlerun at the staged view. This lets `project.skills: ['.']` in `scenarios.base` cleanly self-reference the skill / plugin at the eval root.
+At run time craboodle stages a filtered view of `<root>` into `$TMPDIR` (excluding the scenarios subdirectory) and points scuttlerun at the staged view. This lets `project.skills: ['.']` (skill roots) or `project.plugins: ['.']` (plugin roots) in `scenarios.base` cleanly self-reference the eval root.
 
 ---
 
@@ -66,7 +66,7 @@ scenarios:
       - TodoWrite
     project:
       skills:
-        - .                       # Self-reference: the eval root is the skill / plugin
+        - .                       # Self-reference: the eval root is the skill (for plugins, use `project.plugins: ['.']` — see config-type-patterns.md)
       claude_md: |
         Use relative paths.
 ```
