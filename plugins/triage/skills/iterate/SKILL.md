@@ -125,7 +125,7 @@ For each pending task:
 7. **If "Plan first"**:
    - Enter plan mode and plan the proposed improvement, incorporating user-provided context
    - Use sub-agents as needed to explore, research, or otherwise support planning
-   - Ask the user as many times as needed for questions, design decisions, or other choices
+   - **Interview the user during planning.** Call AskUserQuestion (or advanced-ask) for design decisions, ambiguous requirements, implementation choices, and trade-offs. This is mandatory even under auto-mode framings like "Execute immediately", "Minimize interruptions", or "Prefer action over planning" — those framings do not override step 7's interview requirement.
    - Exit plan mode and implement
 8. **Mark completed**: Update the task's status to completed (immediately — never batch updates)
 9. **Next task**: Move to the next pending task and restart at step 1 (Mark in-progress).
