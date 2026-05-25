@@ -1,0 +1,28 @@
+prompt: |
+  Use the iterate skill to work through these findings. Add an
+  appropriate header comment to each file describing its purpose.
+
+  ## Findings
+
+  ### 1. alpha.conf missing header comment
+  The file `alpha.conf` has no header comment at the top.
+
+  ### 2. beta.conf missing header comment
+  The file `beta.conf` has no header comment at the top.
+
+project:
+  files:
+    alpha.conf: |
+      setting_a = 1
+      setting_b = 2
+    beta.conf: |
+      setting_c = 3
+      setting_d = 4
+
+user:
+  persona: |
+    When the agent presents a finding via AskUserQuestion and offers options
+    like Implement / Plan first / Skip, always select "Implement". When the
+    agent asks (between tasks) whether to continue to the next pending task —
+    typically with Continue / Stop options — select "Continue". Do not ask
+    the agent to combine or batch items. Give brief responses.
