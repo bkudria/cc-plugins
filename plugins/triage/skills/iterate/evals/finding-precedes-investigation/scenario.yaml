@@ -1,0 +1,26 @@
+prompt: |
+  Use the iterate skill to work through this finding.
+
+  ## Findings
+
+  ### 1. Hardcoded timeout in config loader
+  The `load_config()` function has a hardcoded 30-second timeout that should be
+  configurable via an environment variable (e.g. `MYAPP_CONFIG_TIMEOUT`).
+
+project:
+  files:
+    src/myapp/config.py: |
+      """Config loading."""
+      import os
+
+
+      def load_config(path):
+          """Load config from path."""
+          timeout = 30
+          return {"timeout": timeout, "path": path}
+
+user:
+  persona: |
+    When the agent presents the finding via AskUserQuestion, select "Implement".
+    Keep responses brief. Do not volunteer project context that the agent
+    should discover for itself.

@@ -88,7 +88,10 @@ For each pending task:
      - Paraphrasing the task description instead of reporting current findings
      - Investigating multiple items' concerns in a single burst before the first approval prompt
      - Reusing earlier investigation's findings for the current item without spawning at least one fresh sub-agent since marking it in-progress
-3. **Present the item** — Summarize what was found: the current state, what the proposed change concretely entails, any complications or trade-offs discovered, and an assessment of complexity. This gives the user enough context to make an informed decision.
+3. **Present the item** — Structure the presentation in two parts, in this order:
+   1. **The finding/problem** — re-state the item from the source list in its own framing: what was flagged, why it matters, and the proposed change at a conceptual level. State this *before* any investigation specifics so the user sees "what we're deciding" up front.
+   2. **What the investigation found** — the current state, concrete file paths and values from the sub-agent report(s), complications or trade-offs discovered, and an assessment of complexity.
+
    - **Do NOT announce your intended implementation as a forward-looking plan** — no "I'll change X to Y", "I'm going to edit cli.ts to...", "Next, I will...", or "Let me update that". The presentation reports *findings*, not *intentions*. The user has not approved any action yet, and stating an implementation plan creates implicit pre-approval that bypasses the gate that follows.
    - Describe mechanics in third-person/passive when needed ("the version string would be updated to match package.json", "the fix would replace `console.error` with `process.stderr.write`"), never first-person future tense.
 4. **GATE — Ask the user how to proceed**. This step is non-negotiable.
