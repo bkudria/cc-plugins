@@ -1,10 +1,10 @@
 # Plugin Quality Checklist
 
-34 checks across 8 categories. Each item has: ID, description, pass/fail criteria, fix guidance.
+33 checks across 8 categories. Each item has: ID, description, pass/fail criteria, fix guidance.
 
 Apply all checks when running a full audit. For lightweight mode, apply only PM1, PM2, PS1, PS2, PR1, and (when a parent marketplace.json exists) MK1.
 
-Delegations: PC checks are intentionally light because Anthropic's `plugin-dev` plugin's `plugin-validator` agent covers component-level depth. The `improve-standard` workflow runs `plugin-validator` first and reports its findings under PC; this checklist treats PC as a smoke layer. PE checks are gated on `craboodle` being installed; when absent, PE is skipped with a one-time warning and the audit continues.
+Delegations: PC checks are intentionally light because Anthropic's `plugin-dev` plugin's `plugin-validator` agent covers component-level depth. The `improve-standard` workflow runs `plugin-validator` first and reports its findings under PC; this checklist treats PC as a smoke layer.
 
 ---
 
@@ -236,18 +236,12 @@ These checks gate the decision to publish a plugin to a shared marketplace or wi
 
 ---
 
-## Plugin Evals (PE1-PE2)
+## Plugin Evals (PE1)
 
-These checks gate on `craboodle` being installed (a soft dependency, like `plugin-dev`). When craboodle is absent, PE checks are skipped with a one-time warning and the audit continues. See `references/delegation-map.md` for the soft-dependency contract and `references/component-coherence.md` § PE1/PE2 for detection recipes.
+PE1 is a filesystem check; it does not require external tools. See `references/component-coherence.md` § PE1 for the detection recipe.
 
 ### PE1: Plugin Has Eval Suite
 - **Check**: Plugin has `evals.yaml` at the plugin root and at least one `evals/<id>/scenario.yaml`
 - **Pass**: Eval suite scaffolded with at least one real scenario
 - **Fail**: No `evals.yaml`, or no `evals/<id>/scenario.yaml` files (only the bare scaffold)
 - **Fix**: Bootstrap evals via `workflows/bootstrap-evals.md` (delegate: `Skill tool: load plugincraft` then follow the 10-step bootstrap)
-
-### PE2: Every Declared Component Has Scenario Coverage
-- **Check**: Every plugin component declared by the filesystem (skills, agents, commands, hooks, mcp_servers) is exercised by at least one scenario. Verified by running `craboodle lint` and inspecting the `plugin_coverage:` block — every per-component count must be non-zero.
-- **Pass**: Every declared component appears with a non-zero count in `plugin_coverage`
-- **Fail**: One or more components show count `0` (declared but never tested). Example: `plugin_coverage.skills.foo: 0` means `skills/foo/SKILL.md` exists but no scenario `id` matches `skill-foo` or starts with `skill-foo-`.
-- **Fix**: Add a scenario per uncovered component, named `<type>-<id>` (e.g., `skill-foo`) or `<type>-<id>-<suffix>` (e.g., `skill-foo-basic`). For singletons use `hooks` / `hooks-<suffix>` or `mcp` / `mcp-<suffix>`. Then re-run `craboodle lint`. The naming convention is what links a scenario to a component.
