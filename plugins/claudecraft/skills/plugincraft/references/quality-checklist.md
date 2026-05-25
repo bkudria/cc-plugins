@@ -1,10 +1,10 @@
 # Plugin Quality Checklist
 
-34 checks across 8 categories. Each item has: ID, description, pass/fail criteria, fix guidance.
+33 checks across 8 categories. Each item has: ID, description, pass/fail criteria, fix guidance.
 
 Apply all checks when running a full audit. For lightweight mode, apply only PM1, PM2, PS1, PS2, PR1, and (when a parent marketplace.json exists) MK1.
 
-Delegations: PC checks are intentionally light because Anthropic's `plugin-dev` plugin's `plugin-validator` agent covers component-level depth. The `improve-standard` workflow runs `plugin-validator` first and reports its findings under PC; this checklist treats PC as a smoke layer. PE checks are gated on `craboodle` being installed; when absent, PE is skipped with a one-time warning and the audit continues.
+Delegations: PC checks are intentionally light because Anthropic's `plugin-dev` plugin's `plugin-validator` agent covers component-level depth. The `improve-standard` workflow runs `plugin-validator` first and reports its findings under PC; this checklist treats PC as a smoke layer.
 
 ---
 
