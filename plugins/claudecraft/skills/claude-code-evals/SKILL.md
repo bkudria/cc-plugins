@@ -1,6 +1,6 @@
 ---
 name: claude-code-evals
-description: "Evaluate Claude Code configurations (skills, CLAUDE.md, hooks, MCP servers, settings, sub-agents) using the scuttlerun/pincenez/craboodle eval pipeline. Use when evaluating a configuration, writing eval scenarios, designing checks, interpreting eval results, benchmarking configurations, testing CLAUDE.md effectiveness, verifying hooks work, regression testing configs, or building an eval suite."
+description: "MANDATORY load before writing or editing any eval scenario (scenario.yaml), check (checks.yaml), or evals.yaml — wherever the eval suite lives. Evaluate Claude Code configurations (skills, CLAUDE.md, hooks, MCP servers, settings, sub-agents) using the scuttlerun/pincenez/craboodle eval pipeline. TRIGGER when: authoring or modifying scenario.yaml or checks.yaml files; designing checks; interpreting eval results; benchmarking configurations; testing CLAUDE.md effectiveness; verifying hooks work; regression testing configs; building or extending an eval suite. DO NOT skip because 'I'll consult check-design.md directly' or 'one quick check edit' — load first, the schema and anti-pattern rules are cheap to surface."
 ---
 
 # Claude Code Evals
