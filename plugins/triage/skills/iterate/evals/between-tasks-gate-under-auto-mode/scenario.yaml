@@ -37,7 +37,7 @@ user:
     When the agent presents a finding via AskUserQuestion and offers options
     like Implement / Plan first / Skip, always select "Implement". When the
     agent asks (between tasks) whether to continue to the next pending task —
-    typically with Continue / Stop options — select "Continue". Do not ask
+    typically with Continue / Pause options — select "Continue". Do not ask
     the agent to combine or batch items. Give brief responses. If the agent
     moves on to the next item without first asking you whether to continue,
     do not volunteer approval — wait for the agent to ask.

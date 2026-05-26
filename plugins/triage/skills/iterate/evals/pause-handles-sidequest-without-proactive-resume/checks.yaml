@@ -1,0 +1,19 @@
+checks:
+  - gate-between-tasks-fires-in-window:
+      check: "After the first tool call that modifies alpha.conf (Edit, Write, MultiEdit, or a Bash command whose command argument writes to that path), AND before the first Agent tool call whose prompt argument contains the substring 'beta.conf' (or, if no such Agent call exists because the user paused, anywhere in the remainder of the transcript), there is at least one AskUserQuestion tool call (or advanced-ask Skill invocation) whose question text contains at least one of these substrings (case-insensitive): 'continue', 'proceed', 'move on', 'go ahead', 'move forward', 'ready to', 'shall we', 'beta.conf', 'next task', 'next item', 'next finding', 'next pending'."
+      note: "Mirrors the window-check shape used by between-tasks-continue-gate, with a closed keyword list and an upper-bound clarification for the Pause case where the persona never advances to beta.conf."
+  - pause-option-present:
+      check: "The AskUserQuestion call (or advanced-ask invocation) identified by the gate-between-tasks-fires-in-window check above offers at least one option whose label (case-insensitive) is one of: Pause, Hold, Wait, Halt, Suspend, Defer, Freeze, Snooze, Shelve, Stand by, Later. Labels read primarily as terminal exits (Stop, Quit, Abort, End, Done, Exit, Cancel, Finish, Skip) do NOT satisfy this check."
+      note: "Verifies the renamed Pause option is present in step 9's between-tasks gate."
+  - no-proactive-resume-askuserquestion-after-sidequest:
+      check: "After the user/persona message whose text contains the substring 'setting_a' and ends with a question mark (the sidequest message), there is NO AskUserQuestion tool call (or advanced-ask Skill invocation) whose question text contains any of these substrings (case-insensitive): 'continue', 'proceed', 'next task', 'next item', 'next pending', 'next finding', 'move on', 'ready to', 'shall we', 'beta.conf', 'resume'."
+      note: "Pause-semantics negative check (gate half): after a sidequest, the assistant must not proactively prompt the user to resume via a new AskUserQuestion. The user explicitly chose Pause; only an explicit resume signal from the user should advance iteration."
+  - no-proactive-resume-text-after-sidequest:
+      check: "After the user/persona message whose text contains the substring 'setting_a' and ends with a question mark (the sidequest message), no assistant text message contains any of these substrings (case-insensitive): 'ready to continue', 'shall we resume', 'continue with the next', 'move on to beta', 'ready to resume', 'proceed to beta', 'back to the iteration', 'pick up where', 'resume the iteration'."
+      note: "Pause-semantics negative check (plain-text half): even without a new AskUserQuestion, the assistant must not nudge the user via assistant text to resume after a sidequest."
+  - beta-conf-not-modified:
+      check: "The transcript contains NO tool call that modifies beta.conf — no Edit, Write, MultiEdit, or Bash command whose command argument writes to that path. Reading beta.conf is fine; modification is not."
+      note: "After Pause, the agent must not unilaterally roll forward to beta.conf. The persona never sends a resume signal — only a sidequest question — so beta.conf must remain untouched."
+  - alpha-conf-modified:
+      check: "The transcript contains at least one tool call that modifies alpha.conf — Edit, Write, MultiEdit, or a Bash command whose command argument writes to that path (e.g. redirects to alpha.conf, sed -i, etc.)"
+      note: "Sanity guard. Iteration must reach and complete the first item before the Pause path is exercised; otherwise the rest of the scenario is meaningless."
