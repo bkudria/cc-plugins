@@ -62,8 +62,9 @@ When loaded during editing of any file within a skill directory, apply only thes
 3. If evals exist but no scenario covers the behavior being changed: draft and add 1 scenario targeting that behavior; present to user for approval
 4. Run edit-relevant scenario(s) with the current skill loaded; capture output as pre-edit snapshot
 5. **NOW** make the edits
-6. Re-run the same scenarios; confirm intended improvement without regression
-7. If fixing a reported bug, include a scenario that reproduces the original bug pre-edit
+6. **Re-lint before re-running.** If the edits in step 5 touched any eval file (`evals/*/scenario.yaml`, `evals/*/checks.yaml`, or `evals.yaml`), run `craboodle lint <skill-dir>` and confirm clean output before proceeding to step 7. A "lint clean enough" judgment is not sufficient — the post-edit lint must be run and pass. If edits were limited to skill files (SKILL.md, references, scripts, workflows), this step may be skipped.
+7. Re-run the same scenarios; confirm intended improvement without regression
+8. If fixing a reported bug, include a scenario that reproduces the original bug pre-edit
 
 **Red flags — STOP if you catch yourself doing any of these before step 5:**
 - Listing or analyzing what needs to change
