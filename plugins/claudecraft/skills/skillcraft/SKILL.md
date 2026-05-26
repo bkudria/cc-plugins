@@ -19,6 +19,31 @@ Create, audit, improve, and update Claude Code skills.
 - Integrating content from external sources into existing skills
 - Updating skills from upstream sources
 
+## Bulletproofing Against Late Load
+
+**Violating the letter of the rule is violating the spirit.** The MANDATORY load above is not satisfied by "I'm about to load it" or "I'll load before the next Read." It is satisfied by issuing the `Skill` tool call to load skillcraft *before* any `Read`, `Edit`, `Write`, `Glob`, or `Grep` targeting a skill file.
+
+### Red flags — STOP if you catch yourself doing any of these
+
+- Reading `SKILL.md` "just to understand the layout" before loading skillcraft
+- Reading any `evals/`, `scripts/`, `workflows/`, or `references/` file under a skill directory before loading skillcraft
+- "I'll load skillcraft once I know what I'm changing"
+- "The user already described the change; loading skillcraft now would be redundant"
+- "I already loaded testing-strategy / another skill, that's the same discipline"
+- Treating an `AskUserQuestion` clarification round as a substitute for loading
+
+**All of these mean: invoke `Skill skillcraft` (or `Skill claudecraft:skillcraft`) NOW, before the next tool call.**
+
+### Rationalizations
+
+| Excuse | Reality |
+|--------|---------|
+| "It's only a Read, not an Edit" | The rule is `Read/Edit/Write`. Reads count. |
+| "I'll load after the user clarifies the scope" | Lightweight Mode checks help shape the clarification. Load first. |
+| "Loading skillcraft auto-fires from description anyway" | Auto-trigger is best-effort, not guaranteed. If it didn't fire, that's exactly when you load it manually. |
+| "Just one Read to check the path exists" | One Read becomes eight. The first Read is the slip. |
+| "I'm only auditing, not editing" | Auditing is a skillcraft Improve-mode operation. Load first. |
+
 ## Modes
 
 | Mode | Trigger | Workflow |
