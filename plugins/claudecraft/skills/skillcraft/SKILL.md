@@ -88,7 +88,7 @@ When loaded during editing of any file within a skill directory, apply only thes
    **GATE — Load `claude-code-evals` before drafting the scenario.** Drafting a scenario requires check design rules and scenario schema knowledge from the `claude-code-evals` skill. Use the Skill tool to load it now. Do NOT begin drafting until it is loaded. Loading `claude-code-evals` is not the same as having read `references/check-design.md § Pre-Write Checklist` and `§ Common Slips` — if those sections are not in this session's context, Read them before writing any check. Then draft and add 1 scenario targeting that behavior; present to user for approval.
 4. Run edit-relevant scenario(s) with the current skill loaded; capture output as pre-edit snapshot
 5. **NOW** make the edits
-6. **Re-lint before re-running.** If the edits in step 5 touched any eval file (`evals/*/scenario.yaml`, `evals/*/checks.yaml`, or `evals.yaml`), run `craboodle lint <skill-dir>` and confirm clean output before proceeding to step 7. A "lint clean enough" judgment is not sufficient — the post-edit lint must be run and pass. If edits were limited to skill files (SKILL.md, references, scripts, workflows), this step may be skipped.
+6. **Re-lint before re-running.** If the edits in step 5 touched any eval file (`evals/*/scenario.yaml`, `evals/*/checks.yaml`, or `evals.yaml`), re-lint the touched scenario(s): `craboodle lint --scenario <id> <skill-dir>` (or `--scenario <id1>,<id2>` for multiple). Confirm clean output before proceeding to step 7. A "lint clean enough" judgment is not sufficient — the post-edit lint must be run and pass. Scope to the touched scenarios so pre-existing anti-patterns in untouched scenarios don't drown the actionable signal. If edits were limited to skill files (SKILL.md, references, scripts, workflows), this step may be skipped.
 7. Re-run the same scenarios; confirm intended improvement without regression
 8. If fixing a reported bug, include a scenario that reproduces the original bug pre-edit
 
@@ -104,7 +104,7 @@ When loaded during editing of any file within a skill directory, apply only thes
 
 **Lint validates form; run validates substance.** Evals that pass lint but have never been run have the same evidentiary value as tests that have never been executed.
 
-1. **During authoring**: use `craboodle lint` to iterate on check quality (cheap, no LLM agent sessions)
+1. **During authoring**: use `craboodle lint --scenario <id> <skill-dir>` to iterate on check quality on just the scenario being authored (cheap, no LLM agent sessions). For a final full-suite sweep, drop `--scenario` and lint the whole `<skill-dir>`.
 2. **Smoke test**: run `craboodle run --repeats 1 --scenario <one-scenario> <skill-dir>/evals` to catch fundamental config/check mismatches early (~1-2 min)
 3. **Before declaring done**: run `craboodle run <skill-dir>/evals` — full suite, default repetitions
 4. Review craboodle's YAML output and exit code (0 = pass, 3 = below `min_pass_rate`)
