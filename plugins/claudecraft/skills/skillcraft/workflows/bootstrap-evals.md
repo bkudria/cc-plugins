@@ -120,15 +120,17 @@ craboodle lint <skill-dir>/evals
 
 Confirm zero issues across the full suite. If the incremental lint in Step 6 was clean, this should pass on the first run.
 
-## Step 8: First Run
+## Step 8: Full Run
 
-**GATE — Lint validates form; run validates substance. Do NOT report completion or present a final summary until a run has completed and results are reviewed.**
+**GATE — Lint validates form; run validates substance. Do NOT report completion or present a final summary until a full-reps run has completed and results are reviewed.**
 
 ```bash
-craboodle run --repeats 1 <skill-dir>/evals
+craboodle run <skill-dir>/evals
 ```
 
-Review the output. If all scenarios pass, proceed to Final Report. If failures occur, continue to Step 9.
+This uses default repetitions (3). A `craboodle run --repeats 1 <skill-dir>/evals` smoke is allowed during authoring as a fast pre-check, but **does not satisfy this gate** — the Final Report is filed against the full-reps run.
+
+Review the output. If all scenarios pass at default reps, proceed to Final Report. If failures occur, continue to Step 9.
 
 ## Step 9: Iterate
 

@@ -272,9 +272,9 @@ When a skill has no `evals/` at all, follow `workflows/bootstrap-evals.md` (9 st
 **Edit-triggered shortcuts** (optional when Lightweight Mode has already surfaced the change to be tested):
 
 - **Skip Step 4 interview question 2** ("What behaviors are most critical?") — the edit itself specifies the critical behavior.
-- **Use `--repeats 1`** for the first run (Step 8) to calibrate fast, then expand reps before declaring done.
+- **`--repeats 1` is allowed as a fast pre-check** during authoring (cheap calibration), but does not satisfy Step 8. The bootstrap is not complete until Step 8's full-reps run has been completed.
 
-Do NOT skip Step 7 (Lint) or Step 8 (First Run). Lint is ~15s and prevents anti-patterns from wasting run cost; a skipped run means untested evals, which the Iron Law prohibits.
+Do NOT skip Step 7 (Lint) or Step 8 (Full Run). Lint is ~15s and prevents anti-patterns from wasting run cost; the Iron Law requires a full-reps run before completion — a `--repeats 1` smoke alone does not satisfy it.
 
 ### Tier 2: Edit-Specific Scenario
 
@@ -301,7 +301,7 @@ This replaces informal "run 1-2 scenarios" with structured, repeatable eval exec
 
 To minimize bootstrap time:
 - Accept proposed scenarios without modification (skip interview question 2 of the workflow's Step 4).
-- Run `craboodle run --repeats 1` on the first pass to calibrate fast, then expand reps before declaring done.
-- Minimum viable bootstrap: ~5 minutes for Tier 3.
+- `craboodle run --repeats 1` is allowed on a first pass to calibrate fast, but does not satisfy Step 8's gate — a full-reps `craboodle run` must complete before the bootstrap is done.
+- Minimum viable bootstrap: ~5 minutes for Tier 3 with the pre-check; the full-reps run runs in addition.
 
-The Iron Law still applies: lint and at least one run must happen before the edit is considered complete.
+The Iron Law still applies: lint and at least one full-reps run must happen before the edit is considered complete.
