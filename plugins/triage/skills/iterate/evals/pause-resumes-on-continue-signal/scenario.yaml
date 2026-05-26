@@ -24,5 +24,7 @@ user:
     When the agent presents a finding via AskUserQuestion and offers options
     like Implement / Plan first / Skip, always select "Implement". When the
     agent asks (between tasks) whether to continue to the next pending task —
-    typically with Continue / Pause options — select "Continue". Do not ask
-    the agent to combine or batch items. Give brief responses.
+    typically with Continue / Pause options — select "Pause". After selecting
+    Pause, your very next message must be the single word "continue" with no
+    other text. At beta.conf's per-item gate that follows, select "Implement".
+    Do not ask the agent to combine or batch items. Give brief responses.

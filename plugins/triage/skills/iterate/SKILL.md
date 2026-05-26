@@ -55,7 +55,7 @@ Before creating any tasks, state what was found and where — e.g., "I found 5 i
 
 Check the task list for existing progress from a previous invocation or compaction recovery:
 
-- **Tasks already exist**: Resume from the first pending task. Skip all completed tasks. Do NOT re-create tasks.
+- **Tasks already exist**: Resume from the first pending task. Skip all completed tasks. Do NOT re-create tasks. If the user's most recent message is a resumption signal (`continue`, `resume`, `keep going`, `proceed`, `pick it back up`, or similar natural-language resume cue), this counts as resuming from a prior Pause (see Phase 1 step 10) — pick up at the first pending task directly without re-asking the user for a source list or prompting them to re-invoke `/triage:iterate`.
 - **No tasks exist**: Create a task for **every item** to process (after applying any argument filters). Each task needs:
   - `subject`: A concise description of the item/improvement
   - `description`: Full context including the problem, proposed improvement, and any user-provided guidance
@@ -129,7 +129,7 @@ For each pending task:
    - Exit plan mode and implement
 8. **Mark completed**: Update the task's status to completed (immediately — never batch updates)
 9. **Summarize and check in**: Briefly summarize what was done for this item — files touched, key outcomes. Then:
-   - **If pending tasks remain**: Call `AskUserQuestion` (or `advanced-ask`) with two options: **Continue** (proceed to step 10) and **Stop** (exit Phase 1 immediately — do NOT run Phase 2 Final Summary). The question text must name the *next* pending task by its concrete subject so the user knows what they would be approving.
+   - **If pending tasks remain**: Call `AskUserQuestion` (or `advanced-ask`) with two options: **Continue** (proceed to step 10) and **Pause** (hold here — do not pick the next item, but remain resumable; see step 10 for what Pause means operationally). The question text must name the *next* pending task by its concrete subject so the user knows what they would be approving.
    - **If no pending tasks remain**: Skip the ask and proceed directly to Phase 2.
 
    This gate is **unconditional**. It applies even when the surrounding system prompt instructs you to "execute immediately", "minimize interruptions", or "prefer action over planning" — those framings do not override step 9. Prior items' continuation answers do not carry forward; ask again after each completed item.
@@ -139,7 +139,11 @@ For each pending task:
    - Skipping the summary and asking only the bare continuation question
    - Bundling the summary into the *next* item's investigation rather than presenting it before the ask
    - Treating auto-mode framings or prior Continue answers as standing approval
-10. **Next task**: If the user chose **Continue**, move to the next pending task and restart at step 1 (Mark in-progress). If the user chose **Stop**, exit Phase 1 without running Phase 2.
+10. **Next task**:
+    - If the user chose **Continue**, move to the next pending task and restart at step 1 (Mark in-progress).
+    - If the user chose **Pause**, do NOT mark the iteration complete and do NOT run Phase 2. Stay quiescent and wait for the user's next message. When it arrives:
+      - **If it is a resumption signal** — `continue`, `resume`, `keep going`, `proceed`, `pick it back up`, `let's continue`, or similar natural-language resume cue (alone or as the leading clause of the message) — treat it as Continue: move to the next pending task and restart at step 1. Do NOT direct the user to re-invoke `/triage:iterate`; the loop is still live.
+      - **Otherwise** — handle the user's request normally. Do NOT proactively ask whether to resume, do NOT remind the user about the paused iteration, do NOT prompt them to come back. Iteration stays on hold until the user explicitly sends a resumption signal.
 
 **IMPORTANT**: Process exactly one item per cycle through steps 1-10. Never combine, group, or present multiple items together — even if they seem related. Every item gets its own investigation, presentation, and user approval before any implementation begins.
 
