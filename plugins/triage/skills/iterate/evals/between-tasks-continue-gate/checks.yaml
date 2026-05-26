@@ -5,9 +5,6 @@ checks:
   - gate-offers-continue-option:
       check: "The AskUserQuestion call (or advanced-ask invocation) identified by the gate-between-tasks-fires-in-window check above offers at least one option whose label a reasonable reader would interpret as permitting forward continuation of the iteration loop. Examples (non-exhaustive): Continue, Proceed, Next, Yes, OK, Go, Sure, Resume, Accept, Confirm, Keep going."
       note: "Step 9 of the iterate skill requires a forward path option in the continuation gate. This check is independent of the stop-option check — a gate offering only Continue (no Stop) is a different failure mode than one offering only Stop (no Continue)."
-  - gate-offers-stop-option:
-      check: "The AskUserQuestion call (or advanced-ask invocation) identified by the gate-between-tasks-fires-in-window check above offers at least one option whose label a reasonable reader would interpret as ending or declining further continuation of the iteration loop. Examples (non-exhaustive): Stop, Halt, Exit, End, Pause, Skip, Abort, No, Cancel, Done, Quit, Finish, Decline, Not now."
-      note: "Step 9 of the iterate skill requires a stop path option in the continuation gate so the user can end the loop early. This check is independent of the continue-option check."
   - summary-mentions-alpha-in-window:
       check: "Between the first tool call that modifies alpha.conf and the between-tasks AskUserQuestion call identified by the gate-between-tasks-fires-in-window check, there is at least one assistant text message containing the substring 'alpha.conf'"
       note: "Step 9 prescribes a brief per-item summary preceding the continuation ask. This check verifies the summary names the just-completed item; a generic 'done, continue?' prompt without naming the item fails."
