@@ -86,10 +86,15 @@ When loaded during editing of any file within a skill directory, apply only thes
 2. If NO evals exist: **STOP.** Run the Bootstrap Evals workflow (`workflows/bootstrap-evals.md`) before proceeding. After bootstrap completes, return here and continue from step 3.
 3. If evals exist but no scenario covers the behavior being changed:
    **GATE — Load `claude-code-evals` before drafting the scenario.** Drafting a scenario requires check design rules and scenario schema knowledge from the `claude-code-evals` skill. Use the Skill tool to load it now. Do NOT begin drafting until it is loaded. Loading `claude-code-evals` is not the same as having read `references/check-design.md § Pre-Write Checklist` and `§ Common Slips` — if those sections are not in this session's context, Read them before writing any check. Then draft and add 1 scenario targeting that behavior; present to user for approval.
-4. Run edit-relevant scenario(s) with the current skill loaded; capture output as pre-edit snapshot
+4. **Capture the pre-edit snapshot.** Snapshots are ephemeral (kept only for the duration of this edit; never committed). Create a per-edit directory so repeated edits in the same session do not collide:
+   ```bash
+   SNAP=$(mktemp -d -t <skill-name>-snap)
+   craboodle run --scenario <id> <skill-dir> > "$SNAP/pre.yaml"
+   ```
+   `$SNAP` holds both snapshots for this edit; the next edit gets a fresh `$SNAP`. Another paired-path convention is acceptable as long as pre and post are paired and never overwrite a prior edit's snapshots.
 5. **NOW** make the edits
 6. **Re-lint before re-running.** If the edits in step 5 touched any eval file (`evals/*/scenario.yaml`, `evals/*/checks.yaml`, or `evals.yaml`), re-lint the touched scenario(s): `craboodle lint --scenario <id> <skill-dir>` (or `--scenario <id1>,<id2>` for multiple). Confirm clean output before proceeding to step 7. A "lint clean enough" judgment is not sufficient — the post-edit lint must be run and pass. Scope to the touched scenarios so pre-existing anti-patterns in untouched scenarios don't drown the actionable signal. If edits were limited to skill files (SKILL.md, references, scripts, workflows), this step may be skipped.
-7. Re-run the same scenarios; confirm intended improvement without regression
+7. **Re-run and compare; confirm intended improvement without regression.** Re-run the same scenarios and write the second run to `$SNAP/post.yaml`. Compare with `diff "$SNAP/pre.yaml" "$SNAP/post.yaml"` (or open both side-by-side). No numerical threshold is mandated — record a one-line verdict identifying which scenario(s) improved and confirming no other scenario regressed. Both snapshots must exist on disk at the moment of judgment; a judgment made without re-reading the pre-edit snapshot is not a comparison.
 8. If fixing a reported bug, include a scenario that reproduces the original bug pre-edit
 
 **Red flags — STOP if you catch yourself doing any of these before step 5:**

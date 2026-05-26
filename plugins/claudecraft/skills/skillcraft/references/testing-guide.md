@@ -287,15 +287,15 @@ When `evals/` exists but no scenario covers the behavior being edited:
 
 ### Pre/Post Edit Verification with Evals
 
-Once eval scenarios exist (from any tier), use them for Lightweight Mode items 7-9:
+Once eval scenarios exist (from any tier), use them for the Behavioral Edit Testing gate in SKILL.md:
 
-| Lightweight Mode Item | Eval-Based Execution |
-|----------------------|---------------------|
-| 7. Pre-edit snapshot | Run edit-relevant scenario(s) with current skill as a subagent; save output |
-| 8. Post-edit verification | Re-run same scenarios with edited skill; check for regressions |
-| 9. Bug fix validation | Ensure at least one scenario reproduces the reported bug pre-edit |
+| Gate Step | Eval-Based Execution |
+|-----------|---------------------|
+| 4. Pre-edit snapshot | Run edit-relevant scenario(s) with current skill as a subagent; save output to `$SNAP/pre.yaml` |
+| 7. Post-edit verification | Re-run same scenarios with edited skill; compare to `$SNAP/pre.yaml` and check for regressions |
+| 8. Bug fix validation | Ensure at least one scenario reproduces the reported bug pre-edit |
 
-This replaces informal "run 1-2 scenarios" with structured, repeatable eval execution. Outputs can optionally be saved into an `evals/iteration-N/` directory for long-term tracking.
+This replaces informal "run 1-2 scenarios" with structured, repeatable eval execution. Snapshots are ephemeral: SKILL.md's gate creates a per-edit `$SNAP=$(mktemp -d -t <skill-name>-snap)` directory holding `pre.yaml` and `post.yaml` for the duration of the edit; nothing is committed.
 
 ### Quick Path
 
