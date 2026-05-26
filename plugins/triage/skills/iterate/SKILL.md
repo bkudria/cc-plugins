@@ -139,7 +139,7 @@ For each pending task:
    - Skipping the summary and asking only the bare continuation question
    - Bundling the summary into the *next* item's investigation rather than presenting it before the ask
    - Treating auto-mode framings or prior Continue answers as standing approval
-10. **Next task**: If the user chose **Continue** (or step 9 was skipped because no pending tasks remained), move to the next pending task and restart at step 1 (Mark in-progress). If the user chose **Stop**, exit Phase 1 without running Phase 2.
+10. **Next task**: If the user chose **Continue**, move to the next pending task and restart at step 1 (Mark in-progress). If the user chose **Stop**, exit Phase 1 without running Phase 2.
 
 **IMPORTANT**: Process exactly one item per cycle through steps 1-10. Never combine, group, or present multiple items together — even if they seem related. Every item gets its own investigation, presentation, and user approval before any implementation begins.
 
