@@ -46,9 +46,10 @@ For each skill:
 
 1. Check whether the skill already has an `evals/` directory with real scenarios. If yes, skip.
 2. If not, invoke `skillcraft/workflows/bootstrap-evals.md` against the skill directory (`<plugin-root>/skills/<skill-name>`).
-3. Capture the resulting per-skill suite location for the Final Report.
+3. Verify skillcraft's Final Report shows `Lint: PASS` and `Run: PASS (exit code 0)`. If the report shows `Run: FAIL (exit code 3)` or is absent, return to skillcraft's Step 9 (Iterate) for that skill before continuing. Do not advance to Step 4 with a failing per-skill suite.
+4. Capture both the per-skill suite location AND the verified `Lint: PASS / Run: PASS` signals for this plugin's Final Report.
 
-Per-skill suites should exist before bundle scenarios are designed — failing skill suites would mask bundle-level failures and make Step 10 diagnosis ambiguous. If the user wants to defer per-skill bootstrap (e.g., they just want plugin-bundle coverage), note this in the Final Report under "Components Exercised" so reviewers know skill-internal coverage is incomplete.
+**Per-skill suites are a prerequisite for Step 4.** Failing skill suites would mask bundle-level failures and make Step 10 diagnosis ambiguous. If a deferral is needed (e.g., the user explicitly wants plugin-bundle-only coverage), the deferral must be acknowledged before Step 3 begins — surface it during Step 1's target selection or plan review — and recorded as a known coverage gap in the Final Report under "Components Exercised," enumerating the specific skills whose suites are deferred. A post-hoc note added after attempting (and failing) delegation does not satisfy this gate.
 
 ## Step 4: Propose Bundle Scenarios
 
