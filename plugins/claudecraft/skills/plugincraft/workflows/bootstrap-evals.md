@@ -20,8 +20,8 @@ If `$ARGUMENTS` specifies a plugin name or path, use it. Otherwise pick a plugin
 Search roots for resolution: current working tree's `plugins/*/`, `~/.claude/plugins/marketplaces/*/plugins/*/`.
 
 Check the plugin's `evals/` directory status:
-- **No `evals/` directory** — proceed to Step 2.
-- **`evals/` exists but contains only `evals.yaml` (from `craboodle init`)** — proceed to Step 2; Step 6 will use the existing scaffold.
+- **No `evals/` directory and no `evals.yaml`** — proceed to Step 2.
+- **`evals.yaml` at plugin root + `evals/<component>-placeholder/` directories (from `craboodle init`)** — proceed to Step 2; Step 6 will reuse the existing scaffold.
 - **`evals/` exists with real scenario directories** (`evals/<id>/scenario.yaml` files with non-placeholder prompts) — this workflow does not apply; you are extending an existing suite, not bootstrapping. Add scenarios incrementally, applying the Step 7 GATE per new scenario.
 
 ## Step 2: Catalog Components
@@ -95,11 +95,11 @@ The agent-under-test `model:` determines what your evals measure. Haiku (scuttle
 craboodle init <plugin-root>
 ```
 
-`craboodle init` auto-detects plugin mode (presence of `.claude-plugin/plugin.json`) and writes `<plugin-root>/evals/evals.yaml` with `version: "1"`, commented pipeline knobs (`min_pass_rate`, `max_budget_usd`, `repeats`, `artifact_retention_days`), and a commented `scenarios.base` template that includes a `plugins: ['.']` self-reference under `scenarios.base.project`.
+`craboodle init` auto-detects plugin mode (presence of `.claude-plugin/plugin.json`) and writes `<plugin-root>/evals.yaml` with `version: "1"`, commented pipeline knobs (`min_pass_rate`, `max_budget_usd`, `repeats`, `artifact_retention_days`), and a commented `scenarios.base` template that includes a commented `plugins:` / `- .` self-reference under `scenarios.base.project`. In plugin mode, init also writes one `evals/<component>-placeholder/` directory per cataloged component as starter scaffolding.
 
 Then:
 
-1. **Uncomment `scenarios.base.project.plugins`** — the init scaffold has placed a commented `plugins: ['.']` hint; remove the leading `#` characters to activate it. This loads the entire plugin (skills + hooks + sub-agents + MCP servers + commands) into every scenario. `project.plugins` is the canonical caller surface; `sdk.plugins` is the raw SDK escape hatch. Run `scuttlerun --help` for the full field reference and for the precedence between `project.plugins` and `sdk.plugins`.
+1. **Uncomment `scenarios.base.project.plugins`** — the init scaffold has placed a commented `plugins:` hint with `- .` underneath; remove the leading `#` characters from both lines to activate it. This loads the entire plugin (skills + hooks + sub-agents + MCP servers + commands) into every scenario. `project.plugins` is the canonical caller surface; `sdk.plugins` is the raw SDK escape hatch. Run `scuttlerun --help` for the full field reference and for the precedence between `project.plugins` and `sdk.plugins`.
 2. **Optionally add `project.skills`** — the init scaffold no longer emits a `skills:` hint in plugin mode. If a per-skill self-reference is needed alongside the bundle load (rare), add a `skills:` block under `scenarios.base.project` pointing at the specific skill (e.g. `skills/<id>`).
 3. **Fill in `scenarios.base.tools`** — the `tools:` array must include both scuttlerun's defaults (run `scuttlerun --help` for the current list) **plus** any tools the plugin's components require (e.g., `Agent` for plugins with sub-agents, `mcp__*` names for MCP-provided tools). Listing your additions alone replaces the defaults rather than extending them; use `additional_tools:` if you want extension semantics.
 4. **Edit the pipeline knobs in `evals.yaml` (top level)** — uncomment `min_pass_rate` and set a reachable value. Reachable pass rates are `k/(checks × reps)`; e.g. with 3 checks × 1 rep the only reachable values are `{0, 0.33, 0.67, 1.0}`, so `0.8` would collapse to requiring a perfect `1.0`.
