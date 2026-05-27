@@ -1,6 +1,6 @@
 ---
 name: plugincraft
-description: "MANDATORY load before any Read/Edit/Write to plugin content — plugin.json, marketplace.json, files under commands/, agents/, skills/, hooks/, or .mcp.json — regardless of where the plugin lives (personal ~/.claude/plugins/, marketplace-installed, or project-local). Creates, audits, ships, and maintains Claude Code plugins; manages marketplace entries; validates publish readiness. TRIGGER when: editing/creating/reviewing plugin.json or marketplace.json; creating a new plugin; auditing or improving a plugin; regenerating a marketplace; preparing a plugin to publish; bulk-auditing every installed plugin. DO NOT skip because \"it's only a manifest tweak\" — load first, lightweight checks are cheap."
+description: "MANDATORY load before any Read/Edit/Write to plugin content — plugin.json, marketplace.json, files under commands/, agents/, skills/, hooks/, or .mcp.json — regardless of where the plugin lives (personal ~/.claude/plugins/, marketplace-installed, or project-local). Creates, audits, ships, and maintains Claude Code plugins; manages marketplace entries; validates publish readiness. TRIGGER when: editing/creating/reviewing plugin.json or marketplace.json; creating a new plugin; auditing or improving a plugin; regenerating a marketplace; preparing a plugin to publish; bulk-auditing every installed plugin; bootstrapping evals for a plugin. DO NOT skip because \"it's only a manifest tweak\" — load first, lightweight checks are cheap."
 argument-hint: "[plugin name, path, or 'marketplace']"
 ---
 
@@ -25,10 +25,11 @@ Create, audit, ship, and maintain Claude Code plugins.
 | Create | `/plugincraft` or `/plugincraft <name>`, or "create a plugin" | (coming in PR 3 — falls back to inline guidance) |
 | Improve | `/plugincraft --improve [path]`, or "audit/improve a plugin" | `workflows/improve-standard.md` |
 | Bulk Audit | `/plugincraft --all`, or "audit all my plugins" | `workflows/improve-bulk.md` |
+| Bootstrap Evals | "add evals", "add plugin evals", "bootstrap evals", "bootstrap plugin evals", "write evals for" | `workflows/bootstrap-evals.md` |
 | Marketplace Generate | `/plugincraft marketplace`, or "regenerate marketplace.json" | `scripts/marketplace-generate.sh` (interactive workflow doc coming later) |
 | Publish | `/plugincraft --publish [path]`, or "is this plugin ready to publish" | (coming in PR 4 — falls back to inline guidance) |
 
-**Mode selection**: If the request mentions "audit all", "bulk", "every plugin", or "check all plugins", use **Bulk Audit**. If it mentions auditing, reviewing, or improving a specific plugin (single name), use **Improve**. If it mentions regenerating the marketplace, syncing marketplace entries, or fixing marketplace drift, use **Marketplace Generate**. If it mentions publish-readiness, "ready to ship", or release prep, use **Publish**. If it specifies a concrete edit to make on a plugin file (e.g., "add a hook to my plugin"), use **Lightweight** mode — the edit is covered by the inline checks. Otherwise default to **Create**.
+**Mode selection**: If the request mentions "audit all", "bulk", "every plugin", or "check all plugins", use **Bulk Audit**. If it mentions auditing, reviewing, or improving a specific plugin (single name), use **Improve**. If the request asks to add, bootstrap, or write evals for a plugin (e.g. "add plugin evals", "bootstrap evals for this plugin"), use **Bootstrap Evals**. If it mentions regenerating the marketplace, syncing marketplace entries, or fixing marketplace drift, use **Marketplace Generate**. If it mentions publish-readiness, "ready to ship", or release prep, use **Publish**. If it specifies a concrete edit to make on a plugin file (e.g., "add a hook to my plugin"), use **Lightweight** mode — the edit is covered by the inline checks. Otherwise default to **Create**.
 
 ### Testing Discipline
 

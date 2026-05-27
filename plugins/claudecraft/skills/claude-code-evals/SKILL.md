@@ -126,7 +126,7 @@ Any Claude Code configuration that changes agent behavior. Each `scenario.yaml` 
 | Plugins | `project.plugins` | Plugin components compose; skills + hooks + agents + MCP load and interact as one unit |
 | Bundled Combos | Multiple fields | Combined config stack works as a unit |
 
-See `references/config-type-patterns.md` for scenario examples and design guidance for each type.
+See `references/config-type-patterns.md` for scenario examples and design guidance for each type. For a guided bootstrap of plugin-level eval coverage, see plugincraft's `workflows/bootstrap-evals.md`.
 
 ## Suite Lifecycle
 
