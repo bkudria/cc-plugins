@@ -91,7 +91,7 @@ Result: `tools` is `[Read, Glob, Grep]`, `user` has all three fields.
 
 ## Debugging Tips
 
-1. **"What will scuttlerun actually see?"** — Run `craboodle list <root>` for static validation, or `craboodle run --repeats 1 <root>` once and inspect `.craboodle-base.yaml` in the artifact_dir for the materialized base config that scuttlerun was invoked against
+1. **"What will scuttlerun actually see?"** — Run `craboodle list <root>` for static validation, or `craboodle run --repeats 1 <root>` once and inspect `.craboodle-base.yaml` in the staged eval root for the materialized base config that scuttlerun was invoked against
 2. **"Is it a craboodle schema error or a scuttlerun schema error?"** — `craboodle list <root>` validates the evals.yaml top-level keys itself, then delegates `scenarios.base` validation to scuttlerun — the error message tells you which layer rejected the input
 3. **"My setting isn't taking effect"** — Walk the chain: scuttlerun default → `scenarios.base` in evals.yaml → scenario.yaml → CLI flags. A later layer is probably overriding it
 4. **"Array was replaced, not merged"** — This is by design. If you set `tools:` in a scenario, it replaces the base tools entirely. To extend instead, use `additional_tools:` (appended and deduped against scuttlerun's defaults), or repeat the full list plus your addition
