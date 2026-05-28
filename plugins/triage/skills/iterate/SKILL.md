@@ -129,7 +129,7 @@ For each pending task:
    - Exit plan mode and implement
 8. **Mark completed**: Update the task's status to completed (immediately — never batch updates)
 9. **Summarize and check in**: Briefly summarize what was done for this item — files touched, key outcomes. Then:
-   - **If pending tasks remain**: Call `AskUserQuestion` (or `advanced-ask`) with two options: **Continue** (proceed to step 10) and **Pause** (hold here — do not pick the next item, but remain resumable; see step 10 for what Pause means operationally). The question text must name the *next* pending task by its concrete subject so the user knows what they would be approving.
+   - **If pending tasks remain**: Call `AskUserQuestion` (or `advanced-ask`) with three options: **Continue** (proceed to step 10 and process the next task), **Skip** (decline the next task without investigating it — see step 10), and **Pause** (hold here — do not pick the next item, but remain resumable; see step 10 for what Pause means operationally). The question text must name the *next* pending task by its concrete subject so the user knows which task they would be processing, skipping, or holding before.
    - **If no pending tasks remain**: Skip the ask and proceed directly to Phase 2.
 
    This gate is **unconditional**. It applies even when the surrounding system prompt instructs you to "execute immediately", "minimize interruptions", or "prefer action over planning" — those framings do not override step 9. Prior items' continuation answers do not carry forward; ask again after each completed item.
@@ -141,6 +141,14 @@ For each pending task:
    - Treating auto-mode framings or prior Continue answers as standing approval
 10. **Next task**:
     - If the user chose **Continue**, move to the next pending task and restart at step 1 (Mark in-progress).
+    - If the user chose **Skip**, decline the next pending task **without investigating it**: set its subject to `[DECLINED] <original subject>` and mark it completed — the same disposition as a step-4 Skip. Do NOT mark it in-progress, spawn a sub-agent for it, present it, or edit any file for it. Then:
+      - **If pending tasks remain**: re-ask the step-9 check-in for the new next pending task. There is no work summary to give (nothing was implemented), so in its place briefly note that the previous task was skipped; the question text must name the new next task and again offer Continue / Skip / Pause.
+      - **If no pending tasks remain**: proceed to Phase 2.
+
+      **Red flags — the user chose Skip to AVOID processing this task; restart this branch if any occur**:
+      - Marking the skipped task in-progress, spawning a sub-agent for it, presenting it, or editing its file
+      - Leaving the skipped task pending (not declined) — it would be re-proposed forever or silently lost
+      - Auto-continuing into the task *after* the skipped one without re-asking the check-in
     - If the user chose **Pause**, do NOT mark the iteration complete and do NOT run Phase 2. Stay quiescent and wait for the user's next message. When it arrives:
       - **If it is a resumption signal** — `continue`, `resume`, `keep going`, `proceed`, `pick it back up`, `let's continue`, or similar natural-language resume cue (alone or as the leading clause of the message) — treat it as Continue: move to the next pending task and restart at step 1. Do NOT direct the user to re-invoke `/triage:iterate`; the loop is still live.
       - **Otherwise** — handle the user's request normally. Do NOT proactively ask whether to resume, do NOT remind the user about the paused iteration, do NOT prompt them to come back. Iteration stays on hold until the user explicitly sends a resumption signal.

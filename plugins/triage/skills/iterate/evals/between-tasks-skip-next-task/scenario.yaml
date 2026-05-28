@@ -1,0 +1,47 @@
+prompt: |
+  Use the iterate skill to work through these findings. Add an
+  appropriate header comment to each file describing its purpose.
+
+  ## Findings
+
+  ### 1. alpha.conf missing header comment
+  The file `alpha.conf` has no header comment at the top.
+
+  ### 2. beta.conf missing header comment
+  The file `beta.conf` has no header comment at the top.
+
+  ### 3. gamma.conf missing header comment
+  The file `gamma.conf` has no header comment at the top.
+
+project:
+  files:
+    alpha.conf: |
+      setting_a = 1
+      setting_b = 2
+    beta.conf: |
+      setting_c = 3
+      setting_d = 4
+    gamma.conf: |
+      setting_e = 5
+      setting_f = 6
+
+user:
+  persona: |
+    You are working through three findings with the iterate skill. The agent
+    will ask you questions via AskUserQuestion. TWO DIFFERENT kinds of question
+    will appear — answer each by its option set:
+
+    1. PER-ITEM questions: the agent presents ONE finding and offers options
+       like "Implement / Plan first / Skip". For EVERY per-item question,
+       select "Implement".
+
+    2. BETWEEN-TASKS questions: after finishing an item, the agent asks whether
+       to go on to the next pending finding, offering options like
+       "Continue / Skip / Pause". Answer these BY ORDER OF APPEARANCE:
+         - The FIRST between-tasks question (it will name beta.conf as the next
+           finding): select "Skip".
+         - The SECOND between-tasks question (it will name gamma.conf as the
+           next finding): select "Continue".
+
+    Keep every response brief. Do not ask the agent to combine, batch, or
+    reorder findings. Do not add findings of your own.
