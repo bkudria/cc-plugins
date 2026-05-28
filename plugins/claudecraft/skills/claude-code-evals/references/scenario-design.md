@@ -63,7 +63,8 @@ scenarios:
     # when scuttlerun runs (or when `craboodle list` invokes scuttlerun).
     model: claude-sonnet-4-6
     additional_tools:
-      - TodoWrite
+      - TaskCreate
+      - TaskUpdate
     project:
       skills:
         - .                       # Self-reference: the eval root is the skill (for plugins, use `project.plugins: ['.']` — see config-type-patterns.md)
