@@ -1,5 +1,5 @@
 prompt: |
-  /triage:assess config/auth.yaml for misconfigurations
+  /assess config/auth.yaml for misconfigurations
 
 project:
   files:
