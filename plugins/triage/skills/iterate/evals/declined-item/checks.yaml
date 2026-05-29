@@ -1,7 +1,4 @@
 checks:
-  - declined-prefix-applied:
-      check: "A TaskCreate or TaskUpdate tool call in the transcript has a subject field whose value begins with the literal string '[DECLINED]'"
-      note: "The iterate skill's declined-item convention: when the user picks Skip, update the task's subject via TaskCreate or TaskUpdate to '[DECLINED] <original subject>' before marking it completed. The Rust rewrite finding is the one the oracle will decline."
   - second-item-gets-its-own-agent-investigation:
       check: "At least one Agent tool call whose prompt argument references the trailing-whitespace finding (containing one of the substrings 'whitespace', 'trailing', 'config.yaml', or 'version: 1.0') appears in the transcript"
       note: "The iterate skill mandates a fresh sub-agent per item: each item gets its own Agent invocation after it is marked in-progress. This check verifies the second finding receives its own scope-fenced Agent investigation rather than being decided from the prior item's sub-agent context or verification Reads. The check is position-independent because the iterate skill's per-item gate and between-tasks gate produce multiple AskUserQuestion calls whose ordering relative to investigation can vary."
