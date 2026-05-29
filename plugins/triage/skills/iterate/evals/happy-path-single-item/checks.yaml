@@ -5,6 +5,6 @@ checks:
   - no-edit-before-ask:
       check: "No Edit or Write tool call targeting notes.md appears in the transcript before the first AskUserQuestion tool call or advanced-ask Skill invocation"
       note: "The iterate skill requires the approval gate to precede implementation. An edit before any approval prompt violates the gate, even in a single-item iteration."
-  - edit-adds-top-level-heading-to-notes:
-      check: "The written content of an Edit or Write tool call targeting notes.md in the transcript contains a level-1 markdown heading — either a line starting with '# ' (ATX style: single '#' and a space, not '##' or deeper) or a non-empty line immediately followed by a line consisting entirely of '=' characters (setext style)"
-      note: "The finding is 'missing top-level heading', which in Markdown means a level-1 heading. A correct implementation adds such a line to notes.md. This check verifies the substantive fix at the correct heading level, not merely that some heading of any level was added."
+  - notes-md-modified:
+      check: "The transcript contains at least one Edit, Write, or MultiEdit tool call targeting notes.md (or a Bash command whose command argument writes to that path, e.g. a redirect to notes.md or sed -i)"
+      note: "Sanity guard that the single item is actually processed — an edit to notes.md lands (paired with no-edit-before-ask, which constrains it to after the approval gate). Presence-only rather than asserting the heading content because scuttlerun's transcript drops Write/Edit content (content/old_string/new_string) by design (scuttlerun.allium TranscriptToolFieldContract); a content-level assertion forces the grader to infer the written text from prose and is flaky run-to-run."
