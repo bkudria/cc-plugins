@@ -106,7 +106,7 @@ The numbered observations returned by sub-agents are an input, not the final for
 1. Group related observations into discrete findings
 2. **Filter for actionability** — Drop observations that are purely informational (neutral descriptions of working-as-designed behavior, positive observations with no implied problem or opportunity). A finding belongs in the assessment only if it identifies a problem, a gap, a risk, or a concrete opportunity for improvement. "X works correctly" is not a finding, but "X works correctly and is undocumented" is a documentation gap and qualifies.
 3. Order by significance — most impactful first
-4. **Merge overlapping observations** — If two findings share a root cause or near-identical concluding clause, they describe the same issue. Keep the stronger framing; fold the other's unique evidence into it.
+4. **Merge overlapping observations** — If two findings share a root cause or near-identical concluding clause, they describe the same issue. Keep the stronger framing; fold the other's unique evidence into it. This includes the same problem recurring across multiple files or locations (e.g., the same hardcoded-secret pattern appearing in several modules): produce one finding that names every affected location, not a separate finding per occurrence.
 5. Split compound issues into separate findings
 
 ### Write the assessment
