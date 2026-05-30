@@ -146,9 +146,10 @@ Review the output. If all scenarios pass, proceed to Final Report. If failures o
 | Exit Code | Meaning | Action |
 |-----------|---------|--------|
 | 0 | All scenarios at or above `min_pass_rate` | Done |
-| 3 | One or more scenarios below `min_pass_rate` | Diagnose and fix |
-| 1 | Configuration error | Fix scenario YAML |
-| 2 | Infrastructure error | Check tool installation, plugin load path |
+| 1 | Configuration error (invalid `evals.yaml` or scenario YAML) | Fix the offending YAML |
+| 2 | Runtime error — uncaught exception (incl. `evals.yaml` load failure) | Re-run with `-v`; report if it persists |
+| 3 | One or more scenarios below `min_pass_rate` | Diagnose and fix (see below) |
+| 4 | Infrastructure / dependency error — scuttlerun or pincenez missing, no scenarios found, every rep failed, or the reliability gate (`max_error_rate`) tripped | Check tool installation and plugin load path; if reps failed, inspect the scenario `errors` block |
 
 **GATE — When exit code is 3, you MUST produce a per-check diagnosis table before the Final Report. Do NOT emit "Bootstrap complete" or any final summary until every failing check has a Plugin / Component / Check attribution recorded in the Diagnosis section of the report template.**
 
