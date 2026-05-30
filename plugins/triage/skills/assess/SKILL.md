@@ -8,6 +8,8 @@ argument-hint: "[scope to investigate, e.g. 'this codebase' or 'the auth module'
 
 Investigate a scope and produce a structured, numbered findings assessment. Each finding describes an observation, problem, or opportunity — never a solution or fix. Output is designed for consumption by the `iterate` skill.
 
+The investigation itself — planning areas, investigating each in parallel, cross-verifying claims, synthesizing the numbered findings, and writing the file — runs as a background Workflow defined in `workflows/investigate.js`. **That script is the single source of truth for investigation behavior, output format, and the observation-only discipline.** This skill resolves the scope, then delegates to it.
+
 ## When to Use
 
 - Conducting an investigation or analysis of a codebase, feature, or tool
@@ -20,11 +22,11 @@ Investigate a scope and produce a structured, numbered findings assessment. Each
 
 | Tool | Purpose |
 |------|---------|
-| `Read`, `Grep`, `Glob`, `Bash` (read-only) | Investigation and evidence gathering |
-| `Agent` | Sub-agents for deep-area investigation |
 | `AskUserQuestion` | Phase 1 scope interview |
-| `TaskCreate`, `TaskUpdate` | Progress tracking across areas |
-| `Write` | Persist the assessment file |
+| `Workflow` | Run the investigation (`workflows/investigate.js`) |
+| `Read` | Present the written assessment |
+
+The investigation's read-only tools (`Read`, `Grep`, `Glob`, `Bash`), the planning/verifying/synthesizing sub-agents (`Agent`), and the file write (`Write`) all run *inside* the workflow — they are not invoked directly by this skill.
 
 ---
 
@@ -52,111 +54,38 @@ If the scope is broad (entire codebase, "everything"), ask for priority areas or
 
 ---
 
-## Phase 2: Exploration Planning
+## Phase 2: Investigate (delegated)
 
-Break the scope into areas that can be explored semi-independently and assess complexity. Each area is a facet of the scope, not a disconnected inventory — it should contribute to a cohesive investigation of the overall question.
+Once the scope is resolved, run the investigation workflow. It plans the areas, investigates each in parallel (observation-only), cross-verifies overlapping claims, synthesizes the numbered assessment, and writes it to disk.
 
-- **Quick** (1-2 reads) — investigate directly
-- **Moderate** (5-10 tool calls) — investigate directly
-- **Deep** (extensive exploration) — dispatch a sub-agent
+Invoke:
 
-If the investigation has 4+ areas, create a task (via `TaskCreate`) for each to track progress.
+```
+Workflow({
+  scriptPath: "${CLAUDE_PLUGIN_ROOT}/skills/assess/workflows/investigate.js",
+  args: {
+    scope: "<resolved scope>",
+    focus: "<focus from Phase 1; omit to use the workflow default>",
+    depth: "<quick | standard | comprehensive>",
+    sessionId: "${CLAUDE_SESSION_ID}"
+  }
+})
+```
 
-### Sub-agent prompts
+- `scope` is **required**; the workflow bails if it is missing.
+- `focus` and `depth` come from Phase 1 when the interview ran. When the scope came straight from `$ARGUMENTS` (Phase 0, step 1), omit `focus` and `depth` — the workflow uses its defaults (broad focus, `standard` depth).
+- Map the interview's depth answer: quick scan → `quick`, standard review → `standard`, comprehensive analysis → `comprehensive`. `depth` controls how many areas the investigation is broken into.
+- Always pass `sessionId: "${CLAUDE_SESSION_ID}"` so the assessment is written to `/tmp/assessment-${CLAUDE_SESSION_ID}.md`.
 
-When a Deep area warrants a sub-agent, the prompt must include: (1) the observation-only constraint — no fixes or solutions, (2) the output format — numbered observations, each a single paragraph with a short title and specific evidence, and (3) a one-line list of the other areas in the overall scope for context (these areas may be investigated by the main agent directly or by other sub-agents — do not assert parallelism that does not exist).
-
-> Investigate [AREA] within [SCOPE]. Other areas in this investigation: [LIST OF OTHER AREAS]. Look for problems, inconsistencies, surprising patterns, missing pieces, and opportunities for improvement. Do NOT suggest fixes or solutions — only describe what is found. Report as numbered observations, each a single paragraph with a short title. Include specific evidence (file paths, line numbers, values) in every observation.
+The workflow runs in the background and returns when complete, yielding `{ scope, depth, areas, observationCount, findingsCount, outPath, markdown }`.
 
 ---
 
-## Phase 3: Investigation
+## Phase 3: Present
 
-Execute the exploration plan. For each area:
+When the workflow completes:
 
-1. Read relevant files, search for patterns, examine configuration
-2. Note concrete observations — always include file paths, line numbers, or specific values
-3. Identify relationships between areas (a test gap may relate to a code pattern)
-4. Mark area complete via `TaskUpdate` if progress tasks exist
+1. Output the full assessment in the conversation — use the returned `markdown`, or `Read` it back from the returned `outPath`.
+2. State: "Assessment saved to `/tmp/assessment-${CLAUDE_SESSION_ID}.md` — run `/triage:iterate` to process findings."
 
-### Investigation discipline
-
-- **Specificity required** — Every finding must reference concrete evidence: a file path, a configuration value, a pattern with examples, or a metric. Findings without evidence are opinions, not findings.
-- **Breadth before depth** — Survey all areas at surface level first. Go deep only where initial survey reveals something noteworthy.
-- **No solutions** — Record what IS, not what SHOULD BE. Describe the current state and why it is noteworthy. The urge to prescribe a fix means the finding is ready to write down as-is.
-
-### Sub-agent verification
-
-When sub-agents were dispatched, complete these checks before proceeding to Phase 4:
-
-1. **Cross-reference claims between sub-agents** — If any two sub-agents' areas overlap on a shared file, value, or claim, verify the shared element independently before synthesis. If their domains are fully disjoint, state that explicitly and move on.
-2. **Spot-check numerical claims** — Counts, frequencies, and statistics are especially error-prone. Run one independent check on the most significant number.
-3. **Test tool reliability** — If a sub-agent relied on a tool that could have timed out, truncated, or silently failed, verify the tool produced complete results.
-
-If a check does not apply (e.g., no numerical claims), note why and move on — do not skip silently.
-
----
-
-## Phase 4: Synthesis and Output
-
-### Organize findings
-
-The numbered observations returned by sub-agents are an input, not the final form. Sub-agent numbering is discarded; each finding's number comes from significance order after merging, splitting, and filtering. A single sub-agent observation may become zero findings (filtered out), one finding (preserved or rewritten), or multiple findings (split). A finding may also aggregate observations from several sub-agents.
-
-1. Group related observations into discrete findings
-2. **Filter for actionability** — Drop observations that are purely informational (neutral descriptions of working-as-designed behavior, positive observations with no implied problem or opportunity). A finding belongs in the assessment only if it identifies a problem, a gap, a risk, or a concrete opportunity for improvement. "X works correctly" is not a finding, but "X works correctly and is undocumented" is a documentation gap and qualifies.
-3. Order by significance — most impactful first
-4. **Merge overlapping observations** — If two findings share a root cause or near-identical concluding clause, they describe the same issue. Keep the stronger framing; fold the other's unique evidence into it. This includes the same problem recurring across multiple files or locations (e.g., the same hardcoded-secret pattern appearing in several modules): produce one finding that names every affected location, not a separate finding per occurrence.
-5. Split compound issues into separate findings
-
-### Write the assessment
-
-Produce an assessment with this structure:
-
-```
-## Assessment: [Scope Description]
-
-**Scope**: [what was investigated]
-**Areas covered**: [list of areas explored]
-
-## Findings
-
-### 1. [Short descriptive title]
-
-[Detailed observation. What was found, where (file paths, line numbers),
-current state, and why this is noteworthy. Includes specific evidence.]
-
-### 2. [Short descriptive title]
-
-[...]
-
-## Summary
-
-[N] findings. [Brief overall assessment — describe the concentration of problems, recurring root causes, and severity. The filter-for-actionability rule applies here too: do not include positive observations or working-as-designed notes.]
-```
-
-### Finding format rules
-
-- Each finding is an h3 subsection under `## Findings`, numbered in the heading text (e.g., `### 1. Title`)
-- The heading contains the finding number and a short descriptive title — no bold markers, no em dash, no body text on the heading line
-- Body is a regular paragraph after the heading — no sub-bullets, no nested structure
-- Body includes concrete evidence: file paths, values, patterns observed
-- Body describes WHAT and WHY it is noteworthy — never HOW to fix it
-- Each finding stands alone without requiring context from other findings
-
-### Red flags — rewrite the finding if it contains any of these
-
-- "Consider..." / "Should..." / "Could..." / "Recommend..."
-- "Fix by..." / "Solution:" / "To resolve this..."
-- "Migrate to..." / "Replace with..." / "Switch to..."
-- Any imperative verb directed at future action
-- **Modal verbs of obligation or suggestion anywhere in the body** — `should`, `could`, `would`, `must`, `ought to`. Mid-sentence modals are the common slip: "debug endpoints that should not be accessible" prescribes just as clearly as "Should disable debug endpoints". Rewrite as pure description: "debug endpoints are exposed in `config.py`".
-
-These signal a solution, not a finding. Strip the prescription and keep only the observation — describe the current state and what makes it noteworthy, not what the system should be.
-
-### Persist and present
-
-1. Write the complete assessment to `/tmp/assessment-${CLAUDE_SESSION_ID}.md`
-2. Output the full assessment in the conversation message
-
-State at the end: "Assessment saved to `/tmp/assessment-${CLAUDE_SESSION_ID}.md` — run `/triage:iterate` to process findings."
+If the workflow returns an `error` (no scope, no areas planned) or `findingsCount` of 0, report that plainly rather than presenting an empty assessment. The findings format and observation-only rules are enforced inside the workflow; do not re-run or post-edit the assessment to "fix" its phrasing — if it drifts, the fix belongs in `workflows/investigate.js`.
