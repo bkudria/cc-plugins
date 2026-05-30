@@ -37,6 +37,8 @@ If yes, the check tests baseline behavior, not config value. Revise it to target
 
 Most scenarios need 2-3 different pattern types.
 
+**Pair negative and ordering checks with a Presence check.** An **Absence** (`"no X…"`) or **Process** (`"…before any X"`) check passes *vacuously* on a transcript where X never happens — it cannot fail on a bad run, so it cannot tell good behavior from bad. Add a Presence check that X occurs, giving the negative or ordering claim something real to constrain. Lint flags the un-paired form as **unfalsifiable**.
+
 ---
 
 ## Anti-Patterns
@@ -51,6 +53,7 @@ Run `pincenez lint --help` for the authoritative definitions (each anti-pattern 
 | **always_passes** | Tests baseline Claude behavior, not config-added value |
 | **unverifiable** | Tests internal state the grader can't observe |
 | **over_specific** | Mandates one implementation when multiple valid outcomes exist |
+| **unfalsifiable** | Structurally can't fail — a negative/ordering check that passes vacuously when its subject never occurs |
 
 When writing checks, apply the Pre-Write Checklist below (§ Pre-Write Checklist) — it translates each anti-pattern into a self-test question with concrete action.
 
@@ -132,10 +135,11 @@ Apply these tests to each check **before writing it to a file**, and again to an
 | **Tautological** | Does this check mirror the prompt wording? (Prompt: "write a function" → Check: "output contains a function") | Assert HOW — the specific structure, approach, or method — not WHETHER. |
 | **Unverifiable** | Can the grader observe this in the output? Signals: "understood", "considered", "thought about". | Rewrite as observable behavior: what the agent produced, not what it reasoned. |
 | **Over-specific** | Does this check mandate a specific function/operator/tool when the outcome is what matters? Signals: "uses [function name]" as a requirement, "uses X rather than Y" when Y isn't actually wrong. | Rewrite to test the outcome or behavior. Optionally mention specific approaches as non-exhaustive examples: "achieves X (e.g., via ireduce or map\|add)". |
+| **Unfalsifiable** | Could any realistic transcript make this check FAIL? Signals: "no X without Y", "never X unless Y", or an ordering clause whose subject (X) the agent might simply never do. | Pair it with a Presence check asserting X occurs, so the negative/ordering claim has something to constrain — or drop it if no realistic transcript could fail it. |
 
 ### Common Slips
 
-Patterns that look like single checks but fail lint as compound or vague. Recognize them on sight. The last row ("Capitalized AND after a fix") catalogues the rewrite failure mode specifically — re-run the full Pre-Write Checklist against every rewrite, not just the flagged row.
+Patterns that look like single checks but fail lint as compound, vague, or unfalsifiable. Recognize them on sight. The "Capitalized AND after a fix" row catalogues the rewrite failure mode specifically — re-run the full Pre-Write Checklist against every rewrite, not just the flagged row.
 
 | Pattern | Why it slips | Example | Fix |
 |---|---|---|---|
@@ -144,6 +148,7 @@ Patterns that look like single checks but fail lint as compound or vague. Recogn
 | **Abstract-noun stand-ins** | Nouns like "investigation", "presentation", "review" sound concrete but need a grader to infer what counts. | "investigation before presentation" | Replace with observable: "at least one Read/Grep/Bash call against the file before writing findings". |
 | **Capitalized "AND" after a fix** | Re-authoring a compound check often introduces a second compound in the "fix" (the agent sees the first conjunction, misses the next). | "...makes an investigative tool call **AND** asks a separate AskUserQuestion" | Apply the enumeration test to the rewrite, not just the original. |
 | **Enumerated list as requirement** | A short list of specific tools, files, or syntaxes looks concrete but disallows equivalent alternatives — lint treats "X or Y" as "only X or Y" when an outcome-equivalent Z exists. | "**Read or Grep** tool call targeting notes.md" (misses `cat`/`head`/`Bash`); "**pyproject.toml, setup.py, setup.cfg, or requirements.txt**" (misses `package.json`, `Cargo.toml`, `go.mod`); "**ATX-style headings (`#`)**" (misses setext); "'**trailing whitespace' or 'version: 1.0'**" (misses other concrete triggers) | Ask: would an equivalent alternative satisfy the intent? If yes, rewrite as the outcome ("any file-reading tool call against notes.md", "a project-manifest file") and keep the enumeration as non-exhaustive examples ("e.g., Read, Grep, or Bash cat"). |
+| **Vacuous negative-universal** | A "no X without Y" / "never X unless Y" check reads as strict but passes trivially when X never occurs — it can't fail on a bad transcript. | "**No** edit to `config.py` **without a preceding** AskUserQuestion" — passes in any run that never touches `config.py`. | Pair with a Presence check for the subject: (1) "an edit to `config.py` occurs"; (2) the no-edit-without-ask claim. |
 
 ---
 
@@ -155,7 +160,7 @@ Always lint checks before spending money on eval runs:
 - **Single checks file**: `pincenez lint checks.yaml` — catches anti-patterns in one checks file
 - **Full eval suite**: `craboodle lint <evals-dir>` — checks all scenarios
 
-Linting catches vague, compound, tautological, always-passes, unverifiable, and over-specific checks before they waste LLM calls. Fix flagged issues, then run.
+Linting catches vague, compound, tautological, always-passes, unverifiable, over-specific, and unfalsifiable checks before they waste LLM calls. Fix flagged issues, then run.
 
 ---
 
