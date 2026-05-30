@@ -1,6 +1,6 @@
 # Bootstrap Plugin Evals
 
-Add eval coverage to an existing plugin — covering both per-component behavior (delegated to `skillcraft`'s per-skill bootstrap) and cross-component bundle behavior (the scenarios only this workflow owns).
+Add eval coverage to an existing plugin — covering both per-component behavior (delegated to `skillcraft`'s per-skill bootstrap) and plugin-as-unit bundle behavior (the scenarios only this workflow owns).
 
 > **References for this workflow:** `claude-code-evals/references/config-type-patterns.md` § Plugins (cross-component scenario design), `claude-code-evals/references/check-design.md` § Pre-Write Checklist (mandatory before authoring any check), `references/delegation-map.md` (what plugincraft owns vs. delegates). Run `craboodle --help`, `scuttlerun --help`, and `pincenez --help` for the canonical schemas and flag references.
 
@@ -36,7 +36,7 @@ Read `plugin.json` and enumerate every component the plugin ships. Build a small
 | MCP servers | `.mcp.json` | Server name, what tools it exposes |
 | Commands | `commands/*.md` | Command name, what skill or workflow it invokes |
 
-If the plugin ships only one component type and only one component, scenarios will be thin — note this and consider whether plugin-level evals add value over the per-skill suite alone. Single-component plugins may not need bundle scenarios.
+If the plugin ships only one component (a single skill, nothing else), Composition is impossible and Discoverability/Regression collapse toward the per-skill suite — **Step 4 is optional.** Record the plugin as single-component and either skip Step 4 or keep it deliberately thin, noting the decision as a coverage gap in the Final Report. Plugins with two or more components (even two skills) can compose, expose a multi-component load surface, and regress as a bundle — they proceed through Step 4 normally.
 
 ## Step 3: Delegate Per-Skill Bootstrap
 
@@ -53,15 +53,15 @@ For each skill:
 
 ## Step 4: Propose Bundle Scenarios
 
-Bundle scenarios exercise composition — the value the plugin adds over its components in isolation. Generate 3+ proposals across these buckets:
+Bundle scenarios exercise plugin-as-unit value — what the plugin adds over its components in isolation. Generate 3+ proposals across these buckets:
 
 | Bucket | What it tests | Example |
 |---|---|---|
 | Composition | Two or more components interacting in the same session | Skill A triggers hook B; agent C uses MCP D; command E invokes skill F |
-| Discoverability | The plugin's surface area is reachable when the plugin loads | The triggering skill auto-fires on its keywords; the slash command is registered |
+| Discoverability | The plugin's components are all registered and reachable once it loads | Each skill auto-fires on its own keywords without trigger collisions; the registered command resolves |
 | Regression | Loading the plugin doesn't break something it shouldn't | Existing tools remain available; baseline tasks still complete |
 
-For each proposed scenario, draft: `id`, `name`, `prompt`, and 3 `checks`. At least one check per scenario must assert a *cross-component* interaction (mirrors the Plugins pattern in `claude-code-evals/references/config-type-patterns.md`); single-component scenarios belong in the per-skill suites from Step 3.
+For each proposed scenario, draft: `id`, `name`, `prompt`, and 3 `checks`. At least one check per scenario must assert a **plugin-as-unit property** — a cross-component *interaction* for Composition (mirrors the Plugins pattern in `claude-code-evals/references/config-type-patterns.md`), the whole-bundle load surface for Discoverability, or bundle-level non-regression for Regression. A scenario that only exercises a **single component in isolation** carries no such property and belongs in the per-skill suites from Step 3.
 
 Make scenarios realistic and specific to this plugin's actual components — not generic templates.
 
@@ -119,7 +119,7 @@ For each approved bundle scenario from Step 4, create:
 
 Loading the `claude-code-evals` skill (done in the top GATE) is not the same as having the Pre-Write Checklist in context. If you have not Read the § Pre-Write Checklist AND § Common Slips sections of check-design.md during this session, Read them now before continuing.
 
-For every cross-component check, add a `note:` field naming the components the check exercises (e.g., `note: "skills/release-notes + hooks/slack-post — composition"`). This mirrors the `note:` discipline in `claude-code-evals/references/config-type-patterns.md` § Plugins and makes Step 10 attribution faster.
+For every bundle-level check, add a `note:` field naming the components (or load surface) the check exercises (e.g., `note: "skills/release-notes + hooks/slack-post — composition"`). This mirrors the `note:` discipline in `claude-code-evals/references/config-type-patterns.md` § Plugins and makes Step 10 attribution faster.
 
 **Write incrementally**: Write the first scenario, then lint it with `craboodle lint --scenario <id> <plugin-root>/evals`. Fix any issues before writing the remaining scenarios — anti-pattern tendencies caught on the first scenario won't propagate to the rest. Then write the remaining scenarios in parallel, following the same patterns.
 
