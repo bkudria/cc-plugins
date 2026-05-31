@@ -6,7 +6,7 @@ export const meta = {
     { title: 'Plan', detail: 'break the scope into semi-independent areas' },
     { title: 'Investigate', detail: 'one agent per area, observation-only, in parallel' },
     { title: 'Completeness', detail: 'critic names coverage gaps; effort-scaled targeted re-investigation' },
-    { title: 'Verify', detail: 'per-observation adversarial lenses on the most significant observations, consolidated with cross-reference and number spot-check' },
+    { title: 'Verify', detail: 'per-observation adversarial lenses on the most significant observations; verdicts applied in code (drop/correct), then a cross-area consolidation barrier, with a verification audit trail in the result' },
     { title: 'Synthesize', detail: 'merge/filter/order into numbered findings and write the file' },
   ],
 }
@@ -272,7 +272,7 @@ if (criticRounds > 0 && allObs.length) {
   }
 }
 
-// ---- Verify (adversarial lenses on the top-K, then a consolidation barrier) -
+// ---- Verify (adversarial lenses on the top-K → verdicts applied in code → cross-area barrier → audit trail) -
 phase('Verify')
 const VERIFY_SCHEMA = {
   type: 'object',
@@ -297,20 +297,15 @@ const VERIFY_SCHEMA = {
     spotCheckedNumber: { type: 'string', description: 'The most significant numeric claim checked, and the result' },
   },
 }
-// Single-pass verifier — also the consolidation barrier when handed lens
-// verdicts. With no verdicts it is byte-identical to the original single pass,
-// so the low-effort / empty-observation path is unchanged.
-const verifyConsolidated = (verdictsJson) => agent(
+// Cross-area consolidation barrier: cross-reference, numeric spot-check, and
+// reliability over the (already enforced) observation set. Per-observation lens
+// verdicts are applied in code upstream — not folded here. With no probedKeys this
+// is byte-identical to the original single-pass verifier, so the low-effort /
+// empty-observation path is unchanged.
+const verifyConsolidated = (obs, probedKeys) => agent(
   'You are verifying investigation observations before synthesis. You have read-only tools (Read, Grep, Glob, Bash).\n\n' +
   'Scope: ' + scope + '\n\n' +
-  'Observations (JSON):\n' + JSON.stringify(allObs, null, 2) + '\n\n' +
-  (verdictsJson
-    ? 'The most significant observations were each independently probed by adversarial skeptic lenses. ' +
-      'Their verdicts (JSON):\n' + verdictsJson + '\n\n' +
-      'Fold these verdicts in: turn each "correct" verdict into a corrections[] entry ' +
-      '(claim / issue / correctedClaim) and each "drop" verdict or reliabilityConcern into a ' +
-      'reliabilityFlags[] entry. Then run the checks below over the FULL observation set.\n\n'
-    : '') +
+  'Observations (JSON):\n' + JSON.stringify(obs, null, 2) + '\n\n' +
   'Perform these checks:\n' +
   '1. Cross-reference claims across areas: where two observations touch the same file, value, or claim, ' +
   'independently verify the shared element. Where areas are disjoint, say so and move on.\n' +
@@ -318,8 +313,9 @@ const verifyConsolidated = (verdictsJson) => agent(
   'independent check.\n' +
   '3. Reliability: flag any observation that appears to rely on tool output that could have been truncated, ' +
   'timed out, or silently failed.\n' +
-  (verdictsJson
-    ? '4. For observations NOT individually probed above, give them a light group review and flag anything ' +
+  (probedKeys && probedKeys.length
+    ? 'These observations were already individually probed by adversarial lenses and reconciled: ' +
+      probedKeys.join('; ') + '. Give the OTHER observations closer scrutiny and flag anything ' +
       'obviously unsupported.\n'
     : '') +
   VERIFY_INTENSITY[overallEffort] + '\n' +
@@ -327,7 +323,7 @@ const verifyConsolidated = (verdictsJson) => agent(
   { label: 'verify', schema: VERIFY_SCHEMA }
 )
 
-// Per-observation skeptic verdict — collapsed into VERIFY_SCHEMA at the barrier.
+// Per-observation skeptic verdict — applied to the observation set in code (applyVerdicts).
 const VERDICT_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -341,11 +337,51 @@ const VERDICT_SCHEMA = {
   },
 }
 
+// Apply keyed per-observation lens verdicts to the observation set. Pure: args in,
+// plain object out (no injected globals), so it can be unit-tested in isolation.
+// Rails: only a high/medium-confidence `drop` removes an observation; a low-confidence
+// `drop` and any reliabilityConcern become flags the synthesizer still sees; a `correct`
+// is folded as an annotation (the original claim is preserved in the action record),
+// never a destructive body rewrite. Across lenses on one observation a qualifying drop
+// wins over correct wins over holds.
+const applyVerdicts = (obs, verdicts) => {
+  const keyOf = (x) => x.area + ' ' + x.title
+  const byObs = new Map()
+  verdicts.forEach((v) => { const k = keyOf(v); if (!byObs.has(k)) byObs.set(k, []); byObs.get(k).push(v) })
+  const kept = []
+  const actions = []
+  obs.forEach((o) => {
+    const vs = byObs.get(keyOf(o)) || []
+    const hardDrop = vs.find((v) => v.verdict === 'drop' && (v.confidence === 'high' || v.confidence === 'medium'))
+    if (hardDrop) {
+      actions.push({ area: o.area, title: o.title, action: 'dropped', lens: hardDrop.lens, confidence: hardDrop.confidence, rationale: hardDrop.rationale })
+      return
+    }
+    const flags = []
+    vs.filter((v) => v.verdict === 'drop').forEach((v) => flags.push('low-confidence drop (' + v.lens + '): ' + v.rationale))
+    vs.filter((v) => v.reliabilityConcern).forEach((v) => flags.push('reliability (' + v.lens + '): ' + v.reliabilityConcern))
+    const corrections = vs
+      .filter((v) => v.verdict === 'correct' && v.correction)
+      .map((v) => ({ lens: v.lens, was: o.body, now: v.correction, why: v.rationale }))
+    const keptObs = { area: o.area, title: o.title, body: o.body, evidence: o.evidence, significance: o.significance }
+    if (corrections.length || flags.length) keptObs.verificationNotes = { corrections, flags }
+    kept.push(keptObs)
+    if (corrections.length || flags.length) {
+      actions.push({ area: o.area, title: o.title, action: corrections.length ? 'corrected' : 'flagged', corrections, flags })
+    }
+  })
+  return { kept, actions }
+}
+
 const lenses = EFFORT_LENSES[overallEffort] || []
 let verification
+let verdicts = []
+let auditActions = []
+let verifiedObs = allObs
 if (!lenses.length || !allObs.length) {
-  // Low effort or no observations: the single-pass verifier, unchanged.
-  verification = await verifyConsolidated(null)
+  // Low effort or no observations: the single-pass verifier over the full set,
+  // unchanged. No lens verdicts exist here, so nothing is enforced in code.
+  verification = await verifyConsolidated(allObs)
 } else {
   // Rank by significance (high first); the top-K get the full lens set. Stable
   // sort, no Date/Math.random (both forbidden in the harness).
@@ -370,11 +406,17 @@ if (!lenses.length || !allObs.length) {
       { label: 'verify:' + lens + '#' + i, phase: 'Verify', schema: VERDICT_SCHEMA, model: 'sonnet' }
     ).then((v) => v && Object.assign({ area: o.area, title: o.title, lens: lens }, v))
   )))
-  const verdicts = (await parallel(verdictJobs)).filter(Boolean)
-  log('Collected ' + verdicts.length + ' lens verdict(s); consolidating.')
-  // Consolidation barrier — fold verdicts into the contract, cross-reference,
-  // group-review the rest. Model omitted → inherits the lead (like synthesize).
-  verification = await verifyConsolidated(JSON.stringify(verdicts, null, 2))
+  verdicts = (await parallel(verdictJobs)).filter(Boolean)
+  // Enforce the keyed verdicts in code, then verify the reconciled set.
+  const reconciled = applyVerdicts(allObs, verdicts)
+  verifiedObs = reconciled.kept
+  auditActions = reconciled.actions
+  log('Collected ' + verdicts.length + ' lens verdict(s); enforcement: ' +
+    auditActions.filter((a) => a.action === 'dropped').length + ' dropped, ' +
+    auditActions.filter((a) => a.action === 'corrected').length + ' corrected, ' +
+    auditActions.filter((a) => a.action === 'flagged').length + ' flagged.')
+  const probedKeys = targets.map(({ o }) => o.area + ' / ' + o.title)
+  verification = await verifyConsolidated(verifiedObs, probedKeys)
 }
 
 // ---- Synthesize + write -----------------------------------------------------
@@ -393,8 +435,9 @@ const synth = await agent(
   'You are synthesizing investigation observations into a final numbered assessment, then writing it to disk.\n\n' +
   'Scope: ' + scope + '\n' +
   'Areas covered: ' + areaNames.join(', ') + '\n\n' +
-  'Observations (JSON):\n' + JSON.stringify(allObs, null, 2) + '\n\n' +
-  'Verification results (apply corrections; drop or fix any claim flagged unreliable):\n' +
+  'Observations (JSON) — already reconciled against per-observation verification; honor any ' +
+  '"verificationNotes" field (applied corrections / reliability flags):\n' + JSON.stringify(verifiedObs, null, 2) + '\n\n' +
+  'Cross-area verification results (apply these corrections; drop or fix any claim flagged unreliable):\n' +
   JSON.stringify(verification, null, 2) + '\n\n' +
   'SYNTHESIS RULES:\n' +
   '- Sub-agent numbering is discarded. Each finding number comes from significance order (most impactful first).\n' +
@@ -442,4 +485,12 @@ return {
   findingsCount: (synth && synth.findingsCount) || 0,
   outPath: finalPath,
   markdown: (synth && synth.markdown) || '',
+  verification: {
+    enforced: lenses.length > 0 && allObs.length > 0,
+    checks: verification,
+    dropped: auditActions.filter((a) => a.action === 'dropped'),
+    corrected: auditActions.filter((a) => a.action === 'corrected'),
+    flagged: auditActions.filter((a) => a.action === 'flagged'),
+    verdicts,
+  },
 }
