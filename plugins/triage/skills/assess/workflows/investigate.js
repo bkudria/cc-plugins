@@ -5,6 +5,7 @@ export const meta = {
   phases: [
     { title: 'Plan', detail: 'break the scope into semi-independent areas' },
     { title: 'Investigate', detail: 'one agent per area, observation-only, in parallel' },
+    { title: 'Completeness', detail: 'critic names coverage gaps; effort-scaled targeted re-investigation' },
     { title: 'Verify', detail: 'cross-reference overlapping claims and spot-check numbers' },
     { title: 'Synthesize', detail: 'merge/filter/order into numbered findings and write the file' },
   ],
@@ -35,6 +36,12 @@ const sessionId = P.sessionId || 'latest'
 const outPath = P.outPath || '/tmp/assessment-' + sessionId + '.md'
 
 const MAX_AREAS = 8
+// Completeness-critic loop: max critic rounds scale with overall effort, so
+// simple scopes never pay for it. Each round may surface a few gap areas, hard-
+// capped so initial + gap areas can never run away.
+const EFFORT_ROUNDS = { low: 0, medium: 1, high: 2 }
+const MAX_GAPS_PER_ROUND = 3
+const MAX_TOTAL_AREAS = MAX_AREAS + 4
 const EFFORT_GUIDANCE = {
   low: '1-2 targeted reads; confirm the load-bearing facts and move on — do not go deep.',
   medium: '5-10 tool calls; survey the area, then dig into whatever looks noteworthy.',
@@ -145,7 +152,9 @@ const OBS_SCHEMA = {
     },
   },
 }
-const investigations = (await parallel(areas.map((a) => () =>
+// Investigate one area, observation-only. Shared by the initial fan-out and the
+// completeness-critic gap rounds so both dispatch an identical prompt/schema/model.
+const investigateArea = (a, phaseName) =>
   agent(
     'Investigate the area "' + a.name + '" within this scope: ' + scope + '\n' +
     'Why this area matters: ' + a.rationale + '\n' +
@@ -158,19 +167,92 @@ const investigations = (await parallel(areas.map((a) => () =>
     'it is noteworthy. Every observation MUST include concrete evidence: file paths, line numbers, configuration ' +
     'values, or specific patterns — observations without evidence are opinions, not findings. ' +
     'Set "area" to exactly: ' + a.name,
-    { label: 'area:' + a.name, phase: 'Investigate', schema: OBS_SCHEMA, model: 'sonnet' }
+    { label: (phaseName === 'Completeness' ? 'gap:' : 'area:') + a.name, phase: phaseName, schema: OBS_SCHEMA, model: 'sonnet' }
   )
-))).filter(Boolean)
+
+const investigations = (await parallel(
+  areas.map((a) => () => investigateArea(a, 'Investigate'))
+)).filter(Boolean)
 
 if (investigations.length < areas.length) {
   log((areas.length - investigations.length) + ' area(s) failed to investigate and were dropped.')
 }
-const allObs = investigations.flatMap((i) =>
+// Flatten investigator results into one observation list (shared by the initial
+// fan-out and the completeness gap rounds).
+const collectObs = (invs) => invs.flatMap((i) =>
   (i.observations || []).map((o) => ({ area: i.area, title: o.title, body: o.body, evidence: o.evidence, significance: o.significance }))
 )
+const allObs = collectObs(investigations)
 log('Collected ' + allObs.length + ' observation(s) across ' + investigations.length + ' area(s).')
 if (!allObs.length) {
   log('No observations produced; writing an empty assessment.')
+}
+
+// ---- Completeness critic (effort-scaled, bounded) ---------------------------
+// Single-pass investigation can miss a facet the planner never decomposed, or a
+// thread an area surfaced but did not own. A bounded critic names genuine gaps;
+// each becomes a new area run through the same investigator. Rounds scale with
+// effort (low -> none), so simple scopes stay a pure single pass. Verify runs
+// after this loop, so it covers the full accumulated observation set.
+const criticRounds = EFFORT_ROUNDS[overallEffort] || 0
+if (criticRounds > 0 && allObs.length) {
+  phase('Completeness')
+  const GAP_SCHEMA = {
+    type: 'object',
+    additionalProperties: false,
+    required: ['complete', 'gaps'],
+    properties: {
+      complete: { type: 'boolean', description: 'true if coverage is sufficient and no further investigation is warranted' },
+      gaps: {
+        type: 'array',
+        maxItems: MAX_GAPS_PER_ROUND,
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['name', 'rationale'],
+          properties: {
+            name: { type: 'string', description: 'Short name for the uncovered facet (becomes a new area)' },
+            rationale: { type: 'string', description: 'One line: what thread/facet is uncovered and why it matters to the overall question' },
+          },
+        },
+      },
+    },
+  }
+  let roundsLeft = criticRounds
+  while (roundsLeft-- > 0) {
+    const headroom = MAX_TOTAL_AREAS - areaNames.length
+    if (headroom <= 0) break
+    const critique = await agent(
+      'You are a completeness critic for an investigation (an assessment). Judge whether the areas already ' +
+      'investigated TOGETHER cover the overall question, or whether a material facet was missed.\n\n' +
+      'Scope: ' + scope + '\n' +
+      'Overall question: ' + (plan.overallQuestion || scope) + '\n' +
+      'Focus: ' + focus + '\n' +
+      'Areas already investigated (do NOT propose any of these again): ' + areaNames.join('; ') + '\n\n' +
+      'Observations gathered so far (JSON):\n' + JSON.stringify(allObs, null, 2) + '\n\n' +
+      'Name only GENUINE gaps: a facet, thread, or area materially relevant to the overall question that the ' +
+      'existing areas do not cover — an unplanned thread surfaced by an observation counts. Do NOT restate ' +
+      'covered ground, do NOT propose fixes, and do NOT invent gaps to seem thorough. If coverage is already ' +
+      'sufficient, set complete=true and return an empty gaps list. At most ' + MAX_GAPS_PER_ROUND + ' gaps.',
+      { label: 'completeness-critic', phase: 'Completeness', schema: GAP_SCHEMA }
+    )
+    const fresh = ((critique && critique.gaps) || [])
+      .filter((g) => g && g.name && !areaNames.includes(g.name))
+      .slice(0, headroom)
+    if ((critique && critique.complete) || !fresh.length) {
+      log('Completeness critic: coverage sufficient — no further investigation.')
+      break
+    }
+    const gapAreas = fresh.map((g) => ({ name: g.name, rationale: g.rationale, effort: clampEffort(overallEffort, effortCeiling) }))
+    gapAreas.forEach((a) => areaNames.push(a.name))
+    log('Completeness critic: investigating ' + gapAreas.length + ' gap area(s): ' + gapAreas.map((a) => a.name).join(', ') + '.')
+    const gapInvestigations = (await parallel(
+      gapAreas.map((a) => () => investigateArea(a, 'Completeness'))
+    )).filter(Boolean)
+    const gapObs = collectObs(gapInvestigations)
+    allObs.push(...gapObs)
+    log('Completeness round added ' + gapObs.length + ' observation(s); ' + allObs.length + ' total across ' + areaNames.length + ' area(s).')
+  }
 }
 
 // ---- Verify (barrier: needs every observation at once) ----------------------
