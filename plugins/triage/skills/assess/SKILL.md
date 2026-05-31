@@ -36,7 +36,7 @@ Determine the investigation scope before any work begins. Check in order:
 
 1. **`$ARGUMENTS` is populated** — treat it as the scope and proceed to Phase 2.
 2. **Arguments empty but conversation implies a scope** — confirm the inferred scope with the user, then proceed to Phase 2.
-3. **Neither source available** — proceed to Phase 1 (Scope Interview) to gather scope, focus, and depth from the user.
+3. **Neither source available** — proceed to Phase 1 (Scope Interview) to gather scope, focus, and (optional) effort from the user.
 
 Phase 1 is the fallback path, not the default entry point.
 
@@ -48,7 +48,7 @@ Determine what to investigate. Use `AskUserQuestion` to gather:
 
 1. **Scope** — What area to investigate (codebase, feature, skill, session, configuration, etc.)
 2. **Focus** — What to look for (problems, gaps, risks, or opportunities for improvement)
-3. **Depth** — How deep to go (quick scan, standard review, comprehensive analysis)
+3. **Effort** (optional) — How much compute to spend. The default is adaptive: the workflow's planner judges scope complexity and allocates effort (and area count) per area itself. Offer this only as an optional ceiling/bias (low / medium / high); omit it to let the planner decide.
 
 If the scope is broad (entire codebase, "everything"), ask for priority areas or known pain points.
 
@@ -66,18 +66,18 @@ Workflow({
   args: {
     scope: "<resolved scope>",
     focus: "<focus from Phase 1; omit to use the workflow default>",
-    depth: "<quick | standard | comprehensive>",
+    effort: "<low | medium | high>  // OPTIONAL ceiling; omit to let the planner allocate adaptively",
     sessionId: "${CLAUDE_SESSION_ID}"
   }
 })
 ```
 
 - `scope` is **required**; the workflow bails if it is missing.
-- `focus` and `depth` come from Phase 1 when the interview ran. When the scope came straight from `$ARGUMENTS` (Phase 0, step 1), omit `focus` and `depth` — the workflow uses its defaults (broad focus, `standard` depth).
-- Map the interview's depth answer: quick scan → `quick`, standard review → `standard`, comprehensive analysis → `comprehensive`. `depth` controls how many areas the investigation is broken into.
+- `focus` and `effort` come from Phase 1 when the interview ran. When the scope came straight from `$ARGUMENTS` (Phase 0, step 1), omit `focus` and `effort` — the workflow uses its default (broad focus) and allocates effort adaptively.
+- `effort` is an OPTIONAL ceiling: when the interview produced one, map quick scan → `low`, standard review → `medium`, comprehensive analysis → `high`. Omit it entirely to let the planner judge complexity and allocate effort (and how many areas) itself.
 - Always pass `sessionId: "${CLAUDE_SESSION_ID}"` so the assessment is written to `/tmp/assessment-${CLAUDE_SESSION_ID}.md`.
 
-**The `Workflow` call is non-blocking.** It returns immediately with a task id; the investigation then runs in the background for roughly two to four minutes. The real result — `{ scope, depth, areas, observationCount, findingsCount, outPath, markdown }` — arrives later as a `<task-notification>` carrying that task id, *not* as the return value of the `Workflow` call.
+**The `Workflow` call is non-blocking.** It returns immediately with a task id; the investigation then runs in the background for roughly two to four minutes. The real result — `{ scope, effort, areas, observationCount, findingsCount, outPath, markdown }` — arrives later as a `<task-notification>` carrying that task id, *not* as the return value of the `Workflow` call.
 
 **After invoking `Workflow`, stop. Your turn is over.** Do not call any tool, do not investigate the scope yourself, do not read the assessment file or the workflow's journals, and do not assume, summarize, or imagine a result — fabricating a `<task-notification>` or a completion you have not received is a failure. There is nothing to do but wait. You are re-prompted automatically when the genuine `<task-notification>` arrives; only then continue to Phase 3.
 
