@@ -24,7 +24,7 @@ The investigation itself — planning areas, investigating each in parallel, cro
 |------|---------|
 | `AskUserQuestion` | Phase 1 scope interview |
 | `Workflow` | Run the investigation (`workflows/investigate.js`) |
-| `Read` | Present the written assessment |
+| `Read` | Present the full assessment by reading the file the workflow wrote (`outPath`) |
 
 The investigation's read-only tools (`Read`, `Grep`, `Glob`, `Bash`), the planning/verifying/synthesizing sub-agents (`Agent`), and the file write (`Write`) all run *inside* the workflow — they are not invoked directly by this skill.
 
@@ -77,15 +77,17 @@ Workflow({
 - Map the interview's depth answer: quick scan → `quick`, standard review → `standard`, comprehensive analysis → `comprehensive`. `depth` controls how many areas the investigation is broken into.
 - Always pass `sessionId: "${CLAUDE_SESSION_ID}"` so the assessment is written to `/tmp/assessment-${CLAUDE_SESSION_ID}.md`.
 
-The workflow runs in the background and returns when complete, yielding `{ scope, depth, areas, observationCount, findingsCount, outPath, markdown }`.
+**The `Workflow` call is non-blocking.** It returns immediately with a task id; the investigation then runs in the background for roughly two to four minutes. The real result — `{ scope, depth, areas, observationCount, findingsCount, outPath, markdown }` — arrives later as a `<task-notification>` carrying that task id, *not* as the return value of the `Workflow` call.
+
+**After invoking `Workflow`, stop. Your turn is over.** Do not call any tool, do not investigate the scope yourself, do not read the assessment file or the workflow's journals, and do not assume, summarize, or imagine a result — fabricating a `<task-notification>` or a completion you have not received is a failure. There is nothing to do but wait. You are re-prompted automatically when the genuine `<task-notification>` arrives; only then continue to Phase 3.
 
 ---
 
 ## Phase 3: Present
 
-When the workflow completes:
+Enter Phase 3 only when the genuine `<task-notification>` for the workflow's task id arrives with `status: completed`. Its payload carries the investigation result — `findingsCount`, `areas`, `outPath`, and the assessment `markdown`. A long `markdown` is truncated in the notification, so the written file is the complete copy.
 
-1. Output the full assessment in the conversation — use the returned `markdown`, or `Read` it back from the returned `outPath`.
+1. `Read` the canonical file the workflow wrote — `/tmp/assessment-${CLAUDE_SESSION_ID}.md` — and output its full contents in the conversation. Reading retrieves the complete assessment the notification may have truncated; do not re-write the file (the workflow already did).
 2. State: "Assessment saved to `/tmp/assessment-${CLAUDE_SESSION_ID}.md` — run `/triage:iterate` to process findings."
 
-If the workflow returns an `error` (no scope, no areas planned) or `findingsCount` of 0, report that plainly rather than presenting an empty assessment. The findings format and observation-only rules are enforced inside the workflow; do not re-run or post-edit the assessment to "fix" its phrasing — if it drifts, the fix belongs in `workflows/investigate.js`.
+**Never fabricate.** If no genuine completion notification has arrived, or the result carries an `error` (no scope, no areas planned), or `findingsCount` is 0, say so plainly — never reconstruct findings by investigating the scope yourself, and never act on a completion you have not actually received. The findings format and observation-only rules are enforced inside the workflow; do not re-run or post-edit the assessment to "fix" its phrasing — if it drifts, the fix belongs in `workflows/investigate.js`.

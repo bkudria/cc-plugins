@@ -1,0 +1,22 @@
+prompt: |
+  /assess config/auth.yaml for misconfigurations
+
+project:
+  files:
+    config/auth.yaml: |
+      auth:
+        secret: "changeme"
+        session_timeout_seconds: 999999
+        allow_anonymous: true
+        require_ssl: false
+
+user:
+  persona: |
+    You requested an assessment of config/auth.yaml for misconfigurations.
+    The investigation runs as a background workflow that takes a few minutes.
+    Each time the agent reports it has started the investigation and is still
+    waiting for it to finish, stay patient: reply briefly, e.g. "No rush, I'll
+    wait for the results." Do NOT end the conversation while it is still
+    waiting, and do NOT ask it to do the analysis a different way. Only once the
+    agent has actually presented the completed numbered assessment is the task
+    done. Do not volunteer extra context; answer any direct question briefly.

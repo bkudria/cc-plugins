@@ -1,0 +1,19 @@
+checks:
+  - delegates-to-workflow:
+      check: "The transcript contains a Workflow tool call whose script path ends in `investigate.js`."
+      note: "Phase 2 delegates the entire investigation to the background workflow at workflows/investigate.js by invoking the Workflow tool with that scriptPath. A vanilla agent has no such script, so this call is the skill's delegation behavior."
+  - no-direct-fixture-investigation:
+      check: "The transcript contains no file-reading or search tool call made by the agent (Read, Grep, Glob, or a Bash command such as cat/head/grep) that targets the fixture file config/auth.yaml or any other source file inside the working-directory project. Reading the /tmp/assessment-*.md artifact does not count."
+      note: "The skill delegates investigation to the workflow; the main agent must not investigate the scope itself. The workflow's own sub-agent reads happen in separate journals and never appear in this transcript, so the only legitimate file read here is the /tmp assessment artifact. A vanilla agent asked to assess config/auth.yaml would read it directly — such a read means the agent investigated inline instead of delegating, which is the self-investigation/fabrication failure mode this skill fixes."
+  - reads-workflow-artifact:
+      check: "The transcript contains a file-reading tool call (e.g., Read, or a Bash command such as cat or head) whose target is a file located directly under /tmp/ with a filename beginning with `assessment-` and ending with `.md`."
+      note: "Phase 3 retrieves the complete assessment from the canonical file the workflow wrote at /tmp/assessment-${CLAUDE_SESSION_ID}.md (the completion notification truncates large output). The agent can only read this file if the workflow actually ran and wrote it, so this read is the anchor that distinguishes a real result from a fabricated one. Any file-reading mechanism against that path satisfies the intent."
+  - presents-findings-inline:
+      check: "The agent's final message or messages contain at least two findings reproduced inline, each identified by sequential enumeration (e.g., `1.`, `1)`, `Finding 1:`, or a numbered markdown heading such as `### 1.`)."
+      note: "Phase 3 presents the full findings inline, not merely a one-line count or a pointer to the file. Two or more enumerated findings confirm the agent output the workflow's assessment content rather than just announcing completion. Any standard sequential-enumeration style counts."
+  - states-saved-path:
+      check: "The agent's final message states that the assessment was saved to a file path under /tmp/ whose name begins with `assessment-` (for example, `/tmp/assessment-<session-id>.md`)."
+      note: "Phase 3 instructs the agent to state where the assessment was saved. This is the persistence signal — the agent reports the canonical /tmp path the workflow wrote."
+  - points-at-iterate:
+      check: "The agent's final message contains the literal string `/triage:iterate`."
+      note: "Phase 3 ends with the handoff: 'run `/triage:iterate` to process findings.' The literal namespaced command is the handoff signal to the downstream iterate skill."

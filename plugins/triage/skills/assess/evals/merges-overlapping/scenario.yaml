@@ -1,0 +1,44 @@
+prompt: |
+  Run the investigation workflow against the fixture code in this project, then
+  show me the result.
+
+  Do NOT use the /assess skill. Invoke the Workflow tool DIRECTLY on the
+  workflow script that ships with the assess skill, installed at
+  `.claude/skills/assess/workflows/investigate.js`. Call the Workflow tool with:
+    - scriptPath: .claude/skills/assess/workflows/investigate.js
+    - args: {"scope": "the source files in src/", "depth": "standard", "outPath": "/tmp/assessment-eval-merge.md"}
+
+  It runs in the background for a few minutes and writes its assessment to that
+  outPath. When it completes, Read /tmp/assessment-eval-merge.md and show its
+  full contents.
+
+project:
+  files:
+    src/auth.py: |
+      # Auth module
+      API_KEY = "live-key-abc123"
+
+      def authenticate(token):
+          return token == API_KEY
+    src/db.py: |
+      # Database connection
+      DB_PASSWORD = "prod-pass-xyz"
+
+      def connect():
+          return f"postgres://admin:{DB_PASSWORD}@db.example.com"
+    src/cache.py: |
+      # Cache connection
+      REDIS_PASSWORD = "cache-secret-789"
+
+      def connect():
+          return f"redis://:{REDIS_PASSWORD}@cache.example.com"
+
+user:
+  persona: |
+    You asked the agent to run the investigation workflow and show you the
+    result. It runs as a background workflow that takes a few minutes. Each time
+    the agent reports it has started the workflow and is still waiting, stay
+    patient: reply briefly, e.g. "No rush, I'll wait." Do NOT end the
+    conversation while it is still waiting, and do NOT ask it to investigate a
+    different way. Only once the agent has presented the completed assessment is
+    the task done. Answer any direct question briefly.
