@@ -1,0 +1,7 @@
+checks:
+  - merged-credential-finding-spans-all-three-files:
+      check: "At least one `### N.` finding section (from its heading up to the next `### N.` heading or the end of the document) in the presented assessment names all three credential files — `auth.py`, `db.py`, and `cache.py` (with or without a `src/` prefix) — indicating the three hardcoded-credential observations were merged into one finding."
+      note: "investigate.js's synthesize stage requires merging observations that share a root cause or recur as the same pattern across files into ONE finding that names every affected location. The fixture's three files each hardcode a credential in the same connection-string pattern, so the workflow should emit one merged finding naming auth.py, db.py, and cache.py — not three separate findings. Match the filenames whether or not they carry a `src/` prefix."
+  - produces-numbered-h3-findings:
+      check: "The presented assessment contains at least one level-3 markdown heading whose text begins with a number followed by a period and a space (e.g., `### 1. `)."
+      note: "investigate.js mandates findings as `### N. Title` h3 subsections under a `## Findings` section. This confirms the workflow produced its contracted output shape, which the merge check then inspects."
