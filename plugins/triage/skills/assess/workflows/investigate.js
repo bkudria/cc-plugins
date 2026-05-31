@@ -1,7 +1,7 @@
 export const meta = {
   name: 'assess-investigate',
   description: 'Autonomous investigation core for the assess skill: plan areas, investigate each in parallel, cross-verify, synthesize a numbered observation-only assessment, and write it to disk',
-  whenToUse: 'Invoked by the assess skill (by path) once scope/focus/depth are resolved. Runs Phases 2-4 headless; the skill keeps Phase 0-1 (scope resolution + interview).',
+  whenToUse: 'Invoked by the assess skill (by path) once scope/focus/effort are resolved. Runs Phases 2-4 headless; the skill keeps Phase 0-1 (scope resolution + interview).',
   phases: [
     { title: 'Plan', detail: 'break the scope into semi-independent areas' },
     { title: 'Investigate', detail: 'one agent per area, observation-only, in parallel' },
@@ -27,56 +27,95 @@ if (!scope) {
 }
 const focus = P.focus ||
   'problems, gaps, risks, inconsistencies, surprising patterns, missing pieces, and opportunities for improvement'
-const depth = P.depth || 'standard' // quick | standard | comprehensive
+const EFFORT_LEVELS = ['low', 'medium', 'high']
+// `effort` is an OPTIONAL ceiling/bias. When absent, the planner allocates
+// effort adaptively per area; when set, it caps each area's effort.
+const effortCeiling = EFFORT_LEVELS.includes(P.effort) ? P.effort : null
 const sessionId = P.sessionId || 'latest'
 const outPath = P.outPath || '/tmp/assessment-' + sessionId + '.md'
 
-const AREA_GUIDANCE = {
-  quick: '3 areas at most; surface-level',
-  standard: '4 to 6 areas',
-  comprehensive: '6 to 8 areas, including edge cases and cross-cutting concerns',
-}[depth] || '4 to 6 areas'
+const MAX_AREAS = 8
+const EFFORT_GUIDANCE = {
+  low: '1-2 targeted reads; confirm the load-bearing facts and move on — do not go deep.',
+  medium: '5-10 tool calls; survey the area, then dig into whatever looks noteworthy.',
+  high: 'Exhaustive — follow every thread, read adjacent code, check edge cases; spend as many tool calls as the area genuinely warrants.',
+}
+const VERIFY_INTENSITY = {
+  low: 'Effort is low — keep verification light; independently check only the single most load-bearing claim.',
+  medium: 'Cross-reference overlapping claims across areas and spot-check the most significant numeric claim.',
+  high: 'Be thorough — cross-reference every overlapping claim, spot-check each significant numeric claim, and independently re-derive the most consequential findings.',
+}
+// Cap a planner-proposed effort at the optional user ceiling (low < medium < high).
+const clampEffort = (proposed, ceiling) => {
+  const p = EFFORT_LEVELS.indexOf(proposed)
+  const safe = p === -1 ? EFFORT_LEVELS.indexOf('medium') : p
+  if (!ceiling) return EFFORT_LEVELS[safe]
+  return EFFORT_LEVELS[Math.min(safe, EFFORT_LEVELS.indexOf(ceiling))]
+}
 
 // ---- Plan -------------------------------------------------------------------
 phase('Plan')
 const PLAN_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['overallQuestion', 'areas'],
+  required: ['overallQuestion', 'effortRationale', 'areas'],
   properties: {
     overallQuestion: { type: 'string', description: 'The cohesive question this investigation answers' },
+    effortRationale: { type: 'string', description: 'One line: how complex the scope is and why this many areas at these effort levels' },
     areas: {
       type: 'array',
+      minItems: 1,
+      maxItems: MAX_AREAS,
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['name', 'rationale'],
+        required: ['name', 'rationale', 'effort'],
         properties: {
           name: { type: 'string' },
           rationale: { type: 'string', description: 'One line: why this facet matters to the overall question' },
+          effort: { type: 'string', enum: ['low', 'medium', 'high'], description: 'How much investigation this facet warrants' },
         },
       },
     },
   },
 }
+const ceilingNote = effortCeiling
+  ? 'The user capped effort at "' + effortCeiling + '" — do NOT assign any area a higher effort than that, and lean toward fewer areas.\n'
+  : 'No effort cap was given — allocate adaptively to fit the scope you find.\n'
 const plan = await agent(
   'You are planning an investigation (an assessment), not performing it.\n\n' +
   'Scope: ' + scope + '\n' +
-  'Focus: ' + focus + '\n' +
-  'Depth: ' + depth + ' — aim for ' + AREA_GUIDANCE + '.\n\n' +
+  'Focus: ' + focus + '\n\n' +
+  'First judge how complex this scope actually is, then allocate investigation resources to match — ' +
+  'do not over-invest in a simple scope. Scaling rules:\n' +
+  '- Narrow / simple scope (a single file, a small config): 1-3 areas.\n' +
+  '- Moderate scope (a feature, a module): 4-6 areas.\n' +
+  '- Broad / complex scope (a whole subsystem, cross-cutting concerns): up to ' + MAX_AREAS + ' areas.\n' +
+  ceilingNote + '\n' +
   'Break the scope into semi-independent areas that TOGETHER cohesively investigate the overall question — ' +
   'facets of one investigation, not a disconnected inventory. Each area should be explorable on its own. ' +
-  'For each area give a short name and a one-line rationale. Do NOT investigate yet and do NOT propose fixes.',
+  'For each area give a short name, a one-line rationale, and an effort level (low / medium / high) sized to ' +
+  'how much that facet warrants. Also give a one-line effortRationale for the overall allocation. ' +
+  'Do NOT investigate yet and do NOT propose fixes.',
   { label: 'plan', schema: PLAN_SCHEMA }
 )
 
-const areas = (plan && plan.areas) || []
+let areas = (plan && plan.areas) || []
 if (!areas.length) {
   log('Planner produced no areas; nothing to investigate.')
   return { error: 'no areas planned', scope, findingsCount: 0 }
 }
+if (areas.length > MAX_AREAS) {
+  log('Planner proposed ' + areas.length + ' areas; capping at ' + MAX_AREAS +
+    ' (dropped: ' + areas.slice(MAX_AREAS).map((a) => a.name).join(', ') + ').')
+  areas = areas.slice(0, MAX_AREAS)
+}
+// Clamp each area's effort to the optional user ceiling.
+areas = areas.map((a) => ({ ...a, effort: clampEffort(a.effort, effortCeiling) }))
 const areaNames = areas.map((a) => a.name)
-log('Investigating ' + areas.length + ' area(s): ' + areaNames.join(', '))
+const overallEffort = effortCeiling ||
+  EFFORT_LEVELS[Math.max.apply(null, areas.map((a) => EFFORT_LEVELS.indexOf(a.effort)))]
+log('Investigating ' + areas.length + ' area(s) at ' + overallEffort + ' effort: ' + areaNames.join(', '))
 
 // ---- Investigate (parallel fan-out, observation-only) -----------------------
 phase('Investigate')
@@ -114,12 +153,12 @@ const investigations = (await parallel(areas.map((a) => () =>
     'Other areas in this investigation (context only — do NOT investigate these): ' +
     areaNames.filter((n) => n !== a.name).join('; ') + '\n' +
     'Look for: ' + focus + '\n' +
-    'Depth: ' + depth + '\n\n' +
+    'Effort for this area: ' + a.effort + ' — ' + EFFORT_GUIDANCE[a.effort] + '\n\n' +
     'OBSERVATION-ONLY. Do NOT suggest fixes, solutions, or what "should" be done. Record only what IS and why ' +
     'it is noteworthy. Every observation MUST include concrete evidence: file paths, line numbers, configuration ' +
-    'values, or specific patterns — observations without evidence are opinions, not findings. Survey before ' +
-    'going deep. Set "area" to exactly: ' + a.name,
-    { label: 'area:' + a.name, phase: 'Investigate', schema: OBS_SCHEMA }
+    'values, or specific patterns — observations without evidence are opinions, not findings. ' +
+    'Set "area" to exactly: ' + a.name,
+    { label: 'area:' + a.name, phase: 'Investigate', schema: OBS_SCHEMA, model: 'sonnet' }
   )
 ))).filter(Boolean)
 
@@ -170,7 +209,7 @@ const verification = await agent(
   'independent check.\n' +
   '3. Reliability: flag any observation that appears to rely on tool output that could have been truncated, ' +
   'timed out, or silently failed.\n' +
-  (depth === 'quick' ? 'Depth is quick — keep verification light; check only the most load-bearing claim.\n' : '') +
+  VERIFY_INTENSITY[overallEffort] + '\n' +
   'Do NOT add new findings and do NOT suggest fixes. Report only verification results and corrections.',
   { label: 'verify', schema: VERIFY_SCHEMA }
 )
@@ -234,7 +273,7 @@ log('Assessment written to ' + finalPath + ' (' + ((synth && synth.findingsCount
 return {
   scope,
   focus,
-  depth,
+  effort: overallEffort,
   areas: areaNames,
   observationCount: allObs.length,
   findingsCount: (synth && synth.findingsCount) || 0,

@@ -6,7 +6,7 @@ prompt: |
   workflow script that ships with the assess skill, installed at
   `.claude/skills/assess/workflows/investigate.js`. Call the Workflow tool with:
     - scriptPath: .claude/skills/assess/workflows/investigate.js
-    - args: {"scope": "the source files in src/ and README.md", "depth": "standard", "outPath": "/tmp/assessment-eval-observation.md"}
+    - args: {"scope": "the source files in src/ and README.md", "effort": "medium", "outPath": "/tmp/assessment-eval-observation.md"}
 
   It runs in the background for a few minutes and writes its assessment to that
   outPath. When it completes, Read /tmp/assessment-eval-observation.md and show
