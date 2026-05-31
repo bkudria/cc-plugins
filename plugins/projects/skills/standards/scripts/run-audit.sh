@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # run-audit.sh — Two-pass audit runner for the standards skill.
 #
+# Usage: run-audit.sh <--init|--collect|--merge|--gate|--render|--check> [args]
+#        Full synopsis and per-verb semantics below; --init emits a state-dir.
+#
 # Every verb operates on a state-dir produced by --init. The state-dir holds
 # canonical files: collect-required.json (round-1 output),
 # collect-suggested.json (round-2 output, only after the gate passes),
