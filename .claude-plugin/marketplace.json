@@ -22,6 +22,22 @@
       ]
     },
     {
+      "name": "projects",
+      "description": "Audit a project's standards compliance or scaffold a new one, driven by declarative project.yaml profiles.",
+      "license": "MIT",
+      "homepage": "https://github.com/bkudria/cc-plugins/tree/main/plugins/projects",
+      "category": "quality",
+      "keywords": [
+        "standards",
+        "audit",
+        "scaffold",
+        "compliance",
+        "project",
+        "profiles"
+      ],
+      "source": "./plugins/projects"
+    },
+    {
       "name": "triage",
       "source": "./plugins/triage",
       "description": "Assess a scope to produce findings, then address them one-by-one.",

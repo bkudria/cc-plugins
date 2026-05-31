@@ -1,0 +1,12 @@
+{
+  "name": "projects",
+  "description": "Audit a project's standards compliance or scaffold a new one, driven by declarative project.yaml profiles.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "repository": "https://github.com/bkudria/cc-plugins",
+  "homepage": "https://github.com/bkudria/cc-plugins/tree/main/plugins/projects",
+  "keywords": ["standards", "audit", "scaffold", "compliance", "project", "profiles"],
+  "author": {
+    "name": "Benjamin Kudria"
+  }
+}
