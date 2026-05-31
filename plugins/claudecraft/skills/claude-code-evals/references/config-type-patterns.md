@@ -227,6 +227,67 @@ checks:
 
 ---
 
+## Workflow-Delegating Skills
+
+**What to test**: A skill that offloads its core work to a background **Workflow** script behaves correctly end to end — it delegates to the workflow, waits for genuine completion, reads the canonical output artifact, and presents it without fabricating. Separately, the *workflow's own output quality*, graded independently of the skill.
+
+**Inject via**: `project.skills: [.]` (or a path) — installing the skill carries its `workflows/<script>.js` along. Add `Workflow` (and usually `Agent`) via `additional_tools`. Give the background task room to finish: raise `timeout`, raise `max_budget_usd`, and turn the **sandbox off** so the workflow's file write lands.
+
+```yaml
+# evals.yaml — shared base for both suites below
+scenarios:
+  base:
+    additional_tools: [Agent, Workflow]
+    timeout: 600           # a background run needs minutes, not seconds
+    max_budget_usd: 4.0
+    sandbox:
+      enabled: false       # let the workflow's file write land
+    project:
+      skills: [.]          # installs the skill, bringing workflows/<script>.js with it
+```
+
+**Key challenge — the script must actually be present in the agent's project.** scuttlerun builds a fresh project dir populated *only* by `project.skills`, `project.plugins`, and inline `project.files`; there is no copy-an-arbitrary-file mechanism. You cannot drop a bare `<script>.js` into the project root. Install the whole skill via `project.skills` and reference the script by its **installed path** — `.claude/skills/<skill-name>/workflows/<script>.js`. A scenario that points at an out-of-tree or bare script path fails: the agent searches, can't find the script, and either gives up or writes its own (which then tests nothing).
+
+Build two complementary suites.
+
+**1. Skill-contract suite** — does the skill delegate and present correctly? Trigger the skill normally and assert the process.
+
+```yaml
+# scenario.yaml
+prompt: /your-skill <args that trigger the heavy task>
+project:
+  skills:
+    - .
+user:
+  persona: |
+    The task runs as a background workflow that takes a few minutes. Each time
+    the agent says it has started and is still waiting, reply briefly ("No rush")
+    and stay patient. Do NOT end the conversation while it is waiting, and do NOT
+    ask it to do the task a different way. The task is done only once the agent
+    presents the completed result.
+```
+
+```yaml
+# checks.yaml
+checks:
+  - delegates-to-workflow:
+      check: "The agent invoked the Workflow tool rather than performing the task inline itself"
+  - waits-for-completion:
+      check: "The agent waited for the workflow to finish before presenting — it did not treat the immediate task-id return as the result"
+  - reads-canonical-artifact:
+      check: "The agent read the workflow's output file (via Read or an equivalent file-reading call) before presenting"
+  - presents-not-fabricates:
+      check: "The presented result reproduces the content of the workflow's output file, not an invented summary"
+```
+
+The **patient persona** is load-bearing: without it, the synthetic user may end the conversation while the agent is correctly waiting on the background task, failing the scenario for the wrong reason.
+
+**2. Output-quality suite** — is the *workflow's output* good, independent of the skill? Prompt the agent to call the Workflow tool directly on the installed script path (explicitly bypassing the skill), then grade the canonical artifact it produces against the workflow's output contract — format, discipline, source-grounding, merge behavior, whatever the script promises. Isolating the script from the skill makes a regression in either one attributable.
+
+**Check strategy**: For the contract suite, assert on the *process* (delegated → waited → read) plus no-fabrication, not merely that some result appeared. For the quality suite, grade the artifact's content against the contract. In both, grade what the agent read **from the file** — never the completion-notification text, which truncates long fields (~3900 chars). Scalar notification fields (counts, paths, status) survive and are safe to branch on.
+
+---
+
 ## Model/Effort Levels
 
 **What to test**: Whether your configuration works at different model or effort levels — verifying that checks pass at the model/effort you intend to deploy with.

@@ -123,6 +123,7 @@ Any Claude Code configuration that changes agent behavior. Each `scenario.yaml` 
 | Hooks/Settings | `project.settings` | Hook fires, affects behavior |
 | MCP Servers | `sdk.mcp_servers` | Tool discovery and usage |
 | Sub-agents | `tools: [Agent]` + `sdk.agents` | Delegation and coordination |
+| Workflow-delegating skills | `project.skills` + `Workflow` tool | Skill delegates to a background workflow, waits, reads the artifact, presents without fabricating |
 | Model/Effort | `model`, `effort` | Quality at different cost points |
 | Plugins | `project.plugins` | Plugin components compose; skills + hooks + agents + MCP load and interact as one unit |
 | Bundled Combos | Multiple fields | Combined config stack works as a unit |

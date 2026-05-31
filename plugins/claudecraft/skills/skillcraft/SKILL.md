@@ -198,7 +198,7 @@ Consult `references/anti-patterns.md` for 15 common problems across 4 categories
 | `references/skill-templates.md` | Starter templates by skill type |
 | `references/writing-style.md` | Voice, tone, and formatting rules for skill content |
 | `references/interactive-tui.md` | Best practices for using interactive TUI tools in skills |
-| `references/resource-usage.md` | Guide for using scripts/, references/, and assets/ directories |
+| `references/resource-usage.md` | Guide for using scripts/, references/, workflows/, and assets/ directories (incl. background Workflow scripts) |
 | `references/dynamic-context.md` | Backtick-bang syntax, argument substitution, and string substitutions |
 | `references/naming-conventions.md` | Skill naming, description construction, trigger phrase design |
 | `references/dependencies.md` | Handling inter-skill and external tool dependencies |
