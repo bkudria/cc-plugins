@@ -1,12 +1,26 @@
 version: "1"
-min_pass_rate: 0.67
-repeats: 3
+min_pass_rate: 1.0
+repeats: 1
 
+# This skill delegates its investigation to a background Workflow
+# (workflows/investigate.js). Exercising it end-to-end therefore runs the real
+# workflow: ~$1.40 and ~6 min per run. The base config below carries everything
+# the delegation needs — the Workflow tool, a generous timeout/budget, and
+# sandbox disabled (matches the verified manual probe; the agent reads the
+# ephemeral project dir and the workflow writes to /tmp). Investigation QUALITY
+# (output format, observation-only discipline, merge, source-grounding) is NOT
+# tested here — it lives in the standalone investigate.js suite. This suite
+# locks only the skill's own contract: delegate -> wait -> present, no fabrication.
 scenarios:
   base:
     model: claude-sonnet-4-5
     additional_tools:
       - Agent
+      - Workflow
+    timeout: 600
+    max_budget_usd: 4.0
+    sandbox:
+      enabled: false
     project:
       skills:
         - .

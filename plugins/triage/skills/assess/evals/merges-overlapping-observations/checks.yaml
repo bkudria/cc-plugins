@@ -1,4 +1,0 @@
-checks:
-  - merged-credentials-finding-spans-all-three-files:
-      check: "At least one `### N.` finding section (from its heading up to the next `### N.` heading or end of document) in the final assessment names all three credential files — `auth.py`, `db.py`, and `cache.py` (with or without a directory prefix such as `src/`) — indicating the three hardcoded-credential observations were merged into a single finding."
-      note: "The assess skill's Phase 4 'Merge overlapping observations' rule (assess/SKILL.md:109) requires folding observations that share a root cause into one finding. The fixture's three files each hardcode a credential in a connection-string pattern — the same root cause. The agent should produce one merged finding naming all three files (auth.py, db.py, cache.py), not three separate findings each naming one. This check tests the merge, not path format: match the filenames whether or not they carry a `src/` prefix."
