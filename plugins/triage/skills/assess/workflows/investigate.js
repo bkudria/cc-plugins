@@ -69,6 +69,13 @@ const EFFORT_LENSES = {
   medium: ['grounding', 'reliability'],
   high: ['grounding', 'overclaim', 'reliability'],
 }
+// Shared read-only framing for the tool-using sub-agents (investigator + the two
+// verifiers): one identical statement of the toolset and the primary-source
+// discipline, so these roles cannot drift on how they phrase it. Each role keeps its
+// own output discipline (observation-only / no fixes / no new findings) inline.
+const READ_ONLY_TOOLS =
+  'You have read-only tools (Read, Grep, Glob, Bash). Use them to consult primary sources directly: ' +
+  'read the actual files and run the actual searches rather than relying on memory or inference.'
 // Cap a planner-proposed effort at the optional user ceiling (low < medium < high).
 const clampEffort = (proposed, ceiling) => {
   const p = EFFORT_LEVELS.indexOf(proposed)
@@ -214,6 +221,7 @@ const investigateArea = (a, phaseName) =>
     areaNames.filter((n) => n !== a.name).join('; ') + '\n' +
     'Look for: ' + focus + '\n' +
     'Effort for this area: ' + a.effort + ' — ' + EFFORT_GUIDANCE[a.effort] + '\n\n' +
+    READ_ONLY_TOOLS + '\n\n' +
     'OBSERVATION-ONLY. Do NOT suggest fixes, solutions, or what "should" be done. Record only what IS and why ' +
     'it is noteworthy. Every observation MUST include concrete evidence: file paths, line numbers, configuration ' +
     'values, or specific patterns — observations without evidence are opinions, not findings. ' +
@@ -343,7 +351,7 @@ const VERIFY_SCHEMA = {
 // is byte-identical to the original single-pass verifier, so the low-effort /
 // empty-observation path is unchanged.
 const verifyConsolidated = (obs, probedKeys) => agent(
-  'You are verifying investigation observations before synthesis. You have read-only tools (Read, Grep, Glob, Bash).\n\n' +
+  'You are verifying investigation observations before synthesis. ' + READ_ONLY_TOOLS + '\n\n' +
   'Scope: ' + scope + '\n\n' +
   'Observations (JSON):\n' + JSON.stringify(obs, null, 2) + '\n\n' +
   'Perform these checks:\n' +
@@ -448,7 +456,7 @@ if (!lenses.length || !allObs.length) {
   targets.forEach(({ o, i }) => lenses.forEach((lens) => verdictJobs.push(() =>
     agent(
       'You are an adversarial verifier applying ONE lens to ONE investigation observation before synthesis. ' +
-      'You have read-only tools (Read, Grep, Glob, Bash).\n\n' +
+      READ_ONLY_TOOLS + '\n\n' +
       'Scope: ' + scope + '\n' +
       'Lens — ' + VERIFY_LENSES[lens] + '\n\n' +
       'Observation (JSON):\n' + JSON.stringify(o, null, 2) + '\n\n' +
