@@ -8,6 +8,7 @@ export const meta = {
     { title: 'Completeness', detail: 'critic names coverage gaps; effort-scaled targeted re-investigation' },
     { title: 'Verify', detail: 'per-observation adversarial lenses on the most significant observations; verdicts applied in code (drop/correct), then a cross-area consolidation barrier, with a verification audit trail in the result' },
     { title: 'Synthesize', detail: 'merge/filter/order into numbered findings and write the file' },
+    { title: 'Ground', detail: 'post-synthesis grounding: re-read each finding citation against source and flag any that do not resolve' },
   ],
 }
 
@@ -59,6 +60,10 @@ const VERIFY_INTENSITY = {
 // observation count, and a consolidation agent preserves the cross-reference and
 // numeric spot-check the single-pass verifier did.
 const MAX_VERIFY_TARGETS = 6
+// Post-synthesis grounding re-reads each finding's cited source. Bounded like the verify
+// stage: only the top-K significance-ordered findings are grounded, so cost and wall-clock
+// stay flat regardless of how many findings synthesis emits.
+const MAX_GROUND_TARGETS = 6
 const VERIFY_LENSES = {
   grounding: 'Grounding/citation accuracy. Independently re-derive this observation\'s cited evidence from source using your read-only tools. Do the named files, line numbers, and values actually exist and say what the observation claims? Verdict "drop" if the evidence is fabricated or does not support the claim; "correct" if it is partially right with a fixable inaccuracy; "holds" if fully grounded.',
   overclaim: 'Over-claim / significance inflation. Judge whether the observation\'s framing and significance are justified by its evidence, or inflated. Is a "high" significance genuinely load-bearing, or is this working-as-designed, minor, or speculative? Verdict "correct" to downgrade or reframe; "drop" if it is not a real issue; "holds" if proportionate.',
@@ -424,11 +429,29 @@ phase('Synthesize')
 const SYNTH_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['markdown', 'findingsCount', 'outPath'],
+  required: ['markdown', 'findingsCount', 'outPath', 'findings'],
   properties: {
     markdown: { type: 'string' },
     findingsCount: { type: 'integer' },
     outPath: { type: 'string' },
+    findings: {
+      type: 'array',
+      description: 'One entry per "### N." finding in the markdown, in the same order: the structured citations behind each finding. NOT written into the .md — used only to ground the final findings against source post-synthesis.',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['number', 'title', 'citations'],
+        properties: {
+          number: { type: 'integer', description: 'The finding number, matching its "### N." heading' },
+          title: { type: 'string', description: 'The finding title, matching its heading' },
+          citations: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Concrete source locations this finding rests on (file paths, line numbers, values, patterns), carried from the evidence of the observation(s) it synthesizes',
+          },
+        },
+      },
+    },
   },
 }
 const synth = await agent(
@@ -468,13 +491,79 @@ const synth = await agent(
   '## Summary\n\n' +
   '<N findings. Brief overall assessment: concentration of problems, recurring root causes, severity. No ' +
   'positive or working-as-designed notes.>\n\n' +
+  'STRUCTURED CITATIONS (separate from the markdown — do NOT put these in the .md): alongside the prose, return a ' +
+  '"findings" array with one entry per "### N." heading, in the same order, each carrying the SAME number and ' +
+  'title and a "citations" list of the concrete source locations that finding rests on (file paths, line ' +
+  'numbers, values, patterns), drawn from the "evidence" of the observation(s) you merged into it. These ground ' +
+  'the findings against source after synthesis; the markdown itself stays prose-only.\n\n' +
   'AFTER composing the assessment, WRITE it verbatim to exactly this path using the Write tool: ' + outPath + '\n' +
-  'Then return the markdown, the integer finding count, and the outPath.',
+  'Then return the markdown, the integer finding count, the outPath, and the findings array.',
   { label: 'synthesize', phase: 'Synthesize', schema: SYNTH_SCHEMA }
 )
 
 const finalPath = (synth && synth.outPath) || outPath
 log('Assessment written to ' + finalPath + ' (' + ((synth && synth.findingsCount) || 0) + ' findings).')
+
+// ---- Ground (post-synthesis citation grounding; gated; flag-only) -----------
+// The synthesizer reshapes observations into findings (merge / split / renumber) with no
+// read-only tools, so nothing has re-grounded the FINAL findings against source — the
+// pre-synthesis Verify stage only ever saw the observations, not the post-merge findings.
+// One read-only agent per finding re-reads that finding's structured citations and flags any
+// that do not resolve. Purely additive: it never edits the written .md (the synthesizer's
+// file stands) and records results only in the returned audit trail. Bounded to the top-K
+// significance-ordered findings and fanned out in parallel (like the verify stage) so cost
+// and wall-clock stay flat; gated like the other added stages so a low-effort or zero-
+// finding run skips it.
+phase('Ground')
+const GROUND_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['ungrounded'],
+  properties: {
+    ungrounded: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['citation', 'problem', 'detail'],
+        properties: {
+          citation: { type: 'string', description: 'The specific cited path/line/value that did not resolve' },
+          problem: { type: 'string', enum: ['missing', 'mismatch', 'unverifiable'] },
+          detail: { type: 'string', description: 'One line: what the source actually shows vs. what was cited' },
+        },
+      },
+    },
+  },
+}
+const synthFindings = (synth && synth.findings) || []
+let grounding = { ran: false, checked: 0, ungrounded: [] }
+if (overallEffort !== 'low' && synthFindings.length) {
+  // Findings are significance-ordered (most impactful first), so the top-K are the ones
+  // worth grounding; each runs in its own read-only agent, in parallel.
+  const groundTargets = synthFindings.slice(0, MAX_GROUND_TARGETS)
+  const groundJobs = groundTargets.map((fnd) => () =>
+    agent(
+      'You are grounding ONE finding from a finished assessment against source, at the synthesis boundary. ' +
+      'You have read-only tools (Read, Grep, Glob, Bash).\n\n' +
+      'Scope: ' + scope + '\n\n' +
+      'Finding (JSON, with the structured citations it rests on):\n' + JSON.stringify(fnd, null, 2) + '\n\n' +
+      'Independently open each cited location and confirm it exists and says what the finding claims. ' +
+      'This is a FLAG-ONLY pass: do NOT rewrite the finding, do NOT propose fixes, and do NOT invent new ' +
+      'findings. Report ONLY citations that fail to ground:\n' +
+      '- "missing": the cited file, or that line region, does not exist.\n' +
+      '- "mismatch": the source exists but says something materially different from what the finding claims.\n' +
+      '- "unverifiable": the citation is too vague to locate, or its basis could not be checked.\n' +
+      'If every citation resolves, return an empty "ungrounded" list.',
+      { label: 'ground#' + fnd.number, phase: 'Ground', schema: GROUND_SCHEMA, model: 'sonnet' }
+    ).then((r) => r && { findingNumber: fnd.number, ungrounded: r.ungrounded || [] })
+  )
+  const groundResults = (await parallel(groundJobs)).filter(Boolean)
+  const ungrounded = groundResults.flatMap((r) =>
+    r.ungrounded.map((u) => Object.assign({ findingNumber: r.findingNumber }, u)))
+  grounding = { ran: true, checked: groundResults.length, ungrounded }
+  log('Grounding: ' + grounding.checked + ' of ' + synthFindings.length + ' finding(s) checked (top ' +
+    groundTargets.length + '), ' + ungrounded.length + ' citation(s) unresolved.')
+}
 
 return {
   scope,
@@ -493,4 +582,5 @@ return {
     flagged: auditActions.filter((a) => a.action === 'flagged'),
     verdicts,
   },
+  grounding,
 }

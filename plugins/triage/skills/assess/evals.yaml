@@ -17,7 +17,12 @@ scenarios:
     additional_tools:
       - Agent
       - Workflow
-    timeout: 600
+    # The investigation workflow has grown (completeness critic, adversarial
+    # verify, post-synthesis grounding); a medium-effort run on a multi-issue
+    # fixture now writes its assessment around the 500s mark before the
+    # grounding pass, so the earlier 600s wall is no longer generous. Give the
+    # background workflow real headroom while still guarding against a hang.
+    timeout: 1200
     max_budget_usd: 4.0
     sandbox:
       enabled: false
