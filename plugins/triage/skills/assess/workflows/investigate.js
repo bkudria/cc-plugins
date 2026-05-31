@@ -6,7 +6,7 @@ export const meta = {
     { title: 'Plan', detail: 'break the scope into semi-independent areas' },
     { title: 'Investigate', detail: 'one agent per area, observation-only, in parallel' },
     { title: 'Completeness', detail: 'critic names coverage gaps; effort-scaled targeted re-investigation' },
-    { title: 'Verify', detail: 'cross-reference overlapping claims and spot-check numbers' },
+    { title: 'Verify', detail: 'per-observation adversarial lenses on the most significant observations, consolidated with cross-reference and number spot-check' },
     { title: 'Synthesize', detail: 'merge/filter/order into numbered findings and write the file' },
   ],
 }
@@ -51,6 +51,23 @@ const VERIFY_INTENSITY = {
   low: 'Effort is low — keep verification light; independently check only the single most load-bearing claim.',
   medium: 'Cross-reference overlapping claims across areas and spot-check the most significant numeric claim.',
   high: 'Be thorough — cross-reference every overlapping claim, spot-check each significant numeric claim, and independently re-derive the most consequential findings.',
+}
+// Adversarial verification: the most significant observations are each probed by
+// perspective-diverse skeptic lenses before a consolidation barrier. Effort sets
+// the lens COUNT (low skips the fan-out entirely); significance sets WHICH
+// observations get the lenses (top-K). Both caps keep cost bounded regardless of
+// observation count, and a consolidation agent preserves the cross-reference and
+// numeric spot-check the single-pass verifier did.
+const MAX_VERIFY_TARGETS = 6
+const VERIFY_LENSES = {
+  grounding: 'Grounding/citation accuracy. Independently re-derive this observation\'s cited evidence from source using your read-only tools. Do the named files, line numbers, and values actually exist and say what the observation claims? Verdict "drop" if the evidence is fabricated or does not support the claim; "correct" if it is partially right with a fixable inaccuracy; "holds" if fully grounded.',
+  overclaim: 'Over-claim / significance inflation. Judge whether the observation\'s framing and significance are justified by its evidence, or inflated. Is a "high" significance genuinely load-bearing, or is this working-as-designed, minor, or speculative? Verdict "correct" to downgrade or reframe; "drop" if it is not a real issue; "holds" if proportionate.',
+  reliability: 'Reliability / truncation. Judge whether this observation could rest on tool output that was truncated, timed out, or silently failed. Use your tools to check whether the underlying source is larger or different than the evidence implies. Record any concern in reliabilityConcern; verdict "drop" if the basis is likely unreliable; "holds" if solid.',
+}
+const EFFORT_LENSES = {
+  low: [],
+  medium: ['grounding', 'reliability'],
+  high: ['grounding', 'overclaim', 'reliability'],
 }
 // Cap a planner-proposed effort at the optional user ceiling (low < medium < high).
 const clampEffort = (proposed, ceiling) => {
@@ -255,7 +272,7 @@ if (criticRounds > 0 && allObs.length) {
   }
 }
 
-// ---- Verify (barrier: needs every observation at once) ----------------------
+// ---- Verify (adversarial lenses on the top-K, then a consolidation barrier) -
 phase('Verify')
 const VERIFY_SCHEMA = {
   type: 'object',
@@ -280,10 +297,20 @@ const VERIFY_SCHEMA = {
     spotCheckedNumber: { type: 'string', description: 'The most significant numeric claim checked, and the result' },
   },
 }
-const verification = await agent(
+// Single-pass verifier — also the consolidation barrier when handed lens
+// verdicts. With no verdicts it is byte-identical to the original single pass,
+// so the low-effort / empty-observation path is unchanged.
+const verifyConsolidated = (verdictsJson) => agent(
   'You are verifying investigation observations before synthesis. You have read-only tools (Read, Grep, Glob, Bash).\n\n' +
   'Scope: ' + scope + '\n\n' +
   'Observations (JSON):\n' + JSON.stringify(allObs, null, 2) + '\n\n' +
+  (verdictsJson
+    ? 'The most significant observations were each independently probed by adversarial skeptic lenses. ' +
+      'Their verdicts (JSON):\n' + verdictsJson + '\n\n' +
+      'Fold these verdicts in: turn each "correct" verdict into a corrections[] entry ' +
+      '(claim / issue / correctedClaim) and each "drop" verdict or reliabilityConcern into a ' +
+      'reliabilityFlags[] entry. Then run the checks below over the FULL observation set.\n\n'
+    : '') +
   'Perform these checks:\n' +
   '1. Cross-reference claims across areas: where two observations touch the same file, value, or claim, ' +
   'independently verify the shared element. Where areas are disjoint, say so and move on.\n' +
@@ -291,10 +318,64 @@ const verification = await agent(
   'independent check.\n' +
   '3. Reliability: flag any observation that appears to rely on tool output that could have been truncated, ' +
   'timed out, or silently failed.\n' +
+  (verdictsJson
+    ? '4. For observations NOT individually probed above, give them a light group review and flag anything ' +
+      'obviously unsupported.\n'
+    : '') +
   VERIFY_INTENSITY[overallEffort] + '\n' +
   'Do NOT add new findings and do NOT suggest fixes. Report only verification results and corrections.',
   { label: 'verify', schema: VERIFY_SCHEMA }
 )
+
+// Per-observation skeptic verdict — collapsed into VERIFY_SCHEMA at the barrier.
+const VERDICT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['verdict', 'confidence', 'rationale'],
+  properties: {
+    verdict: { type: 'string', enum: ['holds', 'correct', 'drop'] },
+    confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
+    rationale: { type: 'string', description: 'Why, citing what you independently checked' },
+    correction: { type: 'string', description: 'If verdict is "correct": the corrected claim' },
+    reliabilityConcern: { type: 'string', description: 'If the basis may be truncated or failed: describe it' },
+  },
+}
+
+const lenses = EFFORT_LENSES[overallEffort] || []
+let verification
+if (!lenses.length || !allObs.length) {
+  // Low effort or no observations: the single-pass verifier, unchanged.
+  verification = await verifyConsolidated(null)
+} else {
+  // Rank by significance (high first); the top-K get the full lens set. Stable
+  // sort, no Date/Math.random (both forbidden in the harness).
+  const sigRank = { high: 0, medium: 1, low: 2 }
+  const rankOf = (x) => (x.significance in sigRank ? sigRank[x.significance] : 3)
+  const targets = allObs
+    .map((o, i) => ({ o, i }))
+    .sort((a, b) => rankOf(a.o) - rankOf(b.o))
+    .slice(0, MAX_VERIFY_TARGETS)
+  log('Adversarial verify: ' + lenses.length + ' lens(es) over the top ' + targets.length +
+    ' of ' + allObs.length + ' observation(s).')
+  const verdictJobs = []
+  targets.forEach(({ o, i }) => lenses.forEach((lens) => verdictJobs.push(() =>
+    agent(
+      'You are an adversarial verifier applying ONE lens to ONE investigation observation before synthesis. ' +
+      'You have read-only tools (Read, Grep, Glob, Bash).\n\n' +
+      'Scope: ' + scope + '\n' +
+      'Lens — ' + VERIFY_LENSES[lens] + '\n\n' +
+      'Observation (JSON):\n' + JSON.stringify(o, null, 2) + '\n\n' +
+      'Apply ONLY this lens. Be skeptical and check independently rather than trusting the observation. ' +
+      'You may correct an inaccurate CLAIM, but do NOT suggest code fixes and do NOT invent new findings.',
+      { label: 'verify:' + lens + '#' + i, phase: 'Verify', schema: VERDICT_SCHEMA, model: 'sonnet' }
+    ).then((v) => v && Object.assign({ area: o.area, title: o.title, lens: lens }, v))
+  )))
+  const verdicts = (await parallel(verdictJobs)).filter(Boolean)
+  log('Collected ' + verdicts.length + ' lens verdict(s); consolidating.')
+  // Consolidation barrier — fold verdicts into the contract, cross-reference,
+  // group-review the rest. Model omitted → inherits the lead (like synthesize).
+  verification = await verifyConsolidated(JSON.stringify(verdicts, null, 2))
+}
 
 // ---- Synthesize + write -----------------------------------------------------
 phase('Synthesize')
