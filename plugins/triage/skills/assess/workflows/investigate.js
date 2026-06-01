@@ -7,7 +7,7 @@ export const meta = {
     { title: 'Investigate', detail: 'one agent per area, observation-only, in parallel' },
     { title: 'Completeness', detail: 'critic names coverage gaps; effort-scaled targeted re-investigation' },
     { title: 'Verify', detail: 'per-observation adversarial lenses on the most significant observations; verdicts applied in code (drop/correct), then a cross-area consolidation barrier, with a verification audit trail in the result' },
-    { title: 'Synthesize', detail: 'merge/filter/order into numbered findings and write the file' },
+    { title: 'Synthesize', detail: 'merge/filter/order into numbered findings and write the file; a degraded or failed run is reflected in the result status and coverage' },
     { title: 'Ground', detail: 'post-synthesis grounding: re-read each finding citation against source and flag any that do not resolve' },
   ],
 }
@@ -25,7 +25,7 @@ if (typeof args === 'string') {
 const scope = P.scope
 if (!scope) {
   log('No scope provided. Pass args.scope (the area to investigate).')
-  return { error: 'scope is required', findingsCount: 0 }
+  return { status: 'failed', error: 'scope is required', findingsCount: 0 }
 }
 const focus = P.focus ||
   'problems, gaps, risks, inconsistencies, surprising patterns, missing pieces, and opportunities for improvement'
@@ -37,6 +37,10 @@ const sessionId = P.sessionId || 'latest'
 const outPath = P.outPath || '/tmp/assessment-' + sessionId + '.md'
 
 const MAX_AREAS = 8
+// A plan-critic reviews the decomposition before fan-out, but only once there are
+// enough areas for coverage/overlap problems to be real; below this a 1-2 area split
+// can't meaningfully be mis-divided, so the critic is skipped.
+const PLAN_CRITIC_MIN_AREAS = 3
 // Completeness-critic loop: max critic rounds scale with overall effort, so
 // simple scopes never pay for it. Each round may surface a few gap areas, hard-
 // capped so initial + gap areas can never run away.
@@ -74,12 +78,49 @@ const EFFORT_LENSES = {
   medium: ['grounding', 'reliability'],
   high: ['grounding', 'overclaim', 'reliability'],
 }
+// Shared read-only framing for the tool-using sub-agents (investigator + the two
+// verifiers): one identical statement of the toolset and the primary-source
+// discipline, so these roles cannot drift on how they phrase it. Each role keeps its
+// own output discipline (observation-only / no fixes / no new findings) inline.
+const READ_ONLY_TOOLS =
+  'You have read-only tools (Read, Grep, Glob, Bash). Use them to consult primary sources directly: ' +
+  'read the actual files and run the actual searches rather than relying on memory or inference.'
 // Cap a planner-proposed effort at the optional user ceiling (low < medium < high).
 const clampEffort = (proposed, ceiling) => {
   const p = EFFORT_LEVELS.indexOf(proposed)
   const safe = p === -1 ? EFFORT_LEVELS.indexOf('medium') : p
   if (!ceiling) return EFFORT_LEVELS[safe]
   return EFFORT_LEVELS[Math.min(safe, EFFORT_LEVELS.indexOf(ceiling))]
+}
+
+// Retry a bare critical-path agent() call once on throw. parallel() swallows a
+// throw to null, but a bare `await agent()` on the critical path (planner, synth)
+// propagates uncaught and kills the whole run; one retry absorbs a transient
+// failure. Returns null if both attempts throw — the caller decides how to degrade.
+const withRetry = async (label, fn) => {
+  try { return await fn() }
+  catch (e1) {
+    log('Stage "' + label + '" threw (' + ((e1 && e1.message) || e1) + '); retrying once.')
+    try { return await fn() }
+    catch (e2) {
+      log('Stage "' + label + '" failed after retry (' + ((e2 && e2.message) || e2) + ').')
+      return null
+    }
+  }
+}
+
+// Derive the run's status + normalized coverage from the raw degradation signals.
+// Pure (signals in, plain object out — no injected globals), so it is the first
+// unit to cover when a JS test harness lands.
+//   'failed'   — no usable synthesis (planner died, or synth failed after retry).
+//   'degraded' — produced output but lost coverage (areas dropped) or skipped verify.
+//   'ok'       — no losses (a legitimately empty result is still 'ok'; its document
+//                shape is owned elsewhere).
+const degradationSummary = ({ plannedAreas, droppedAreas, synthOk, verifyFailed }) => {
+  const status = !synthOk ? 'failed'
+    : (droppedAreas.length > 0 || verifyFailed) ? 'degraded'
+    : 'ok'
+  return { status, coverage: { planned: plannedAreas, completed: plannedAreas - droppedAreas.length, dropped: droppedAreas } }
 }
 
 // ---- Plan -------------------------------------------------------------------
@@ -108,10 +149,34 @@ const PLAN_SCHEMA = {
     },
   },
 }
+const PLAN_REVIEW_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['sound', 'issues'],
+  properties: {
+    sound: { type: 'boolean', description: 'true if the areas cover the question, are mutually distinct, and the count fits the scope' },
+    issues: {
+      type: 'array',
+      maxItems: 4,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['kind', 'detail'],
+        properties: {
+          kind: { type: 'string', enum: ['coverage', 'overlap', 'count'] },
+          detail: { type: 'string', description: 'One line: the specific gap, overlap, or sizing problem' },
+        },
+      },
+    },
+  },
+}
 const ceilingNote = effortCeiling
   ? 'The user capped effort at "' + effortCeiling + '" — do NOT assign any area a higher effort than that, and lean toward fewer areas.\n'
   : 'No effort cap was given — allocate adaptively to fit the scope you find.\n'
-const plan = await agent(
+// One source of truth for how to decompose the scope, used for the initial plan and
+// for the plan-critic's single revision. `revisionNote` is empty on the first pass and
+// carries the critique on a re-plan, so both plans obey identical decomposition rules.
+const buildPlanPrompt = (revisionNote) =>
   'You are planning an investigation (an assessment), not performing it.\n\n' +
   'Scope: ' + scope + '\n' +
   'Focus: ' + focus + '\n\n' +
@@ -125,25 +190,84 @@ const plan = await agent(
   'facets of one investigation, not a disconnected inventory. Each area should be explorable on its own. ' +
   'For each area give a short name, a one-line rationale, and an effort level (low / medium / high) sized to ' +
   'how much that facet warrants. Also give a one-line effortRationale for the overall allocation. ' +
-  'Do NOT investigate yet and do NOT propose fixes.',
-  { label: 'plan', schema: PLAN_SCHEMA }
-)
+  (revisionNote || '') +
+  'Do NOT investigate yet and do NOT propose fixes.'
+const plan = await withRetry('plan', () => agent(buildPlanPrompt(''), { label: 'plan', schema: PLAN_SCHEMA }))
+if (!plan) {
+  log('Planning failed after retry; cannot investigate.')
+  return { status: 'failed', error: 'planning failed', scope, findingsCount: 0 }
+}
 
-let areas = (plan && plan.areas) || []
+// Normalize a raw plan's areas: cap the count (logging any drop) and clamp each area's
+// effort to the optional user ceiling. Shared by the initial plan and the plan-critic's
+// revision so a revised plan can never bypass the bounds.
+const finalizeAreas = (raw) => {
+  let a = raw
+  if (a.length > MAX_AREAS) {
+    log('Planner proposed ' + a.length + ' areas; capping at ' + MAX_AREAS +
+      ' (dropped: ' + a.slice(MAX_AREAS).map((x) => x.name).join(', ') + ').')
+    a = a.slice(0, MAX_AREAS)
+  }
+  return a.map((x) => ({ ...x, effort: clampEffort(x.effort, effortCeiling) }))
+}
+// Overall effort = the user ceiling if set, else the most ambitious area's effort.
+const deriveOverallEffort = (a) => effortCeiling ||
+  EFFORT_LEVELS[Math.max.apply(null, a.map((x) => EFFORT_LEVELS.indexOf(x.effort)))]
+
+let areas = finalizeAreas((plan && plan.areas) || [])
 if (!areas.length) {
   log('Planner produced no areas; nothing to investigate.')
-  return { error: 'no areas planned', scope, findingsCount: 0 }
+  return { status: 'failed', error: 'no areas planned', scope, findingsCount: 0 }
 }
-if (areas.length > MAX_AREAS) {
-  log('Planner proposed ' + areas.length + ' areas; capping at ' + MAX_AREAS +
-    ' (dropped: ' + areas.slice(MAX_AREAS).map((a) => a.name).join(', ') + ').')
-  areas = areas.slice(0, MAX_AREAS)
+let overallEffort = deriveOverallEffort(areas)
+
+// ---- Plan critic (gated; one bounded revision) ------------------------------
+// Before paying for fan-out, a no-tool critic judges the decomposition for coverage,
+// disjointness, and count. Gated on effort + size so simple scopes skip it. On a genuine
+// problem one revised plan is requested through the same prompt and bounds; a revision
+// that yields nothing usable falls back to the original plan.
+if (overallEffort !== 'low' && areas.length >= PLAN_CRITIC_MIN_AREAS) {
+  const review = await agent(
+    'You are reviewing a planned decomposition of an investigation (an assessment) BEFORE it runs — ' +
+    'not performing it.\n\n' +
+    'Scope: ' + scope + '\n' +
+    'Overall question: ' + (plan.overallQuestion || scope) + '\n' +
+    'Focus: ' + focus + '\n\n' +
+    'Proposed areas (JSON):\n' +
+    JSON.stringify(areas.map((a) => ({ name: a.name, rationale: a.rationale })), null, 2) + '\n\n' +
+    'Judge the decomposition on three axes:\n' +
+    '- coverage: do the areas TOGETHER cover the overall question, or is a material facet left out?\n' +
+    '- overlap: do any two areas investigate the same ground (which would duplicate cost)?\n' +
+    '- count: is the number of areas sized to the scope, or clearly too many / too few?\n\n' +
+    'Name only GENUINE structural problems. Do NOT investigate the scope, do NOT propose fixes, and do NOT ' +
+    'invent issues to seem thorough. If the decomposition is sound, set sound=true and return an empty issues list.',
+    { label: 'plan-critic', phase: 'Plan', schema: PLAN_REVIEW_SCHEMA }
+  )
+  const issues = (review && review.issues) || []
+  if (review && review.sound === false && issues.length) {
+    log('Plan critic flagged ' + issues.length + ' issue(s) (' + issues.map((i) => i.kind).join(', ') +
+      '); revising once.')
+    const revisionNote =
+      'A prior decomposition of this scope was REJECTED before investigation. Issues found:\n' +
+      issues.map((i) => '- [' + i.kind + '] ' + i.detail).join('\n') + '\n' +
+      'The rejected areas were: ' + areas.map((a) => a.name).join('; ') + '.\n' +
+      'Produce a better decomposition that closes the coverage gaps, makes the areas mutually distinct, and ' +
+      'sizes the count to the scope.\n'
+    const revised = await agent(buildPlanPrompt(revisionNote), { label: 'plan-revise', phase: 'Plan', schema: PLAN_SCHEMA })
+    const revisedAreas = finalizeAreas((revised && revised.areas) || [])
+    if (revisedAreas.length) {
+      areas = revisedAreas
+      overallEffort = deriveOverallEffort(areas)
+      log('Revised plan: ' + areas.length + ' area(s).')
+    } else {
+      log('Revision produced no usable areas; keeping original plan.')
+    }
+  } else {
+    log('Plan critic: decomposition sound.')
+  }
 }
-// Clamp each area's effort to the optional user ceiling.
-areas = areas.map((a) => ({ ...a, effort: clampEffort(a.effort, effortCeiling) }))
+
 const areaNames = areas.map((a) => a.name)
-const overallEffort = effortCeiling ||
-  EFFORT_LEVELS[Math.max.apply(null, areas.map((a) => EFFORT_LEVELS.indexOf(a.effort)))]
 log('Investigating ' + areas.length + ' area(s) at ' + overallEffort + ' effort: ' + areaNames.join(', '))
 
 // ---- Investigate (parallel fan-out, observation-only) -----------------------
@@ -185,6 +309,7 @@ const investigateArea = (a, phaseName) =>
     areaNames.filter((n) => n !== a.name).join('; ') + '\n' +
     'Look for: ' + focus + '\n' +
     'Effort for this area: ' + a.effort + ' — ' + EFFORT_GUIDANCE[a.effort] + '\n\n' +
+    READ_ONLY_TOOLS + '\n\n' +
     'OBSERVATION-ONLY. Do NOT suggest fixes, solutions, or what "should" be done. Record only what IS and why ' +
     'it is noteworthy. Every observation MUST include concrete evidence: file paths, line numbers, configuration ' +
     'values, or specific patterns — observations without evidence are opinions, not findings. ' +
@@ -192,12 +317,15 @@ const investigateArea = (a, phaseName) =>
     { label: (phaseName === 'Completeness' ? 'gap:' : 'area:') + a.name, phase: phaseName, schema: OBS_SCHEMA, model: 'sonnet' }
   )
 
-const investigations = (await parallel(
+const droppedAreaNames = []
+let dispatchedAreas = areas.length
+const investResults = await parallel(
   areas.map((a) => () => investigateArea(a, 'Investigate'))
-)).filter(Boolean)
-
-if (investigations.length < areas.length) {
-  log((areas.length - investigations.length) + ' area(s) failed to investigate and were dropped.')
+)
+areas.forEach((a, i) => { if (!investResults[i]) droppedAreaNames.push(a.name) })
+const investigations = investResults.filter(Boolean)
+if (droppedAreaNames.length) {
+  log(droppedAreaNames.length + ' area(s) failed to investigate and were dropped: ' + droppedAreaNames.join(', ') + '.')
 }
 // Flatten investigator results into one observation list (shared by the initial
 // fan-out and the completeness gap rounds).
@@ -268,9 +396,12 @@ if (criticRounds > 0 && allObs.length) {
     const gapAreas = fresh.map((g) => ({ name: g.name, rationale: g.rationale, effort: clampEffort(overallEffort, effortCeiling) }))
     gapAreas.forEach((a) => areaNames.push(a.name))
     log('Completeness critic: investigating ' + gapAreas.length + ' gap area(s): ' + gapAreas.map((a) => a.name).join(', ') + '.')
-    const gapInvestigations = (await parallel(
+    const gapResults = await parallel(
       gapAreas.map((a) => () => investigateArea(a, 'Completeness'))
-    )).filter(Boolean)
+    )
+    dispatchedAreas += gapAreas.length
+    gapAreas.forEach((a, i) => { if (!gapResults[i]) droppedAreaNames.push(a.name) })
+    const gapInvestigations = gapResults.filter(Boolean)
     const gapObs = collectObs(gapInvestigations)
     allObs.push(...gapObs)
     log('Completeness round added ' + gapObs.length + ' observation(s); ' + allObs.length + ' total across ' + areaNames.length + ' area(s).')
@@ -308,7 +439,7 @@ const VERIFY_SCHEMA = {
 // is byte-identical to the original single-pass verifier, so the low-effort /
 // empty-observation path is unchanged.
 const verifyConsolidated = (obs, probedKeys) => agent(
-  'You are verifying investigation observations before synthesis. You have read-only tools (Read, Grep, Glob, Bash).\n\n' +
+  'You are verifying investigation observations before synthesis. ' + READ_ONLY_TOOLS + '\n\n' +
   'Scope: ' + scope + '\n\n' +
   'Observations (JSON):\n' + JSON.stringify(obs, null, 2) + '\n\n' +
   'Perform these checks:\n' +
@@ -383,10 +514,21 @@ let verification
 let verdicts = []
 let auditActions = []
 let verifiedObs = allObs
+let verifyFailed = false
+// Guard the bare consolidation call so a throw degrades the run instead of crashing
+// it; the per-lens verdict jobs already self-degrade inside parallel().
+const safeVerify = async (obs, probed) => {
+  try { return await verifyConsolidated(obs, probed) }
+  catch (e) {
+    verifyFailed = true
+    log('Consolidation verify failed (' + ((e && e.message) || e) + '); continuing without it.')
+    return { checksPerformed: [], corrections: [], reliabilityFlags: ['consolidation verification failed and was skipped'] }
+  }
+}
 if (!lenses.length || !allObs.length) {
   // Low effort or no observations: the single-pass verifier over the full set,
   // unchanged. No lens verdicts exist here, so nothing is enforced in code.
-  verification = await verifyConsolidated(allObs)
+  verification = await safeVerify(allObs)
 } else {
   // Rank by significance (high first); the top-K get the full lens set. Stable
   // sort, no Date/Math.random (both forbidden in the harness).
@@ -402,7 +544,7 @@ if (!lenses.length || !allObs.length) {
   targets.forEach(({ o, i }) => lenses.forEach((lens) => verdictJobs.push(() =>
     agent(
       'You are an adversarial verifier applying ONE lens to ONE investigation observation before synthesis. ' +
-      'You have read-only tools (Read, Grep, Glob, Bash).\n\n' +
+      READ_ONLY_TOOLS + '\n\n' +
       'Scope: ' + scope + '\n' +
       'Lens — ' + VERIFY_LENSES[lens] + '\n\n' +
       'Observation (JSON):\n' + JSON.stringify(o, null, 2) + '\n\n' +
@@ -421,7 +563,7 @@ if (!lenses.length || !allObs.length) {
     auditActions.filter((a) => a.action === 'corrected').length + ' corrected, ' +
     auditActions.filter((a) => a.action === 'flagged').length + ' flagged.')
   const probedKeys = targets.map(({ o }) => o.area + ' / ' + o.title)
-  verification = await verifyConsolidated(verifiedObs, probedKeys)
+  verification = await safeVerify(verifiedObs, probedKeys)
 }
 
 // ---- Synthesize + write -----------------------------------------------------
@@ -454,10 +596,17 @@ const SYNTH_SCHEMA = {
     },
   },
 }
-const synth = await agent(
+const completedAreaNames = areaNames.filter((n) => !droppedAreaNames.includes(n))
+const coverageNote = droppedAreaNames.length
+  ? 'INCOMPLETE COVERAGE: ' + droppedAreaNames.length + ' planned area(s) failed to investigate and are absent ' +
+    'from these observations: ' + droppedAreaNames.join(', ') + '. Note this incompleteness briefly in the Summary; ' +
+    'do not imply the assessment is exhaustive.\n\n'
+  : ''
+const synth = await withRetry('synthesize', () => agent(
   'You are synthesizing investigation observations into a final numbered assessment, then writing it to disk.\n\n' +
   'Scope: ' + scope + '\n' +
-  'Areas covered: ' + areaNames.join(', ') + '\n\n' +
+  'Areas covered: ' + completedAreaNames.join(', ') + '\n\n' +
+  coverageNote +
   'Observations (JSON) — already reconciled against per-observation verification; honor any ' +
   '"verificationNotes" field (applied corrections / reliability flags):\n' + JSON.stringify(verifiedObs, null, 2) + '\n\n' +
   'Cross-area verification results (apply these corrections; drop or fix any claim flagged unreliable):\n' +
@@ -499,10 +648,14 @@ const synth = await agent(
   'AFTER composing the assessment, WRITE it verbatim to exactly this path using the Write tool: ' + outPath + '\n' +
   'Then return the markdown, the integer finding count, the outPath, and the findings array.',
   { label: 'synthesize', phase: 'Synthesize', schema: SYNTH_SCHEMA }
-)
+))
 
+const synthOk = !!(synth && synth.markdown)
+const { status, coverage } = degradationSummary({ plannedAreas: dispatchedAreas, droppedAreas: droppedAreaNames, synthOk, verifyFailed })
 const finalPath = (synth && synth.outPath) || outPath
-log('Assessment written to ' + finalPath + ' (' + ((synth && synth.findingsCount) || 0) + ' findings).')
+log('Synthesis ' + (synthOk
+  ? 'written to ' + finalPath + ' (' + ((synth && synth.findingsCount) || 0) + ' findings)'
+  : 'FAILED — no trustworthy file') + '; status=' + status + '.')
 
 // ---- Ground (post-synthesis citation grounding; gated; flag-only) -----------
 // The synthesizer reshapes observations into findings (merge / split / renumber) with no
@@ -570,10 +723,13 @@ return {
   focus,
   effort: overallEffort,
   areas: areaNames,
+  status,
+  coverage,
   observationCount: allObs.length,
   findingsCount: (synth && synth.findingsCount) || 0,
   outPath: finalPath,
   markdown: (synth && synth.markdown) || '',
+  ...(synthOk ? {} : { error: 'synthesis failed' }),
   verification: {
     enforced: lenses.length > 0 && allObs.length > 0,
     checks: verification,
