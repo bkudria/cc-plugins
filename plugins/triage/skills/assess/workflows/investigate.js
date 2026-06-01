@@ -36,6 +36,10 @@ const sessionId = P.sessionId || 'latest'
 const outPath = P.outPath || '/tmp/assessment-' + sessionId + '.md'
 
 const MAX_AREAS = 8
+// A plan-critic reviews the decomposition before fan-out, but only once there are
+// enough areas for coverage/overlap problems to be real; below this a 1-2 area split
+// can't meaningfully be mis-divided, so the critic is skipped.
+const PLAN_CRITIC_MIN_AREAS = 3
 // Completeness-critic loop: max critic rounds scale with overall effort, so
 // simple scopes never pay for it. Each round may surface a few gap areas, hard-
 // capped so initial + gap areas can never run away.
@@ -140,10 +144,34 @@ const PLAN_SCHEMA = {
     },
   },
 }
+const PLAN_REVIEW_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['sound', 'issues'],
+  properties: {
+    sound: { type: 'boolean', description: 'true if the areas cover the question, are mutually distinct, and the count fits the scope' },
+    issues: {
+      type: 'array',
+      maxItems: 4,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['kind', 'detail'],
+        properties: {
+          kind: { type: 'string', enum: ['coverage', 'overlap', 'count'] },
+          detail: { type: 'string', description: 'One line: the specific gap, overlap, or sizing problem' },
+        },
+      },
+    },
+  },
+}
 const ceilingNote = effortCeiling
   ? 'The user capped effort at "' + effortCeiling + '" — do NOT assign any area a higher effort than that, and lean toward fewer areas.\n'
   : 'No effort cap was given — allocate adaptively to fit the scope you find.\n'
-const plan = await withRetry('plan', () => agent(
+// One source of truth for how to decompose the scope, used for the initial plan and
+// for the plan-critic's single revision. `revisionNote` is empty on the first pass and
+// carries the critique on a re-plan, so both plans obey identical decomposition rules.
+const buildPlanPrompt = (revisionNote) =>
   'You are planning an investigation (an assessment), not performing it.\n\n' +
   'Scope: ' + scope + '\n' +
   'Focus: ' + focus + '\n\n' +
@@ -157,29 +185,84 @@ const plan = await withRetry('plan', () => agent(
   'facets of one investigation, not a disconnected inventory. Each area should be explorable on its own. ' +
   'For each area give a short name, a one-line rationale, and an effort level (low / medium / high) sized to ' +
   'how much that facet warrants. Also give a one-line effortRationale for the overall allocation. ' +
-  'Do NOT investigate yet and do NOT propose fixes.',
-  { label: 'plan', schema: PLAN_SCHEMA }
-))
+  (revisionNote || '') +
+  'Do NOT investigate yet and do NOT propose fixes.'
+const plan = await withRetry('plan', () => agent(buildPlanPrompt(''), { label: 'plan', schema: PLAN_SCHEMA }))
 if (!plan) {
   log('Planning failed after retry; cannot investigate.')
   return { status: 'failed', error: 'planning failed', scope, findingsCount: 0 }
 }
 
-let areas = (plan && plan.areas) || []
+// Normalize a raw plan's areas: cap the count (logging any drop) and clamp each area's
+// effort to the optional user ceiling. Shared by the initial plan and the plan-critic's
+// revision so a revised plan can never bypass the bounds.
+const finalizeAreas = (raw) => {
+  let a = raw
+  if (a.length > MAX_AREAS) {
+    log('Planner proposed ' + a.length + ' areas; capping at ' + MAX_AREAS +
+      ' (dropped: ' + a.slice(MAX_AREAS).map((x) => x.name).join(', ') + ').')
+    a = a.slice(0, MAX_AREAS)
+  }
+  return a.map((x) => ({ ...x, effort: clampEffort(x.effort, effortCeiling) }))
+}
+// Overall effort = the user ceiling if set, else the most ambitious area's effort.
+const deriveOverallEffort = (a) => effortCeiling ||
+  EFFORT_LEVELS[Math.max.apply(null, a.map((x) => EFFORT_LEVELS.indexOf(x.effort)))]
+
+let areas = finalizeAreas((plan && plan.areas) || [])
 if (!areas.length) {
   log('Planner produced no areas; nothing to investigate.')
   return { status: 'failed', error: 'no areas planned', scope, findingsCount: 0 }
 }
-if (areas.length > MAX_AREAS) {
-  log('Planner proposed ' + areas.length + ' areas; capping at ' + MAX_AREAS +
-    ' (dropped: ' + areas.slice(MAX_AREAS).map((a) => a.name).join(', ') + ').')
-  areas = areas.slice(0, MAX_AREAS)
+let overallEffort = deriveOverallEffort(areas)
+
+// ---- Plan critic (gated; one bounded revision) ------------------------------
+// Before paying for fan-out, a no-tool critic judges the decomposition for coverage,
+// disjointness, and count. Gated on effort + size so simple scopes skip it. On a genuine
+// problem one revised plan is requested through the same prompt and bounds; a revision
+// that yields nothing usable falls back to the original plan.
+if (overallEffort !== 'low' && areas.length >= PLAN_CRITIC_MIN_AREAS) {
+  const review = await agent(
+    'You are reviewing a planned decomposition of an investigation (an assessment) BEFORE it runs — ' +
+    'not performing it.\n\n' +
+    'Scope: ' + scope + '\n' +
+    'Overall question: ' + (plan.overallQuestion || scope) + '\n' +
+    'Focus: ' + focus + '\n\n' +
+    'Proposed areas (JSON):\n' +
+    JSON.stringify(areas.map((a) => ({ name: a.name, rationale: a.rationale })), null, 2) + '\n\n' +
+    'Judge the decomposition on three axes:\n' +
+    '- coverage: do the areas TOGETHER cover the overall question, or is a material facet left out?\n' +
+    '- overlap: do any two areas investigate the same ground (which would duplicate cost)?\n' +
+    '- count: is the number of areas sized to the scope, or clearly too many / too few?\n\n' +
+    'Name only GENUINE structural problems. Do NOT investigate the scope, do NOT propose fixes, and do NOT ' +
+    'invent issues to seem thorough. If the decomposition is sound, set sound=true and return an empty issues list.',
+    { label: 'plan-critic', phase: 'Plan', schema: PLAN_REVIEW_SCHEMA }
+  )
+  const issues = (review && review.issues) || []
+  if (review && review.sound === false && issues.length) {
+    log('Plan critic flagged ' + issues.length + ' issue(s) (' + issues.map((i) => i.kind).join(', ') +
+      '); revising once.')
+    const revisionNote =
+      'A prior decomposition of this scope was REJECTED before investigation. Issues found:\n' +
+      issues.map((i) => '- [' + i.kind + '] ' + i.detail).join('\n') + '\n' +
+      'The rejected areas were: ' + areas.map((a) => a.name).join('; ') + '.\n' +
+      'Produce a better decomposition that closes the coverage gaps, makes the areas mutually distinct, and ' +
+      'sizes the count to the scope.\n'
+    const revised = await agent(buildPlanPrompt(revisionNote), { label: 'plan-revise', phase: 'Plan', schema: PLAN_SCHEMA })
+    const revisedAreas = finalizeAreas((revised && revised.areas) || [])
+    if (revisedAreas.length) {
+      areas = revisedAreas
+      overallEffort = deriveOverallEffort(areas)
+      log('Revised plan: ' + areas.length + ' area(s).')
+    } else {
+      log('Revision produced no usable areas; keeping original plan.')
+    }
+  } else {
+    log('Plan critic: decomposition sound.')
+  }
 }
-// Clamp each area's effort to the optional user ceiling.
-areas = areas.map((a) => ({ ...a, effort: clampEffort(a.effort, effortCeiling) }))
+
 const areaNames = areas.map((a) => a.name)
-const overallEffort = effortCeiling ||
-  EFFORT_LEVELS[Math.max.apply(null, areas.map((a) => EFFORT_LEVELS.indexOf(a.effort)))]
 log('Investigating ' + areas.length + ' area(s) at ' + overallEffort + ' effort: ' + areaNames.join(', '))
 
 // ---- Investigate (parallel fan-out, observation-only) -----------------------
