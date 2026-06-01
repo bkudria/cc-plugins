@@ -7,7 +7,7 @@ export const meta = {
     { title: 'Investigate', detail: 'one agent per area, observation-only, in parallel' },
     { title: 'Completeness', detail: 'critic names coverage gaps; effort-scaled targeted re-investigation' },
     { title: 'Verify', detail: 'per-observation adversarial lenses on the most significant observations; verdicts applied in code (drop/correct), then a cross-area consolidation barrier, with a verification audit trail in the result' },
-    { title: 'Synthesize', detail: 'merge/filter/order into numbered findings and write the file; a degraded or failed run is reflected in the result status and coverage' },
+    { title: 'Synthesize', detail: 'merge/filter/order into structured numbered findings, render the markdown deterministically, and write the file; a degraded or failed run is reflected in the result status and coverage' },
     { title: 'Ground', detail: 'post-synthesis grounding: re-read each finding citation against source and flag any that do not resolve' },
   ],
 }
@@ -121,6 +121,29 @@ const degradationSummary = ({ plannedAreas, droppedAreas, synthOk, verifyFailed 
     : (droppedAreas.length > 0 || verifyFailed) ? 'degraded'
     : 'ok'
   return { status, coverage: { planned: plannedAreas, completed: plannedAreas - droppedAreas.length, dropped: droppedAreas } }
+}
+
+// Render the final assessment markdown DETERMINISTICALLY from the synthesizer's
+// structured output. Formatting — the "### N. Title" finding headings, the three
+// structural h2s, the single-paragraph bodies — is owned by code, not the LLM, so the
+// document shape cannot drift: the synthesizer supplies only field VALUES. Pure
+// (structure in, string out — no injected globals); the prime unit to cover when a JS
+// test harness lands. Citations are intentionally NOT rendered (internal grounding only).
+const renderAssessment = ({ assessmentTitle, scopeSummary, areasCovered, findings, summary }) => {
+  const parts = [
+    '## Assessment: ' + assessmentTitle,
+    '',
+    '**Scope**: ' + scopeSummary,
+    '**Areas covered**: ' + areasCovered,
+    '',
+    '## Findings',
+    '',
+  ]
+  for (const f of findings) {
+    parts.push('### ' + f.number + '. ' + f.title, '', f.body, '')
+  }
+  parts.push('## Summary', '', summary, '')
+  return parts.join('\n')
 }
 
 // ---- Plan -------------------------------------------------------------------
@@ -568,32 +591,49 @@ if (!lenses.length || !allObs.length) {
 
 // ---- Synthesize + write -----------------------------------------------------
 phase('Synthesize')
+// The synthesizer returns the assessment as STRUCTURED DATA, not markdown. The workflow
+// renders the document from this (renderAssessment), so the LLM never hand-produces the
+// "### N." heading shape that used to drift. findingsCount / outPath / the markdown text
+// are all derived in code, not returned by the agent.
 const SYNTH_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['markdown', 'findingsCount', 'outPath', 'findings'],
+  required: ['assessmentTitle', 'scopeSummary', 'areasCovered', 'findings', 'summary'],
   properties: {
-    markdown: { type: 'string' },
-    findingsCount: { type: 'integer' },
-    outPath: { type: 'string' },
+    assessmentTitle: { type: 'string', description: 'Short scope description for the document\'s "## Assessment: <...>" header' },
+    scopeSummary: { type: 'string', description: 'One line: what was investigated (rendered as the "**Scope**:" value)' },
+    areasCovered: { type: 'string', description: 'Comma-separated areas investigated (rendered as the "**Areas covered**:" value)' },
     findings: {
       type: 'array',
-      description: 'One entry per "### N." finding in the markdown, in the same order: the structured citations behind each finding. NOT written into the .md — used only to ground the final findings against source post-synthesis.',
+      description: 'The findings as structured data, in significance order (most impactful first). The workflow renders the markdown from this — the agent writes no markdown itself.',
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['number', 'title', 'citations'],
+        required: ['number', 'title', 'body', 'citations'],
         properties: {
-          number: { type: 'integer', description: 'The finding number, matching its "### N." heading' },
-          title: { type: 'string', description: 'The finding title, matching its heading' },
+          number: { type: 'integer', description: 'Finding number from significance order (1 = most impactful); rendered as the "### N." heading' },
+          title: { type: 'string', description: 'Short descriptive finding title; rendered after the number on the heading line' },
+          body: { type: 'string', description: 'A single observation-only paragraph: what was found, where (paths/lines/values), current state, why noteworthy. No sub-bullets, no fixes.' },
           citations: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Concrete source locations this finding rests on (file paths, line numbers, values, patterns), carried from the evidence of the observation(s) it synthesizes',
+            description: 'Concrete source locations this finding rests on (file paths, line numbers, values, patterns), carried from the evidence of the observation(s) it synthesizes. INTERNAL — used only to ground the finding against source; never rendered into the document.',
           },
         },
       },
     },
+    summary: { type: 'string', description: 'Brief overall assessment paragraph rendered under "## Summary": concentration of problems, recurring root causes, severity. No positive / working-as-designed notes.' },
+  },
+}
+// The rendered document is persisted by a minimal write-agent (the workflow script has no
+// filesystem access); it confirms the write so a failed persist degrades the run.
+const WRITE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['written', 'path'],
+  properties: {
+    written: { type: 'boolean', description: 'True iff the document was written to disk' },
+    path: { type: 'string', description: 'The path actually written' },
   },
 }
 const completedAreaNames = areaNames.filter((n) => !droppedAreaNames.includes(n))
@@ -603,7 +643,7 @@ const coverageNote = droppedAreaNames.length
     'do not imply the assessment is exhaustive.\n\n'
   : ''
 const synth = await withRetry('synthesize', () => agent(
-  'You are synthesizing investigation observations into a final numbered assessment, then writing it to disk.\n\n' +
+  'You are synthesizing investigation observations into a final numbered assessment, returned as STRUCTURED DATA.\n\n' +
   'Scope: ' + scope + '\n' +
   'Areas covered: ' + completedAreaNames.join(', ') + '\n\n' +
   coverageNote +
@@ -627,34 +667,39 @@ const synth = await withRetry('synthesize', () => agent(
   '"recommend", "fix by", "migrate to", "replace with", "switch to", or any imperative directed at future ' +
   'action. Mid-sentence modals count: "endpoints that should not be accessible" becomes "endpoints are exposed ' +
   'in config.py". Strip the prescription; keep only the description.\n\n' +
-  'OUTPUT FORMAT — produce exactly this Markdown (h3 finding headings are "### N. Title" — number and short ' +
-  'title only, no bold, no em dash, no body text on the heading line; finding bodies are a single plain ' +
-  'paragraph with no sub-bullets):\n\n' +
-  '## Assessment: <scope description>\n\n' +
-  '**Scope**: <what was investigated>\n' +
-  '**Areas covered**: <comma-separated areas>\n\n' +
-  '## Findings\n\n' +
-  '### 1. <short descriptive title>\n\n' +
-  '<single paragraph: what was found, where (paths/lines/values), current state, why noteworthy>\n\n' +
-  '### 2. <...>\n\n' +
-  '## Summary\n\n' +
-  '<N findings. Brief overall assessment: concentration of problems, recurring root causes, severity. No ' +
-  'positive or working-as-designed notes.>\n\n' +
-  'STRUCTURED CITATIONS (separate from the markdown — do NOT put these in the .md): alongside the prose, return a ' +
-  '"findings" array with one entry per "### N." heading, in the same order, each carrying the SAME number and ' +
-  'title and a "citations" list of the concrete source locations that finding rests on (file paths, line ' +
-  'numbers, values, patterns), drawn from the "evidence" of the observation(s) you merged into it. These ground ' +
-  'the findings against source after synthesis; the markdown itself stays prose-only.\n\n' +
-  'AFTER composing the assessment, WRITE it verbatim to exactly this path using the Write tool: ' + outPath + '\n' +
-  'Then return the markdown, the integer finding count, the outPath, and the findings array.',
+  'OUTPUT — return STRUCTURED DATA only (the schema); do NOT produce markdown and do NOT write any file. ' +
+  'The workflow renders the assessment document from your structured output. Provide:\n' +
+  '- assessmentTitle, scopeSummary, areasCovered for the document header.\n' +
+  '- findings: one entry per finding, in significance order, each with its number, a short title, and a body ' +
+  'that is a SINGLE observation-only paragraph naming where it was found (paths/lines/values) — the same prose a ' +
+  'reader sees under the "### N. Title" heading.\n' +
+  '- For each finding, a "citations" list of the concrete source locations it rests on (file paths, line ' +
+  'numbers, values, patterns), drawn from the "evidence" of the observation(s) you merged into it. Citations are ' +
+  'INTERNAL — used to ground the finding against source; they are never shown to the reader.\n' +
+  '- summary: a brief overall assessment paragraph.',
   { label: 'synthesize', phase: 'Synthesize', schema: SYNTH_SCHEMA }
 ))
 
-const synthOk = !!(synth && synth.markdown)
+const synthStructured = !!(synth && Array.isArray(synth.findings))
+const markdown = synthStructured ? renderAssessment(synth) : ''
+// The workflow script has no filesystem access, so persisting the rendered document goes
+// through a minimal write-agent: one verbatim Write, no reasoning. The file is trustworthy
+// only if BOTH the structured synthesis AND this write succeeded.
+const wrote = synthStructured
+  ? await withRetry('write-assessment', () => agent(
+      'Write the following assessment document verbatim to exactly this path using the Write tool: ' + outPath + '\n' +
+      'Do NOT edit, reformat, summarize, re-order, or add anything — write it byte-for-byte as given. Then return ' +
+      'whether the write succeeded and the path written.\n\n' +
+      '----- BEGIN DOCUMENT -----\n' + markdown + '\n----- END DOCUMENT -----',
+      { label: 'write-assessment', phase: 'Synthesize', schema: WRITE_SCHEMA }
+    ))
+  : null
+const synthOk = !!(synthStructured && wrote && wrote.written)
 const { status, coverage } = degradationSummary({ plannedAreas: dispatchedAreas, droppedAreas: droppedAreaNames, synthOk, verifyFailed })
-const finalPath = (synth && synth.outPath) || outPath
+const finalPath = (wrote && wrote.path) || outPath
+const findingsCount = synthStructured ? synth.findings.length : 0
 log('Synthesis ' + (synthOk
-  ? 'written to ' + finalPath + ' (' + ((synth && synth.findingsCount) || 0) + ' findings)'
+  ? 'written to ' + finalPath + ' (' + findingsCount + ' findings)'
   : 'FAILED — no trustworthy file') + '; status=' + status + '.')
 
 // ---- Ground (post-synthesis citation grounding; gated; flag-only) -----------
@@ -726,9 +771,9 @@ return {
   status,
   coverage,
   observationCount: allObs.length,
-  findingsCount: (synth && synth.findingsCount) || 0,
+  findingsCount,
   outPath: finalPath,
-  markdown: (synth && synth.markdown) || '',
+  markdown,
   ...(synthOk ? {} : { error: 'synthesis failed' }),
   verification: {
     enforced: lenses.length > 0 && allObs.length > 0,
