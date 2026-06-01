@@ -124,9 +124,10 @@ const degradationSummary = ({ plannedAreas, droppedAreas, synthOk, verifyFailed 
 }
 
 // Render the final assessment markdown DETERMINISTICALLY from the synthesizer's
-// structured output. Formatting — the "### N. Title" finding headings, the three
-// structural h2s, the single-paragraph bodies — is owned by code, not the LLM, so the
-// document shape cannot drift: the synthesizer supplies only field VALUES. Pure
+// structured output. Formatting — the "### N. Title" finding headings, the
+// "**Significance**:" line under each, the three structural h2s, the single-paragraph
+// bodies — is owned by code, not the LLM, so the document shape cannot drift: the
+// synthesizer supplies only field VALUES. Pure
 // (structure in, string out — no injected globals); the prime unit to cover when a JS
 // test harness lands. Citations are intentionally NOT rendered (internal grounding only).
 const renderAssessment = ({ assessmentTitle, scopeSummary, areasCovered, findings, summary }) => {
@@ -140,7 +141,7 @@ const renderAssessment = ({ assessmentTitle, scopeSummary, areasCovered, finding
     '',
   ]
   for (const f of findings) {
-    parts.push('### ' + f.number + '. ' + f.title, '', f.body, '')
+    parts.push('### ' + f.number + '. ' + f.title, '**Significance**: ' + f.significance, '', f.body, '')
   }
   parts.push('## Summary', '', summary, '')
   return parts.join('\n')
@@ -609,10 +610,11 @@ const SYNTH_SCHEMA = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['number', 'title', 'body', 'citations'],
+        required: ['number', 'title', 'significance', 'body', 'citations'],
         properties: {
           number: { type: 'integer', description: 'Finding number from significance order (1 = most impactful); rendered as the "### N." heading' },
           title: { type: 'string', description: 'Short descriptive finding title; rendered after the number on the heading line' },
+          significance: { type: 'string', enum: ['high', 'medium', 'low'], description: 'The finding\'s significance, taken from the highest significance of the observation(s) it synthesizes; rendered as the "**Significance**:" line under the heading.' },
           body: { type: 'string', description: 'A single observation-only paragraph: what was found, where (paths/lines/values), current state, why noteworthy. No sub-bullets, no fixes.' },
           citations: {
             type: 'array',
@@ -652,7 +654,9 @@ const synth = await withRetry('synthesize', () => agent(
   'Cross-area verification results (apply these corrections; drop or fix any claim flagged unreliable):\n' +
   JSON.stringify(verification, null, 2) + '\n\n' +
   'SYNTHESIS RULES:\n' +
-  '- Sub-agent numbering is discarded. Each finding number comes from significance order (most impactful first).\n' +
+  '- Sub-agent numbering is discarded. Each finding number comes from significance order (most impactful first), ' +
+  'and each finding carries an explicit significance of high/medium/low — the highest significance among the ' +
+  'observations merged into it (the same significance that drives the ordering, now also emitted as a field).\n' +
   '- An observation may become zero findings (filtered), one finding, or be split into several; a finding may ' +
   'aggregate observations from multiple areas.\n' +
   '- Filter for actionability: drop purely informational / working-as-designed observations. A finding must ' +
@@ -670,7 +674,8 @@ const synth = await withRetry('synthesize', () => agent(
   'OUTPUT — return STRUCTURED DATA only (the schema); do NOT produce markdown and do NOT write any file. ' +
   'The workflow renders the assessment document from your structured output. Provide:\n' +
   '- assessmentTitle, scopeSummary, areasCovered for the document header.\n' +
-  '- findings: one entry per finding, in significance order, each with its number, a short title, and a body ' +
+  '- findings: one entry per finding, in significance order, each with its number, its significance ' +
+  '(high/medium/low), a short title, and a body ' +
   'that is a SINGLE observation-only paragraph naming where it was found (paths/lines/values) — the same prose a ' +
   'reader sees under the "### N. Title" heading.\n' +
   '- For each finding, a "citations" list of the concrete source locations it rests on (file paths, line ' +
