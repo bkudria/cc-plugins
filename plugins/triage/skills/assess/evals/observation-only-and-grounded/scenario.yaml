@@ -9,8 +9,10 @@ prompt: |
     - args: {"scope": "the source files in src/ and README.md", "effort": "medium", "outPath": "/tmp/assessment-eval-observation.md"}
 
   It runs in the background for a few minutes and writes its assessment to that
-  outPath. When it completes, Read /tmp/assessment-eval-observation.md and show
-  its full contents.
+  outPath. When it completes, Read /tmp/assessment-eval-observation.md and
+  reproduce its full contents verbatim in your reply — exactly as written, every
+  heading and line preserved. Do not reorganize, regroup, renumber, or summarize
+  the findings; show the document as-is.
 
 project:
   files:

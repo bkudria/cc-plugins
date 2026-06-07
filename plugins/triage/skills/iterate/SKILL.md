@@ -51,7 +51,7 @@ Apply both when present. Ask the user to clarify ambiguous arguments. When no ar
 
 If multiple candidate lists exist or the source is ambiguous, ask the user which one to process.
 
-Before creating any tasks, state what was found and where — e.g., "I found 5 items from the audit's Prioritized Remediation section" or "Recovered 8 findings from the persisted assessment file."
+Before creating any tasks, state what was found and where — e.g., "I found 5 items in the assessment's Findings section" or "Recovered 8 findings from the persisted assessment file."
 
 Check the task list for existing progress from a previous invocation or compaction recovery:
 
@@ -94,6 +94,7 @@ For each pending task:
 
    - **Do NOT announce your intended implementation as a forward-looking plan** — no "I'll change X to Y", "I'm going to edit cli.ts to...", "Next, I will...", or "Let me update that". The presentation reports *findings*, not *intentions*. The user has not approved any action yet, and stating an implementation plan creates implicit pre-approval that bypasses the gate that follows.
    - Describe mechanics in third-person/passive when needed ("the version string would be updated to match package.json", "the fix would replace `console.error` with `process.stderr.write`"), never first-person future tense.
+   - When a finding carries a `**Significance**:` annotation (the `assess` skill emits a `high`/`medium`/`low` level under each finding heading), surface that level in the presentation and include it in the gate's finding handle, so the user can weigh severity when deciding. It informs prioritization only — it does not change the gate's options or the selection mechanism.
 4. **GATE — Ask the user how to proceed**. This step is non-negotiable.
 
    **STOP.** Before any further work on this item, you MUST call `AskUserQuestion` (or the `advanced-ask` Skill) with the options below. Do NOT call `Edit`, `Write`, `MultiEdit`, `NotebookEdit`, or any other file-modifying tool. Do NOT enter plan mode. Do NOT run shell commands that mutate state. Until the user answers, this item is BLOCKED.
