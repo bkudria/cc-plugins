@@ -17,3 +17,6 @@ checks:
   - points-at-iterate:
       check: "The agent's final message contains the literal string `/triage:iterate`."
       note: "Phase 3 ends with the handoff: 'run `/triage:iterate` to process findings.' The literal namespaced command is the handoff signal to the downstream iterate skill."
+  - forwards-embedded-focus-to-param:
+      check: "The Workflow tool call includes a `focus` argument whose value expresses the credential- and secret-handling focus from the request — for example mentioning credentials, secrets, or the exclusion of schema/formatting concerns."
+      note: "The request combines a scope (config/auth.yaml) with an embedded focus directive in one argument string. Phase 0/2 must route that directive to the first-class `focus` argument of the Workflow call rather than fold it into `scope` and omit `focus` (which makes the workflow fall back to its generic default focus). The Workflow tool-call input is observable in the transcript — inspect its args.focus value, not the scope text or the presented findings."
