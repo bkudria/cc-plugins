@@ -116,12 +116,14 @@ const withRetry = async (label, fn) => {
 //   'degraded' — produced output but lost coverage (areas dropped) or skipped verify.
 //   'ok'       — no losses (a legitimately empty result is still 'ok'; its document
 //                shape is owned elsewhere).
+/* test-seam:pure-fn:start */
 const degradationSummary = ({ plannedAreas, droppedAreas, synthOk, verifyFailed }) => {
   const status = !synthOk ? 'failed'
     : (droppedAreas.length > 0 || verifyFailed) ? 'degraded'
     : 'ok'
   return { status, coverage: { planned: plannedAreas, completed: plannedAreas - droppedAreas.length, dropped: droppedAreas } }
 }
+/* test-seam:pure-fn:end */
 
 // Render the final assessment markdown DETERMINISTICALLY from the synthesizer's
 // structured output. Formatting — the "### N. Title" finding headings, the
@@ -130,6 +132,7 @@ const degradationSummary = ({ plannedAreas, droppedAreas, synthOk, verifyFailed 
 // synthesizer supplies only field VALUES. Pure
 // (structure in, string out — no injected globals); the prime unit to cover when a JS
 // test harness lands. Citations are intentionally NOT rendered (internal grounding only).
+/* test-seam:pure-fn:start */
 const renderAssessment = ({ assessmentTitle, scopeSummary, areasCovered, findings, summary }) => {
   const parts = [
     '## Assessment: ' + assessmentTitle,
@@ -146,6 +149,7 @@ const renderAssessment = ({ assessmentTitle, scopeSummary, areasCovered, finding
   parts.push('## Summary', '', summary, '')
   return parts.join('\n')
 }
+/* test-seam:pure-fn:end */
 
 // ---- Plan -------------------------------------------------------------------
 phase('Plan')
@@ -244,7 +248,18 @@ if (!areas.length) {
   return { status: 'failed', error: 'no areas planned', scope, findingsCount: 0 }
 }
 let overallEffort = deriveOverallEffort(areas)
-let overallQuestion = (plan && plan.overallQuestion) || scope
+/* test-seam:pure-fn:start */
+// Select the overall question that frames every post-plan agent. A revised plan's
+// question (when a revision is adopted and carries one) supersedes the original
+// planner's; absent that, the planner's question, falling back to the raw scope.
+// Pure (plans in, string out — no injected globals).
+const pickOverallQuestion = ({ plan, revised, scope }) => {
+  if (revised && revised.overallQuestion) return revised.overallQuestion
+  if (plan && plan.overallQuestion) return plan.overallQuestion
+  return scope
+}
+/* test-seam:pure-fn:end */
+let overallQuestion = pickOverallQuestion({ plan, scope })
 
 // ---- Plan critic (gated; one bounded revision) ------------------------------
 // Before paying for fan-out, a no-tool critic judges the decomposition for coverage,
@@ -283,7 +298,7 @@ if (overallEffort !== 'low' && areas.length >= PLAN_CRITIC_MIN_AREAS) {
     if (revisedAreas.length) {
       areas = revisedAreas
       overallEffort = deriveOverallEffort(areas)
-      if (revised && revised.overallQuestion) overallQuestion = revised.overallQuestion
+      overallQuestion = pickOverallQuestion({ plan, revised, scope })
       log('Revised plan: ' + areas.length + ' area(s).')
     } else {
       log('Revision produced no usable areas; keeping original plan.')
@@ -506,6 +521,7 @@ const VERDICT_SCHEMA = {
 // is folded as an annotation (the original claim is preserved in the action record),
 // never a destructive body rewrite. Across lenses on one observation a qualifying drop
 // wins over correct wins over holds.
+/* test-seam:pure-fn:start */
 const applyVerdicts = (obs, verdicts) => {
   const keyOf = (x) => x.area + ' ' + x.title
   const byObs = new Map()
@@ -534,6 +550,7 @@ const applyVerdicts = (obs, verdicts) => {
   })
   return { kept, actions }
 }
+/* test-seam:pure-fn:end */
 
 const lenses = EFFORT_LENSES[overallEffort] || []
 let verification
