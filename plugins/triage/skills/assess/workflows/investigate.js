@@ -244,6 +244,7 @@ if (!areas.length) {
   return { status: 'failed', error: 'no areas planned', scope, findingsCount: 0 }
 }
 let overallEffort = deriveOverallEffort(areas)
+let overallQuestion = (plan && plan.overallQuestion) || scope
 
 // ---- Plan critic (gated; one bounded revision) ------------------------------
 // Before paying for fan-out, a no-tool critic judges the decomposition for coverage,
@@ -255,7 +256,7 @@ if (overallEffort !== 'low' && areas.length >= PLAN_CRITIC_MIN_AREAS) {
     'You are reviewing a planned decomposition of an investigation (an assessment) BEFORE it runs — ' +
     'not performing it.\n\n' +
     'Scope: ' + scope + '\n' +
-    'Overall question: ' + (plan.overallQuestion || scope) + '\n' +
+    'Overall question: ' + overallQuestion + '\n' +
     'Focus: ' + focus + '\n\n' +
     'Proposed areas (JSON):\n' +
     JSON.stringify(areas.map((a) => ({ name: a.name, rationale: a.rationale })), null, 2) + '\n\n' +
@@ -282,6 +283,7 @@ if (overallEffort !== 'low' && areas.length >= PLAN_CRITIC_MIN_AREAS) {
     if (revisedAreas.length) {
       areas = revisedAreas
       overallEffort = deriveOverallEffort(areas)
+      if (revised && revised.overallQuestion) overallQuestion = revised.overallQuestion
       log('Revised plan: ' + areas.length + ' area(s).')
     } else {
       log('Revision produced no usable areas; keeping original plan.')
@@ -328,7 +330,7 @@ const investigateArea = (a, phaseName) =>
   agent(
     'Investigate the area "' + a.name + '" within this scope: ' + scope + '\n' +
     'Why this area matters: ' + a.rationale + '\n' +
-    'Overall question: ' + (plan.overallQuestion || scope) + '\n' +
+    'Overall question: ' + overallQuestion + '\n' +
     'Other areas in this investigation (context only — do NOT investigate these): ' +
     areaNames.filter((n) => n !== a.name).join('; ') + '\n' +
     'Look for: ' + focus + '\n' +
@@ -400,7 +402,7 @@ if (criticRounds > 0 && allObs.length) {
       'You are a completeness critic for an investigation (an assessment). Judge whether the areas already ' +
       'investigated TOGETHER cover the overall question, or whether a material facet was missed.\n\n' +
       'Scope: ' + scope + '\n' +
-      'Overall question: ' + (plan.overallQuestion || scope) + '\n' +
+      'Overall question: ' + overallQuestion + '\n' +
       'Focus: ' + focus + '\n' +
       'Areas already investigated (do NOT propose any of these again): ' + areaNames.join('; ') + '\n\n' +
       'Observations gathered so far (JSON):\n' + JSON.stringify(allObs, null, 2) + '\n\n' +
