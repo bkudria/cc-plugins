@@ -77,7 +77,7 @@ Workflow({
 - `effort` is an OPTIONAL ceiling: when the interview produced one, map quick scan → `low`, standard review → `medium`, comprehensive analysis → `high`. Omit it entirely to let the planner judge complexity and allocate effort (and how many areas) itself.
 - Always pass `sessionId: "${CLAUDE_SESSION_ID}"` so the assessment is written to `/tmp/assessment-${CLAUDE_SESSION_ID}.md`.
 
-**The `Workflow` call is non-blocking.** It returns immediately with a task id; the investigation then runs in the background for roughly two to four minutes. The real result — `{ scope, effort, areas, observationCount, findingsCount, outPath, markdown }` — arrives later as a `<task-notification>` carrying that task id, *not* as the return value of the `Workflow` call.
+**The `Workflow` call is non-blocking.** It returns immediately with a task id; the investigation then runs in the background — usually several minutes, though a high-effort run over a broad scope can take considerably longer (tens of minutes). The real result — `{ scope, effort, areas, observationCount, findingsCount, outPath, markdown }` — arrives later as a `<task-notification>` carrying that task id, *not* as the return value of the `Workflow` call.
 
 **After invoking `Workflow`, stop. Your turn is over.** Do not call any tool, do not investigate the scope yourself, do not read the assessment file or the workflow's journals, and do not assume, summarize, or imagine a result — fabricating a `<task-notification>` or a completion you have not received is a failure. There is nothing to do but wait. You are re-prompted automatically when the genuine `<task-notification>` arrives; only then continue to Phase 3.
 
