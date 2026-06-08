@@ -251,7 +251,7 @@ let overallEffort = deriveOverallEffort(areas)
 // problem one revised plan is requested through the same prompt and bounds; a revision
 // that yields nothing usable falls back to the original plan.
 if (overallEffort !== 'low' && areas.length >= PLAN_CRITIC_MIN_AREAS) {
-  const review = await agent(
+  const review = await withRetry('plan-critic', () => agent(
     'You are reviewing a planned decomposition of an investigation (an assessment) BEFORE it runs — ' +
     'not performing it.\n\n' +
     'Scope: ' + scope + '\n' +
@@ -266,7 +266,7 @@ if (overallEffort !== 'low' && areas.length >= PLAN_CRITIC_MIN_AREAS) {
     'Name only GENUINE structural problems. Do NOT investigate the scope, do NOT propose fixes, and do NOT ' +
     'invent issues to seem thorough. If the decomposition is sound, set sound=true and return an empty issues list.',
     { label: 'plan-critic', phase: 'Plan', schema: PLAN_REVIEW_SCHEMA }
-  )
+  ))
   const issues = (review && review.issues) || []
   if (review && review.sound === false && issues.length) {
     log('Plan critic flagged ' + issues.length + ' issue(s) (' + issues.map((i) => i.kind).join(', ') +
@@ -277,7 +277,7 @@ if (overallEffort !== 'low' && areas.length >= PLAN_CRITIC_MIN_AREAS) {
       'The rejected areas were: ' + areas.map((a) => a.name).join('; ') + '.\n' +
       'Produce a better decomposition that closes the coverage gaps, makes the areas mutually distinct, and ' +
       'sizes the count to the scope.\n'
-    const revised = await agent(buildPlanPrompt(revisionNote), { label: 'plan-revise', phase: 'Plan', schema: PLAN_SCHEMA })
+    const revised = await withRetry('plan-revise', () => agent(buildPlanPrompt(revisionNote), { label: 'plan-revise', phase: 'Plan', schema: PLAN_SCHEMA }))
     const revisedAreas = finalizeAreas((revised && revised.areas) || [])
     if (revisedAreas.length) {
       areas = revisedAreas
@@ -396,7 +396,7 @@ if (criticRounds > 0 && allObs.length) {
   while (roundsLeft-- > 0) {
     const headroom = MAX_TOTAL_AREAS - areaNames.length
     if (headroom <= 0) break
-    const critique = await agent(
+    const critique = await withRetry('completeness-critic', () => agent(
       'You are a completeness critic for an investigation (an assessment). Judge whether the areas already ' +
       'investigated TOGETHER cover the overall question, or whether a material facet was missed.\n\n' +
       'Scope: ' + scope + '\n' +
@@ -409,7 +409,7 @@ if (criticRounds > 0 && allObs.length) {
       'covered ground, do NOT propose fixes, and do NOT invent gaps to seem thorough. If coverage is already ' +
       'sufficient, set complete=true and return an empty gaps list. At most ' + MAX_GAPS_PER_ROUND + ' gaps.',
       { label: 'completeness-critic', phase: 'Completeness', schema: GAP_SCHEMA }
-    )
+    ))
     const fresh = ((critique && critique.gaps) || [])
       .filter((g) => g && g.name && !areaNames.includes(g.name))
       .slice(0, headroom)
