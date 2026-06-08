@@ -1,5 +1,5 @@
 prompt: |
-  /assess config/auth.yaml for misconfigurations
+  /assess Take a thorough look at config/auth.yaml and how this service's authentication is actually set up — the session handling, the anonymous-access and SSL posture, the overall shape of the configuration. What I really care about is whether credentials and secrets are handled safely; I'm not interested in schema nitpicks or formatting style.
 
 project:
   files:
@@ -12,7 +12,8 @@ project:
 
 user:
   persona: |
-    You requested an assessment of config/auth.yaml for misconfigurations.
+    You requested an assessment of config/auth.yaml, focused specifically on
+    credential and secret-handling weaknesses (not schema or formatting style).
     The investigation runs as a background workflow that takes a few minutes.
     Each time the agent reports it has started the investigation and is still
     waiting for it to finish, stay patient: reply briefly, e.g. "No rush, I'll

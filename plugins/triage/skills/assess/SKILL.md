@@ -34,7 +34,9 @@ The investigation's read-only tools (`Read`, `Grep`, `Glob`, `Bash`), the planni
 
 Determine the investigation scope before any work begins. Check in order:
 
-1. **`$ARGUMENTS` is populated** — treat it as the scope and proceed to Phase 2.
+1. **`$ARGUMENTS` is populated** — resolve scope **and** focus from it, then proceed to Phase 2:
+   - Scope-only arguments (no directional intent) → the whole string is the `scope`; leave `focus` unset (the workflow uses its default).
+   - Arguments that embed a focus directive alongside the scope — markers like "focus on…", "I care about…", "looking for…", "rather than…", "not …" — must be **split**: the scope portion becomes `scope`, the focus portion becomes `focus`. Do **not** fold the directive into an expanded `scope`; a directive left inside `scope` never reaches the workflow's `focus` parameter, so the investigation falls back to its generic default focus and the user's steer is lost. When an explicit marker makes the split clear, do it silently; when it is genuinely ambiguous which part is scope vs. focus, confirm the inferred split with the user before proceeding (as in step 2).
 2. **Arguments empty but conversation implies a scope** — confirm the inferred scope with the user, then proceed to Phase 2.
 3. **Neither source available** — proceed to Phase 1 (Scope Interview) to gather scope, focus, and (optional) effort from the user.
 
@@ -65,7 +67,7 @@ Workflow({
   scriptPath: "${CLAUDE_PLUGIN_ROOT}/skills/assess/workflows/investigate.js",
   args: {
     scope: "<resolved scope>",
-    focus: "<focus from Phase 1; omit to use the workflow default>",
+    focus: "<focus from Phase 1, or the focus directive split out of combined $ARGUMENTS; omit only when scope-only and no interview ran>",
     effort: "<low | medium | high>  // OPTIONAL ceiling; omit to let the planner allocate adaptively",
     sessionId: "${CLAUDE_SESSION_ID}"
   }
@@ -73,7 +75,8 @@ Workflow({
 ```
 
 - `scope` is **required**; the workflow bails if it is missing.
-- `focus` and `effort` come from Phase 1 when the interview ran. When the scope came straight from `$ARGUMENTS` (Phase 0, step 1), omit `focus` and `effort` — the workflow uses its default (broad focus) and allocates effort adaptively.
+- `focus` comes from Phase 1 (interview) **or** from Phase 0 step 1 when the arguments embedded a focus directive. Pass it whenever either path produced one; omit it only when the arguments were scope-only and no interview ran — then the workflow uses its default (broad focus). Never fold a focus directive into `scope`; route it to `focus`.
+- `effort` comes from Phase 1 when the interview ran. When the scope came straight from `$ARGUMENTS`, omit `effort` so the planner allocates it adaptively.
 - `effort` is an OPTIONAL ceiling: when the interview produced one, map quick scan → `low`, standard review → `medium`, comprehensive analysis → `high`. Omit it entirely to let the planner judge complexity and allocate effort (and how many areas) itself.
 - Always pass `sessionId: "${CLAUDE_SESSION_ID}"` so the assessment is written to `/tmp/assessment-${CLAUDE_SESSION_ID}.md`.
 
