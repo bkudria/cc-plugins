@@ -7,10 +7,13 @@ repeats: 1
 # workflow: ~$1.40 and ~6 min per run. The base config below carries everything
 # the delegation needs — the Workflow tool, a generous timeout/budget, and
 # sandbox disabled (matches the verified manual probe; the agent reads the
-# ephemeral project dir and the workflow writes to /tmp). Investigation QUALITY
-# (output format, observation-only discipline, merge, source-grounding) is NOT
-# tested here — it lives in the standalone investigate.js suite. This suite
-# locks only the skill's own contract: delegate -> wait -> present, no fabrication.
+# ephemeral project dir and the workflow writes to /tmp). The workflow's
+# DETERMINISTIC core — the assess<->iterate markdown format contract, the verdict
+# rails, status/coverage derivation, and overall-question selection — is unit-tested
+# directly in workflows/test/ (run: node --test workflows/test/*.test.mjs), not here.
+# Its LLM-BEHAVIORAL facets (observation-only discipline, source-grounding) have no
+# unit coverage and are exercised only at this skill/eval layer. This suite locks
+# only the skill's own contract: delegate -> wait -> present, no fabrication.
 scenarios:
   base:
     model: claude-sonnet-4-5
