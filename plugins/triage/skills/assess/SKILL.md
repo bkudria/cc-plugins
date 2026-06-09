@@ -8,7 +8,7 @@ argument-hint: "[scope to investigate, e.g. 'this codebase' or 'the auth module'
 
 Investigate a scope and produce a structured, numbered findings assessment. Each finding describes an observation, problem, or opportunity — never a solution or fix. Output is designed for consumption by the `iterate` skill.
 
-The investigation itself — planning areas, investigating each in parallel, cross-verifying claims, synthesizing the numbered findings, and writing the file — runs as a background Workflow defined in `workflows/investigate.js`. **That script is the single source of truth for investigation behavior, output format, and the observation-only discipline.** This skill resolves the scope, then delegates to it.
+The investigation itself — planning areas, investigating each in parallel, checking coverage for gaps with targeted re-investigation, cross-verifying claims, synthesizing the numbered findings and writing the file, then grounding each finding's citations against source — runs as a background Workflow defined in `workflows/investigate.js`. **That script is the single source of truth for investigation behavior, output format, and the observation-only discipline.** This skill resolves the scope, then delegates to it.
 
 ## When to Use
 
@@ -58,7 +58,7 @@ If the scope is broad (entire codebase, "everything"), ask for priority areas or
 
 ## Phase 2: Investigate (delegated)
 
-Once the scope is resolved, run the investigation workflow. It plans the areas, investigates each in parallel (observation-only), cross-verifies overlapping claims, synthesizes the numbered assessment, and writes it to disk.
+Once the scope is resolved, run the investigation workflow. It plans the areas, investigates each in parallel (observation-only), checks coverage for gaps with targeted re-investigation, cross-verifies overlapping claims, synthesizes the numbered assessment and writes it to disk, then grounds each finding's citations against source.
 
 Invoke:
 
@@ -80,7 +80,7 @@ Workflow({
 - `effort` is an OPTIONAL ceiling: when the interview produced one, map quick scan → `low`, standard review → `medium`, comprehensive analysis → `high`. Omit it entirely to let the planner judge complexity and allocate effort (and how many areas) itself.
 - Always pass `sessionId: "${CLAUDE_SESSION_ID}"` so the assessment is written to `/tmp/assessment-${CLAUDE_SESSION_ID}.md`.
 
-**The `Workflow` call is non-blocking.** It returns immediately with a task id; the investigation then runs in the background — usually several minutes, though a high-effort run over a broad scope can take considerably longer (tens of minutes). The real result — `{ scope, effort, areas, observationCount, findingsCount, outPath, markdown }` — arrives later as a `<task-notification>` carrying that task id, *not* as the return value of the `Workflow` call.
+**The `Workflow` call is non-blocking.** It returns immediately with a task id; the investigation then runs in the background — usually several minutes, though a high-effort run over a broad scope can take considerably longer (tens of minutes). The real result — `{ findingsCount, areas, outPath, markdown, status, coverage }` (`status` is `ok` / `degraded` / `failed`; `coverage` is `{ planned, completed, dropped }`) — arrives later as a `<task-notification>` carrying that task id, *not* as the return value of the `Workflow` call.
 
 **After invoking `Workflow`, stop. Your turn is over.** Do not call any tool, do not investigate the scope yourself, do not read the assessment file or the workflow's journals, and do not assume, summarize, or imagine a result — fabricating a `<task-notification>` or a completion you have not received is a failure. There is nothing to do but wait. You are re-prompted automatically when the genuine `<task-notification>` arrives; only then continue to Phase 3.
 
@@ -88,7 +88,7 @@ Workflow({
 
 ## Phase 3: Present
 
-Enter Phase 3 only when the genuine `<task-notification>` for the workflow's task id arrives with `status: completed`. Its payload carries the investigation result — `findingsCount`, `areas`, `outPath`, and the assessment `markdown`. A long `markdown` is truncated in the notification, so the written file is the complete copy.
+Enter Phase 3 only when the genuine `<task-notification>` for the workflow's task id arrives with `status: completed`. Its payload carries the investigation result described in Phase 2. A long `markdown` is truncated in the notification, so the written file is the complete copy.
 
 1. `Read` the canonical file the workflow wrote — `/tmp/assessment-${CLAUDE_SESSION_ID}.md` — and output its full contents **verbatim** in the conversation: reproduce the document exactly as written, preserving every `### N.` finding heading, `**Significance**:` line, and body paragraph. Do NOT reorganize, regroup (e.g. by severity), renumber, summarize, or collapse findings into a list — the document's structure is deterministic and is consumed downstream, so reshaping it breaks `iterate`'s recovery and the format contract. Reading retrieves the complete assessment the notification may have truncated; do not re-write the file (the workflow already did).
 2. State: "Assessment saved to `/tmp/assessment-${CLAUDE_SESSION_ID}.md` — run `/triage:iterate` to process findings."
