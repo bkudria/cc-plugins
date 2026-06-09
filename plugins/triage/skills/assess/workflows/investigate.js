@@ -113,13 +113,13 @@ const withRetry = async (label, fn) => {
 // Pure (signals in, plain object out — no injected globals), so it is the first
 // unit to cover when a JS test harness lands.
 //   'failed'   — no usable synthesis (planner died, or synth failed after retry).
-//   'degraded' — produced output but lost coverage (areas dropped) or skipped verify.
+//   'degraded' — produced output but lost coverage (areas dropped) or skipped/lost verify.
 //   'ok'       — no losses (a legitimately empty result is still 'ok'; its document
 //                shape is owned elsewhere).
 /* test-seam:pure-fn:start */
-const degradationSummary = ({ plannedAreas, droppedAreas, synthOk, verifyFailed }) => {
+const degradationSummary = ({ plannedAreas, droppedAreas, synthOk, verifyFailed, verifyLost }) => {
   const status = !synthOk ? 'failed'
-    : (droppedAreas.length > 0 || verifyFailed) ? 'degraded'
+    : (droppedAreas.length > 0 || verifyFailed || verifyLost) ? 'degraded'
     : 'ok'
   return { status, coverage: { planned: plannedAreas, completed: plannedAreas - droppedAreas.length, dropped: droppedAreas } }
 }
@@ -609,6 +609,14 @@ if (!lenses.length || !allObs.length) {
   verification = await safeVerify(verifiedObs, probedKeys)
 }
 
+// A dispatched-but-empty lens pass is a silent total loss of adversarial
+// verification — distinct from a thrown consolidation (verifyFailed). Flag it
+// (mirroring safeVerify's skipped-consolidation flag) and degrade the run below.
+const verifyLost = lenses.length > 0 && allObs.length > 0 && verdicts.length === 0
+if (verifyLost && verification && Array.isArray(verification.reliabilityFlags)) {
+  verification.reliabilityFlags.push('adversarial lens verification was dispatched but every verdict was lost; observations were not adversarially checked')
+}
+
 // ---- Synthesize + write -----------------------------------------------------
 phase('Synthesize')
 // The synthesizer returns the assessment as STRUCTURED DATA, not markdown. The workflow
@@ -719,7 +727,7 @@ const wrote = synthStructured
     ))
   : null
 const synthOk = !!(synthStructured && wrote && wrote.written)
-const { status, coverage } = degradationSummary({ plannedAreas: dispatchedAreas, droppedAreas: droppedAreaNames, synthOk, verifyFailed })
+const { status, coverage } = degradationSummary({ plannedAreas: dispatchedAreas, droppedAreas: droppedAreaNames, synthOk, verifyFailed, verifyLost })
 const finalPath = (wrote && wrote.path) || outPath
 const findingsCount = synthStructured ? synth.findings.length : 0
 log('Synthesis ' + (synthOk
@@ -800,7 +808,7 @@ return {
   markdown,
   ...(synthOk ? {} : { error: 'synthesis failed' }),
   verification: {
-    enforced: lenses.length > 0 && allObs.length > 0,
+    enforced: verdicts.length > 0,
     checks: verification,
     dropped: auditActions.filter((a) => a.action === 'dropped'),
     corrected: auditActions.filter((a) => a.action === 'corrected'),
