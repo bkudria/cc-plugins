@@ -10,7 +10,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { helpers } from './_load.mjs'
 
-const { degradationSummary, renderAssessment, applyVerdicts, pickOverallQuestion } = helpers
+const { degradationSummary, renderAssessment, applyVerdicts, pickOverallQuestion, selectVerifyTargets } = helpers
 
 test('renderAssessment emits the deterministic assess<->iterate format contract', () => {
   const md = renderAssessment({
@@ -132,6 +132,54 @@ test('applyVerdicts: across lenses, a qualifying drop wins over a correct', () =
     ]
   )
   assert.equal(kept.length, 0)
+})
+
+// area-aware verify-target selection
+const vobs = (area, significance, title) => ({ area, title, body: 'b', evidence: 'e', significance })
+const countByArea = (targets) => targets.reduce((m, t) => ((m[t.o.area] = (m[t.o.area] || 0) + 1), m), {})
+
+test('selectVerifyTargets: per-area floor quota spreads slots, including a lone medium area', () => {
+  const list = [
+    ...Array.from({ length: 6 }, (_, n) => vobs('A', 'high', 'a' + n)),
+    vobs('B', 'high', 'b0'), vobs('B', 'high', 'b1'),
+    vobs('C', 'medium', 'c0'),
+  ]
+  const targets = selectVerifyTargets(list, 6)
+  assert.equal(targets.length, 6)
+  // Every area gets its floor; A keeps the surplus. The old top-6-by-significance
+  // slice would take all six high-sig A observations and never probe C's medium.
+  assert.deepEqual(countByArea(targets), { A: 4, B: 1, C: 1 })
+  assert.ok(targets.some((t) => t.o.area === 'C'))
+})
+
+test('selectVerifyTargets: a low-only area gets just its floor; higher significance fills the rest', () => {
+  const list = [
+    vobs('A', 'high', 'a0'), vobs('A', 'high', 'a1'), vobs('A', 'high', 'a2'),
+    vobs('B', 'low', 'b0'), vobs('B', 'low', 'b1'),
+  ]
+  const targets = selectVerifyTargets(list, 4)
+  // B is represented once (its floor); the remaining slots go to A's highs,
+  // never B's second low while higher-significance observations remain.
+  assert.deepEqual(countByArea(targets), { A: 3, B: 1 })
+})
+
+test('selectVerifyTargets: a single area is unchanged from the top-K slice (no regression)', () => {
+  const list = Array.from({ length: 10 }, (_, n) => vobs('A', 'high', 'a' + n))
+  const targets = selectVerifyTargets(list, 6)
+  assert.equal(targets.length, 6)
+  assert.deepEqual(targets.map((t) => t.i), [0, 1, 2, 3, 4, 5])
+})
+
+test('selectVerifyTargets: returns all observations when fewer than the budget', () => {
+  const list = [vobs('A', 'high', 'a0'), vobs('B', 'medium', 'b0')]
+  assert.equal(selectVerifyTargets(list, 6).length, 2)
+})
+
+test('selectVerifyTargets: preserves each observation original index', () => {
+  const list = [vobs('A', 'high', 'a0'), vobs('B', 'high', 'b0'), vobs('A', 'high', 'a1')]
+  const targets = selectVerifyTargets(list, 3)
+  for (const t of targets) assert.equal(list[t.i], t.o)
+  assert.deepEqual(targets.map((t) => t.i).sort((a, b) => a - b), [0, 1, 2])
 })
 
 test('pickOverallQuestion: original plan question by default', () => {
