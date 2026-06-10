@@ -552,6 +552,39 @@ const applyVerdicts = (obs, verdicts) => {
 }
 /* test-seam:pure-fn:end */
 
+// Choose which observations get the full adversarial lens set. Significance-first,
+// but area-aware: every area with any observation gets at least one slot (its
+// highest-significance one) before the remaining budget is filled by global
+// significance — so the lens budget can't be monopolised by whichever area the
+// planner happened to list first. Pure (observations + budget in, [{o,i}] out;
+// the original index i is preserved for per-lens labelling and probedKeys).
+/* test-seam:pure-fn:start */
+const selectVerifyTargets = (obs, maxK) => {
+  const sigRank = { high: 0, medium: 1, low: 2 }
+  const rankOf = (x) => (x.significance in sigRank ? sigRank[x.significance] : 3)
+  const bySig = obs
+    .map((o, i) => ({ o, i }))
+    .sort((a, b) => rankOf(a.o) - rankOf(b.o) || a.i - b.i)
+  const chosen = []
+  const taken = new Set()
+  // Floor: one best observation per area, areas ordered by their best's
+  // significance (ties: first appearance), capped at the budget.
+  const seenArea = new Set()
+  for (const t of bySig) {
+    if (chosen.length >= maxK) break
+    if (seenArea.has(t.o.area)) continue
+    seenArea.add(t.o.area); chosen.push(t); taken.add(t.i)
+  }
+  // Fill the remaining budget by global significance across all areas.
+  for (const t of bySig) {
+    if (chosen.length >= maxK) break
+    if (taken.has(t.i)) continue
+    chosen.push(t); taken.add(t.i)
+  }
+  return chosen
+}
+/* test-seam:pure-fn:end */
+
 const lenses = EFFORT_LENSES[overallEffort] || []
 let verification
 let verdicts = []
@@ -573,14 +606,11 @@ if (!lenses.length || !allObs.length) {
   // unchanged. No lens verdicts exist here, so nothing is enforced in code.
   verification = await safeVerify(allObs)
 } else {
-  // Rank by significance (high first); the top-K get the full lens set. Stable
-  // sort, no Date/Math.random (both forbidden in the harness).
-  const sigRank = { high: 0, medium: 1, low: 2 }
-  const rankOf = (x) => (x.significance in sigRank ? sigRank[x.significance] : 3)
-  const targets = allObs
-    .map((o, i) => ({ o, i }))
-    .sort((a, b) => rankOf(a.o) - rankOf(b.o))
-    .slice(0, MAX_VERIFY_TARGETS)
+  // Area-aware target selection: a per-area floor (every area's best observation)
+  // then significance-fill, so the top-K lens budget spreads across areas instead
+  // of concentrating on whichever one sorts first. Deterministic — no
+  // Date/Math.random (both forbidden in the harness).
+  const targets = selectVerifyTargets(allObs, MAX_VERIFY_TARGETS)
   log('Adversarial verify: ' + lenses.length + ' lens(es) over the top ' + targets.length +
     ' of ' + allObs.length + ' observation(s).')
   const verdictJobs = []
