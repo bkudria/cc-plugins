@@ -72,6 +72,17 @@ test('degradationSummary: degraded when verify failed even with full coverage', 
   assert.equal(r.coverage.completed, 2)
 })
 
+test('degradationSummary: degraded when the lens verdicts were lost (dispatched but empty)', () => {
+  const r = degradationSummary({ plannedAreas: 2, droppedAreas: [], synthOk: true, verifyFailed: false, verifyLost: true })
+  assert.equal(r.status, 'degraded')
+  assert.equal(r.coverage.completed, 2)
+})
+
+test('degradationSummary: ok when verify ran (verifyLost false) and nothing else lost', () => {
+  const r = degradationSummary({ plannedAreas: 2, droppedAreas: [], synthOk: true, verifyFailed: false, verifyLost: false })
+  assert.equal(r.status, 'ok')
+})
+
 test('degradationSummary: failed overrides everything when synth did not succeed', () => {
   assert.deepEqual(
     degradationSummary({ plannedAreas: 2, droppedAreas: ['a', 'b'], synthOk: false, verifyFailed: false }),
