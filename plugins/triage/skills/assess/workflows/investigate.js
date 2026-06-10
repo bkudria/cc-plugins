@@ -1,6 +1,6 @@
 export const meta = {
   name: 'assess-investigate',
-  description: 'Autonomous investigation core for the assess skill: plan areas, investigate each in parallel, cross-verify, synthesize a numbered observation-only assessment, and write it to disk',
+  description: 'Autonomous investigation core for the assess skill: plan areas, investigate each in parallel, check coverage for gaps, cross-verify, synthesize a numbered observation-only assessment and write it to disk, then ground finding citations against source',
   whenToUse: 'Invoked by the assess skill (by path) once scope/focus/effort are resolved. Runs Phases 2-4 headless; the skill keeps Phase 0-1 (scope resolution + interview).',
   phases: [
     { title: 'Plan', detail: 'break the scope into semi-independent areas' },
