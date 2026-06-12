@@ -44,12 +44,17 @@ This preserves the full run record, keeps the tool output small, and guarantees 
 
 ### Exit Codes
 
+Canonical taxonomy: `craboodle run --help` (shared with scuttlerun and pincenez).
+
 | Code | Meaning |
 |------|---------|
 | 0 | Pipeline completed. Individual failures are in the output, not the exit code |
-| 1 | Configuration error (invalid YAML, missing fields) |
-| 2 | Infrastructure error (tools not found, zero scenarios, all reps failed) |
+| 1 | Refusal/config error — `init` won't overwrite, `list` found invalid scenarios, `lint` reported issues |
+| 2 | Load failure (evals.yaml schema/version/range) or runtime error — the caught exception is printed to stderr |
 | 3 | Threshold failure — a scenario fell below `min_pass_rate` in evals.yaml |
+| 4 | Infrastructure/dependency error — scuttlerun or pincenez missing, no scenarios found, empty filter, zero successful reps, or the reliability gate (`max_error_rate`) tripped |
+| 5 | Budget exhausted (`max_budget_usd`) |
+| 130 | Interrupted (SIGINT) |
 
 ---
 
@@ -75,7 +80,7 @@ Common causes:
 | Check fails inconsistently (pass_rate 0.3-0.7) | Config adds tendency but doesn't enforce it strongly enough | Strengthen the config instruction, or relax the check |
 | Check always fails (pass_rate 0.0) | Config doesn't address this behavior, or check is too strict | Verify the config actually teaches this; try loosening the check wording |
 | Check always passes (pass_rate 1.0) | May test baseline behavior, not config value | Run without the config — if it still passes, the check is an always-passes anti-pattern |
-| Infrastructure errors in `errors` array | scuttlerun or pincenez failed, not the config | Check the artifact directory for raw logs |
+| Infrastructure errors in `errors` array | scuttlerun or pincenez failed, not the config | Read the `errors[].error` field — it carries the crash message. The artifact directory holds only per-rep `output.yaml` and `grading.yaml`, no separate logs |
 
 ### Config problem or check problem?
 
@@ -84,7 +89,7 @@ When a check fails, the issue is in one of two places:
 1. **Config problem** — the configuration doesn't cause the behavior you expected. Fix: revise the configuration.
 2. **Check problem** — the configuration works, but the check doesn't capture the behavior correctly. Fix: revise the check.
 
-To distinguish: read the scuttlerun transcript in the artifact directory. If the agent *did* follow the config but the check missed it, it's a check problem. If the agent *didn't* follow the config, it's a config problem.
+To distinguish: read the scuttlerun transcript at `<artifact_dir>/<scenario-id>/rep-<N>/output.yaml` (the `artifact_dir` is printed in craboodle's YAML output). If the agent *did* follow the config but the check missed it, it's a check problem. If the agent *didn't* follow the config, it's a config problem.
 
 ---
 

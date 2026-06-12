@@ -26,18 +26,21 @@ Run `craboodle run --help` for all available options.
 
 ## Step 3: Iterate
 
-| Exit Code | Meaning | Action |
-|-----------|---------|--------|
-| 0 | All scenarios at or above `min_pass_rate` | Done |
-| 3 | One or more scenarios below `min_pass_rate` | Diagnose and fix |
-| 1 | Configuration error | Fix scenario YAML |
-| 2 | Infrastructure error | Check tool installation |
+Exit-code meanings: `craboodle run --help` (above), or `claude-code-evals/references/results-interpretation.md` § Exit Codes.
+
+| Exit Code | Action |
+|-----------|--------|
+| 0 | Done |
+| 1 | Fix the offending YAML |
+| 2 | Read the error message on stderr; fix what it names (often an `evals.yaml` load failure) |
+| 3 | Diagnose and fix (see below) |
+| 4 | Check tool installation and skill load path; if reps failed, inspect the scenario `errors` block |
 
 For each failing check, diagnose:
 - **Skill problem** — The skill doesn't cause the intended behavior. Fix: revise the skill.
 - **Check problem** — The skill works but the check doesn't capture it correctly. Fix: revise the check.
 
-To distinguish: read the scuttlerun transcript in the artifact directory.
+To distinguish: read the scuttlerun transcript at `<artifact_dir>/<scenario-id>/rep-<N>/output.yaml` (the `artifact_dir` is printed in craboodle's YAML output).
 
 Iteration rules:
 1. Fix one thing at a time (skill OR check, not both)
