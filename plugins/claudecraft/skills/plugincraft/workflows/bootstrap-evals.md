@@ -119,7 +119,7 @@ For each approved bundle scenario from Step 4, create:
 
 Loading the `claude-code-evals` skill (done in the top GATE) is not the same as having the Pre-Write Checklist in context. If you have not Read the § Pre-Write Checklist AND § Common Slips sections of check-design.md during this session, Read them now before continuing.
 
-For every bundle-level check, add a `note:` field naming the components (or load surface) the check exercises (e.g., `note: "skills/release-notes + hooks/slack-post — composition"`). This mirrors the `note:` discipline in `claude-code-evals/references/config-type-patterns.md` § Plugins and makes Step 10 attribution faster.
+For every bundle-level check, add a `note:` field naming the components (or load surface) the check exercises (e.g., `note: "skills/release-notes + hooks/slack-post — composition"`). This mirrors the `note:` discipline in `claude-code-evals/references/config-type-patterns.md` § Plugins and makes Step 10 attribution faster. For Regression-bucket checks, also declare the regression-baseline intent in the note — those checks are presence-anchored by design (see `claude-code-evals/references/check-design.md` § Check Patterns), and the declaration is what tells lint the WHETHER form is deliberate.
 
 **Write incrementally**: Write the first scenario, then lint it with `craboodle lint --scenario <id> <plugin-root>/evals`. Fix any issues before writing the remaining scenarios — anti-pattern tendencies caught on the first scenario won't propagate to the rest. Then write the remaining scenarios in parallel, following the same patterns.
 
@@ -130,6 +130,8 @@ craboodle lint <plugin-root>/evals
 ```
 
 Confirm zero issues across the full suite. If the incremental lint in Step 7 was clean, this should pass on the first run.
+
+If lint flags `tautological` or `always_passes` on a deliberate presence anchor or regression baseline (common in the Regression bucket), the fix is to declare the intent in the check's `note:` and re-lint — not to delete or weaken the check (see `claude-code-evals/references/check-design.md` § Check Patterns). The bar stays zero issues: declared intent clears the flag because calibrated lint stops flagging, not because the issue is waived.
 
 ## Step 9: First Run
 
