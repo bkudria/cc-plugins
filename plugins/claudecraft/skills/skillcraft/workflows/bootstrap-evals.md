@@ -77,7 +77,7 @@ Revise scenarios based on feedback. Two questions is the target; three is the ma
 
 ### Model selection
 
-The agent-under-test `model:` determines what your evals measure. Haiku (scuttlerun's default) is cheap and fast but its failure modes may not reflect what the skill does under Sonnet or Opus — the models most users run. Default to Sonnet for representative evals; reserve Haiku for smoke-testing scenario design or iterating cheaply. The synthetic-user `oracle_model` (under `user:`) also defaults to Haiku — raise it when the skill depends on the oracle following nuanced prompts.
+The agent-under-test `model:` determines what your evals measure. Haiku (scuttlerun's default) is cheap and fast but its failure modes may not reflect what the skill does under Sonnet or Opus — the models most users run. Default to Sonnet for representative evals; reserve Haiku for smoke-testing scenario design or iterating cheaply. The synthetic-user `oracle_model` (under `user:`) also defaults to Haiku — raise it when the skill depends on the oracle following nuanced prompts. Trigger scenarios are especially model-sensitive — Haiku frequently skips autonomous skill invocation, making trigger results on it misleading (see `references/eval-guide.md` § Trigger Testing).
 
 ### If `evals/` does not exist
 

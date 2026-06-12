@@ -88,7 +88,7 @@ Revise scenarios based on feedback. Two questions is the target; three is the ma
 
 ### Model selection
 
-The agent-under-test `model:` determines what your evals measure. Haiku (scuttlerun's default) is cheap and fast but its failure modes may not reflect what the plugin does under Sonnet or Opus — the models most users run. Default to Sonnet for representative bundle evals; reserve Haiku for smoke-testing scenario design or iterating cheaply. The synthetic-user `oracle_model` (under `user:`) also defaults to Haiku — raise it when bundle scenarios depend on the oracle following nuanced multi-turn prompts.
+The agent-under-test `model:` determines what your evals measure. Haiku (scuttlerun's default) is cheap and fast but its failure modes may not reflect what the plugin does under Sonnet or Opus — the models most users run. Default to Sonnet for representative bundle evals; reserve Haiku for smoke-testing scenario design or iterating cheaply. The synthetic-user `oracle_model` (under `user:`) also defaults to Haiku — raise it when bundle scenarios depend on the oracle following nuanced multi-turn prompts. Discoverability scenarios (skills auto-firing on their own keywords) are especially model-sensitive — Haiku frequently skips autonomous invocation, making those results misleading (see the skillcraft skill's `references/eval-guide.md` § Trigger Testing).
 
 ### Scaffold and inject the plugin
 

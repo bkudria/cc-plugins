@@ -174,3 +174,5 @@ checks:
 ```
 
 Include 1-2 trigger scenarios alongside behavioral scenarios for each skill.
+
+**Model sensitivity**: Trigger scenarios are the most model-sensitive scenario type. Autonomous skill invocation is a judgment the agent model makes on its own, and weaker models — Haiku, scuttlerun's default — frequently skip invocation even when the prompt cleanly matches the description. A trigger failure on Haiku is therefore ambiguous: it may indict the model rather than the description, and iterating on the description won't fix it. Run trigger scenarios on the model users will actually run the skill under (Sonnet or stronger); when the suite's `scenarios.base` uses a cheaper model, pin a stronger `model:` in the trigger scenario's own scenario.yaml rather than inheriting the base.
