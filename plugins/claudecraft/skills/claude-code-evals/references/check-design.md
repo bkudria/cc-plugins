@@ -39,6 +39,10 @@ Most scenarios need 2-3 different pattern types.
 
 **Pair negative and ordering checks with a Presence check.** An **Absence** (`"no X…"`) or **Process** (`"…before any X"`) check passes *vacuously* on a transcript where X never happens — it cannot fail on a bad run, so it cannot tell good behavior from bad. Add a Presence check that X occurs, giving the negative or ordering claim something real to constrain. Lint flags the un-paired form as **unfalsifiable**.
 
+**When presence IS the signal, declare it in `note:`.** Two check designs are deliberate WHETHER checks: the Presence *anchor* added for the pairing above, and a *regression baseline* ("the baseline task still completes with this config loaded" — it fails when the config breaks the behavior). Both look like lint's tautological/always_passes targets, so say what the check is for in its `note:` in plain prose — e.g. `note: "Presence anchor paired with no-edit-without-ask"` or `note: "Regression baseline — the config must not break plain file edits"`. Lint reads notes and honors declared intent; there is no special syntax. The declaration settles only the WHETHER objection — a vague, compound, or unverifiable check is still flagged.
+
+Presence-only is also frequently the *correct* form, not a fallback: scuttlerun transcripts drop the content written by Write/Edit (`content`, `old_string`, `new_string`) by design, so a content-level assertion forces the grader to infer the written text from prose and grades flakily run-to-run. Asserting the write occurred (by path), constrained by a paired negative or ordering check, is the gradeable design.
+
 ---
 
 ## Anti-Patterns
@@ -55,7 +59,7 @@ Run `pincenez lint --help` for the authoritative definitions (each anti-pattern 
 | **over_specific** | Mandates one implementation when multiple valid outcomes exist |
 | **unfalsifiable** | Structurally can't fail — a negative/ordering check that passes vacuously when its subject never occurs |
 
-When writing checks, apply the Pre-Write Checklist below (§ Pre-Write Checklist) — it translates each anti-pattern into a self-test question with concrete action.
+When writing checks, apply the Pre-Write Checklist below (§ Pre-Write Checklist) — it translates each anti-pattern into a self-test question with concrete action. One sanctioned exception: a check whose `note:` declares it as a presence anchor or regression baseline (see § Check Patterns) deliberately tests WHETHER, and lint honors that declaration for **tautological**/**always_passes** only.
 
 ### Splitting Compound Checks
 
@@ -131,11 +135,11 @@ Apply these tests to each check **before writing it to a file**, and again to an
 |---|---|---|
 | **Compound** | Enumerate every independent fact this check asserts. If the count is >1, it's compound. Signals: "and", "both", "as well as", "likewise", "also", "then", semicolons joining clauses, capitalized "AND" (including after a "fix"), temporal/ordering phrases like "before X-ing" or "after Y-ing" that bundle a second claim onto the first. | Split into separate checks — one per independent fact. If one claim is a precondition of another (e.g., "X happens before Y"), keep the ordering claim as a single check; do not bundle it with a claim about X's content. |
 | **Vague** | Could two graders disagree on pass/fail? Signals: "valid", "correct", "appropriate", "proper", plus abstract nouns standing in for observable actions ("investigation", "presentation", "consideration", "review") without a concrete criterion. | Add a concrete syntactic example or name the specific element to look for. Replace abstract nouns with the observable tool call, file, or output pattern that would satisfy the claim. |
-| **Always-passes** | Would Claude do this without the configuration? | Revise to target what the config specifically adds — the delta, not the baseline. |
-| **Tautological** | Does this check mirror the prompt wording? (Prompt: "write a function" → Check: "output contains a function") | Assert HOW — the specific structure, approach, or method — not WHETHER. |
+| **Always-passes** | Would Claude do this without the configuration? | Revise to target what the config specifically adds — the delta, not the baseline. Exception: a regression baseline deliberately asserts the baseline survives the config — keep the check and declare the intent in `note:`. |
+| **Tautological** | Does this check mirror the prompt wording? (Prompt: "write a function" → Check: "output contains a function") | Assert HOW — the specific structure, approach, or method — not WHETHER. Exception: presence anchors and regression baselines deliberately assert WHETHER — keep the check and declare the intent in `note:`. |
 | **Unverifiable** | Can the grader observe this in the output? Signals: "understood", "considered", "thought about". | Rewrite as observable behavior: what the agent produced, not what it reasoned. |
 | **Over-specific** | Does this check mandate a specific function/operator/tool when the outcome is what matters? Signals: "uses [function name]" as a requirement, "uses X rather than Y" when Y isn't actually wrong. | Rewrite to test the outcome or behavior. Optionally mention specific approaches as non-exhaustive examples: "achieves X (e.g., via ireduce or map\|add)". |
-| **Unfalsifiable** | Could any realistic transcript make this check FAIL? Signals: "no X without Y", "never X unless Y", or an ordering clause whose subject (X) the agent might simply never do. | Pair it with a Presence check asserting X occurs, so the negative/ordering claim has something to constrain — or drop it if no realistic transcript could fail it. |
+| **Unfalsifiable** | Could any realistic transcript make this check FAIL? Signals: "no X without Y", "never X unless Y", or an ordering clause whose subject (X) the agent might simply never do. | Pair it with a Presence check asserting X occurs, so the negative/ordering claim has something to constrain — or drop it if no realistic transcript could fail it. Give the added Presence anchor a `note:` declaring the pairing, so lint reads it as deliberate. |
 
 ### Common Slips
 
@@ -160,7 +164,7 @@ Always lint checks before spending money on eval runs:
 - **Single checks file**: `pincenez lint checks.yaml` — catches anti-patterns in one checks file
 - **Full eval suite**: `craboodle lint <evals-dir>` — checks all scenarios
 
-Linting catches vague, compound, tautological, always-passes, unverifiable, over-specific, and unfalsifiable checks before they waste LLM calls. Fix flagged issues, then run.
+Linting catches vague, compound, tautological, always-passes, unverifiable, over-specific, and unfalsifiable checks before they waste LLM calls. Fix flagged issues, then run. One class of flag is fixed by declaring rather than rewriting: a tautological/always_passes flag on a deliberate presence anchor or regression baseline means the check is missing its `note:` intent declaration — add it and re-lint; don't delete a legitimate anchor.
 
 ---
 
@@ -187,3 +191,5 @@ checks:
 ```
 
 Notes are hints, not definitions. They orient the grader toward the right evidence without changing what pass/fail means.
+
+Notes do double duty at lint time: `pincenez lint` reads the same field as declared intent. A note naming the check's design — presence anchor for a paired negative check, regression baseline — keeps deliberate WHETHER checks from being misflagged as tautological/always_passes. Grading semantics are unchanged: notes still orient, and never redefine pass/fail.

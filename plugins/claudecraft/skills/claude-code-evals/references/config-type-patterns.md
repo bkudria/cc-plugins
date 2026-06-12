@@ -426,3 +426,14 @@ craboodle run my-config/
 ```
 
 **Key principle**: Version your scenarios alongside the configs they test. When you change a config, the scenarios serve as regression tests. When you add new behavior, add new scenarios to cover it.
+
+**Check strategy**: Regression checks are presence-anchored by design — they assert the baseline task *still completes* with the config loaded, so a presence-shaped check is the signal, not a smell. Declare that in each check's `note:` so lint reads the deliberate form correctly:
+
+```yaml
+checks:
+  - baseline-task-completes:
+      check: "A Write or Edit tool call targeting src/app.py appears in the transcript"
+      note: "Regression baseline — loading the plugin must not break plain file edits. Presence-only because the transcript drops Write/Edit content by design; the path is the recorded field."
+```
+
+Mind the transcript constraint (see `check-design.md` § Check Patterns): Write/Edit content fields are dropped, so presence-of-the-call plus path is the gradeable assertion — a content-level regression check is flaky by construction.

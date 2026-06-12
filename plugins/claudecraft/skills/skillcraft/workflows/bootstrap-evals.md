@@ -120,6 +120,8 @@ craboodle lint <skill-dir>/evals
 
 Confirm zero issues across the full suite. If the incremental lint in Step 6 was clean, this should pass on the first run.
 
+If lint flags `tautological` or `always_passes` on a deliberate presence anchor or regression baseline, the fix is to declare the intent in the check's `note:` and re-lint — not to delete or weaken the check (see `claude-code-evals/references/check-design.md` § Check Patterns). The bar stays zero issues: declared intent clears the flag because calibrated lint stops flagging, not because the issue is waived.
+
 ## Step 8: Full Run
 
 **GATE — Lint validates form; run validates substance. Do NOT report completion or present a final summary until a full-reps run has completed and results are reviewed.**
