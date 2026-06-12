@@ -134,12 +134,15 @@ Review the output. If all scenarios pass at default reps, proceed to Final Repor
 
 ## Step 9: Iterate
 
-| Exit Code | Meaning | Action |
-|-----------|---------|--------|
-| 0 | All scenarios at or above `min_pass_rate` | Done |
-| 3 | One or more scenarios below `min_pass_rate` | Diagnose and fix |
-| 1 | Configuration error | Fix scenario YAML |
-| 2 | Infrastructure error | Check tool installation |
+Exit-code meanings: `craboodle run --help` (canonical), or `claude-code-evals/references/results-interpretation.md` § Exit Codes.
+
+| Exit Code | Action |
+|-----------|--------|
+| 0 | Done |
+| 1 | Fix the offending YAML |
+| 2 | Read the error message on stderr; fix what it names (often an `evals.yaml` load failure) |
+| 3 | Diagnose and fix (see below) |
+| 4 | Check tool installation and skill load path; if reps failed, inspect the scenario `errors` block |
 
 **GATE — When exit code is 3, you MUST produce a per-check diagnosis table before the Final Report. Do NOT emit "Bootstrap complete" or any final summary until every failing check has a Skill-vs-Check attribution recorded in the Diagnosis section of the report template.**
 
