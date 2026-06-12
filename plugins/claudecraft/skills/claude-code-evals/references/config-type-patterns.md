@@ -38,6 +38,8 @@ checks:
 
 **Check strategy**: Test the *method* the skill teaches, not just the outcome. Without the skill, Claude might still solve the problem — but it would use a different approach.
 
+**Tool allow-list pitfall**: The scenario's effective tool set must include every tool the skill-under-test mandates — tools its instructions tell the agent to call, plus anything in its `allowed-tools` frontmatter. Trimming `tools:` to bound cost starves the skill: the agent can't follow the skill's own workflow, and the failure surfaces as a check failure that reads like a skill bug, so you debug the skill when the eval config is at fault. No lint catches this — a skill's mandated tools live in its prose. Prefer `additional_tools:` (extends scuttlerun's defaults); when you do use `tools:`, verify the exact set covers the skill's mandated tools. Restricting tools is legitimate only when the restriction *is* the scenario's subject — deliberate, per-scenario, and documented in the scenario (see the tool-restriction example under Hooks and Settings) — never as a base-config cost measure.
+
 For skill-type-specific patterns (discipline, technique, pattern, reference), see the skillcraft skill's `references/eval-guide.md`.
 
 ---
