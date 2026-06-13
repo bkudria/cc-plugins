@@ -125,6 +125,29 @@ const degradationSummary = ({ plannedAreas, droppedAreas, synthOk, verifyFailed,
 }
 /* test-seam:pure-fn:end */
 
+// Flat scalar audit summary for Phase 3: collapses the run's verification, grounding,
+// and funnel signals into a notification-safe set of counts (the nested verification/
+// grounding objects are truncated from the completion notification). The observations→
+// synthesized→findings funnel is reported as raw counts so the reduction is visible
+// without claiming a single "filtered" number (merge/split make it non-linear). Pure
+// (signals in, plain object out), so it is unit-tested alongside degradationSummary.
+/* test-seam:pure-fn:start */
+const summarizeAudit = ({ status, observationCount, synthInputCount, findingsCount, auditActions, grounding, reliabilityFlags }) => {
+  const count = (action) => auditActions.filter((a) => a.action === action).length
+  return {
+    status,
+    observations: observationCount,
+    synthesized: synthInputCount,
+    findings: findingsCount,
+    corrected: count('corrected'),
+    dropped: count('dropped'),
+    flagged: count('flagged'),
+    ungrounded: grounding && Array.isArray(grounding.ungrounded) ? grounding.ungrounded.length : 0,
+    reliabilityFlags: Array.isArray(reliabilityFlags) ? reliabilityFlags.length : 0,
+  }
+}
+/* test-seam:pure-fn:end */
+
 // Render the final assessment markdown DETERMINISTICALLY from the synthesizer's
 // structured output. Formatting — the "### N. Title" finding headings, the
 // "**Significance**:" line under each, the three structural h2s, the single-paragraph
@@ -825,6 +848,16 @@ if (overallEffort !== 'low' && synthFindings.length) {
     groundTargets.length + '), ' + ungrounded.length + ' citation(s) unresolved.')
 }
 
+const auditSummary = summarizeAudit({
+  status,
+  observationCount: allObs.length,
+  synthInputCount: verifiedObs.length,
+  findingsCount,
+  auditActions,
+  grounding,
+  reliabilityFlags: verification && verification.reliabilityFlags,
+})
+
 return {
   scope,
   focus,
@@ -834,6 +867,7 @@ return {
   coverage,
   observationCount: allObs.length,
   findingsCount,
+  auditSummary,
   outPath: finalPath,
   markdown,
   ...(synthOk ? {} : { error: 'synthesis failed' }),

@@ -10,7 +10,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { helpers } from './_load.mjs'
 
-const { degradationSummary, renderAssessment, applyVerdicts, pickOverallQuestion, selectVerifyTargets } = helpers
+const { degradationSummary, renderAssessment, applyVerdicts, pickOverallQuestion, selectVerifyTargets, summarizeAudit } = helpers
 
 test('renderAssessment emits the deterministic assess<->iterate format contract', () => {
   const md = renderAssessment({
@@ -215,4 +215,54 @@ test('pickOverallQuestion: a revision without a question falls back to plan/scop
     'Q'
   )
   assert.equal(pickOverallQuestion({ plan: null, revised: { overallQuestion: 'R' }, scope: 's' }), 'R')
+})
+
+test('summarizeAudit counts corrections, drops, flags, ungrounded, and reliability flags', () => {
+  const summary = summarizeAudit({
+    status: 'degraded',
+    observationCount: 12,
+    synthInputCount: 10,
+    findingsCount: 4,
+    auditActions: [
+      { action: 'corrected' }, { action: 'corrected' },
+      { action: 'dropped' },
+      { action: 'flagged' }, { action: 'flagged' }, { action: 'flagged' },
+    ],
+    grounding: { ran: true, checked: 4, ungrounded: [{ findingNumber: 1 }, { findingNumber: 2 }] },
+    reliabilityFlags: ['consolidation verification failed and was skipped'],
+  })
+  assert.deepEqual(summary, {
+    status: 'degraded',
+    observations: 12,
+    synthesized: 10,
+    findings: 4,
+    corrected: 2,
+    dropped: 1,
+    flagged: 3,
+    ungrounded: 2,
+    reliabilityFlags: 1,
+  })
+})
+
+test('summarizeAudit on a clean run reports zeros and passes the funnel counts through', () => {
+  const summary = summarizeAudit({
+    status: 'ok',
+    observationCount: 8,
+    synthInputCount: 8,
+    findingsCount: 5,
+    auditActions: [],
+    grounding: { ran: false, checked: 0, ungrounded: [] },
+    reliabilityFlags: undefined,
+  })
+  assert.deepEqual(summary, {
+    status: 'ok',
+    observations: 8,
+    synthesized: 8,
+    findings: 5,
+    corrected: 0,
+    dropped: 0,
+    flagged: 0,
+    ungrounded: 0,
+    reliabilityFlags: 0,
+  })
 })
