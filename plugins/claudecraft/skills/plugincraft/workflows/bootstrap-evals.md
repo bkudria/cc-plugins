@@ -129,7 +129,7 @@ For every bundle-level check, add a `note:` field naming the components (or load
 craboodle lint <plugin-root>/evals
 ```
 
-Confirm zero issues across the full suite. If the incremental lint in Step 7 was clean, this should pass on the first run.
+Confirm zero issues across the full suite. If the incremental lint in Step 7 was clean, this will usually pass on the first run — but lint is advisory and non-deterministic, so an unexpected flag on re-run may be lint variance rather than a regression (see the *Evaluation is probabilistic* note in `claude-code-evals` and `pincenez lint --help`). Re-run and judge a surprise flag on its merits before acting on it.
 
 If lint flags `tautological` or `always_passes` on a deliberate presence anchor or regression baseline (common in the Regression bucket), the fix is to declare the intent in the check's `note:` and re-lint — not to delete or weaken the check (see `claude-code-evals/references/check-design.md` § Check Patterns). The bar stays zero issues: declared intent clears the flag because calibrated lint stops flagging, not because the issue is waived.
 

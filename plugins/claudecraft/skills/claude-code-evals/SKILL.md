@@ -31,7 +31,7 @@ Evaluation replaces intuition with behavioral evidence. Instead of reading your 
 - Configs with no behavioral expectations (e.g., editor settings)
 - During initial exploratory drafting — write first, evaluate when the config stabilizes
 
-**Evaluation is probabilistic.** LLM behavior is non-deterministic. Evals run multiple repetitions and report pass *rates*, not binary pass/fail. A pass rate of 0.8 means the configuration works reliably, not that it works every time.
+**Evaluation is probabilistic.** LLM behavior is non-deterministic. Evals run multiple repetitions and report pass *rates*, not binary pass/fail. A pass rate of 0.8 means the configuration works reliably, not that it works every time. Lint is non-deterministic too: each check is a single un-seeded LLM judgment, so re-running `craboodle lint` may add or drop individual findings (see `pincenez lint --help`). Treat lint findings as advisory — judge each on its merits rather than expecting an identical issue count on every run.
 
 ## The Three Tools
 
