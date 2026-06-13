@@ -10,7 +10,13 @@
 #                                            <skill>/profiles/*/*.yaml.
 set -euo pipefail
 
-SKILL_DIR="${CLAUDE_SKILL_DIR:-${CLAUDE_PLUGIN_ROOT:-}/skills/standards}"
+# Resolve the standards skill dir. Precedence: explicit CLAUDE_SKILL_DIR
+# override (used by the tests) > the plugin-install layout under
+# CLAUDE_PLUGIN_ROOT > self-location from this script's own path. The last
+# fallback keeps the linter working when neither env var is exported into the
+# subprocess, instead of silently collapsing to the root-level /skills/standards.
+SKILL_DIR="${CLAUDE_SKILL_DIR:-${CLAUDE_PLUGIN_ROOT:+$CLAUDE_PLUGIN_ROOT/skills/standards}}"
+SKILL_DIR="${SKILL_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 
 usage() {
   echo "Usage:" >&2
@@ -171,22 +177,13 @@ lint_project_yaml() {
   done < <(yq -r '.profiles[]?' "$pyaml" 2>/dev/null || true)
 
   local valid_profiles=()
-  local missing_profile=0
   for profile in "${profiles[@]}"; do
     if [[ -d "$SKILL_DIR/profiles/$profile" ]]; then
       valid_profiles+=("$profile")
     else
       err "profile not found: $profile (looked in $SKILL_DIR/profiles/$profile)"
-      missing_profile=1
     fi
   done
-
-  # When both skill-dir vars are unset, SKILL_DIR collapses to a bare
-  # /skills/standards and every profile lookup fails against a path that looks
-  # like a bug rather than a missing env var. Name the real cause once.
-  if [[ "$missing_profile" -eq 1 && -z "${CLAUDE_SKILL_DIR:-}" && -z "${CLAUDE_PLUGIN_ROOT:-}" ]]; then
-    echo "  Hint: neither CLAUDE_PLUGIN_ROOT nor CLAUDE_SKILL_DIR is set, so profiles were sought under the bare path '$SKILL_DIR'. Set CLAUDE_PLUGIN_ROOT to the plugin root (the directory containing skills/standards/profiles/)." >&2
-  fi
 
   while IFS= read -r key; do
     [[ -n "$key" ]] || continue

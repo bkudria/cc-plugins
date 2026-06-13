@@ -64,7 +64,15 @@
 #       from "audit had FAILs."
 set -euo pipefail
 
-SKILL_DIR="${CLAUDE_SKILL_DIR:-${CLAUDE_PLUGIN_ROOT:-}/skills/standards}"
+# Resolve the standards skill dir. Precedence: explicit CLAUDE_SKILL_DIR
+# override (used by the tests) > the plugin-install layout under
+# CLAUDE_PLUGIN_ROOT > self-location from this script's own path. The last
+# fallback keeps the runner working when neither env var is exported into the
+# subprocess (CLAUDE_PLUGIN_ROOT is a skill-content template token, not an env
+# var), instead of silently collapsing to the root-level /skills/standards.
+_SELF_SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SKILL_DIR="${CLAUDE_SKILL_DIR:-${CLAUDE_PLUGIN_ROOT:+$CLAUDE_PLUGIN_ROOT/skills/standards}}"
+SKILL_DIR="${SKILL_DIR:-$(cd "$_SELF_SCRIPTS_DIR/.." && pwd)}"
 
 usage() {
   echo "Usage:" >&2
@@ -263,9 +271,7 @@ collect() {
     exit 1
   }
 
-  local runner_dir lint_script
-  runner_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  lint_script="$runner_dir/lint-project-yaml.sh"
+  local lint_script="$_SELF_SCRIPTS_DIR/lint-project-yaml.sh"
   if [[ -f "$lint_script" ]]; then
     bash "$lint_script" "$project_root/project.yaml" >/dev/null || exit 1
   else
