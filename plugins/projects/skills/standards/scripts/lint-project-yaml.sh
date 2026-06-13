@@ -158,13 +158,22 @@ lint_project_yaml() {
   done < <(yq -r '.profiles[]?' "$pyaml" 2>/dev/null || true)
 
   local valid_profiles=()
+  local missing_profile=0
   for profile in "${profiles[@]}"; do
     if [[ -d "$SKILL_DIR/profiles/$profile" ]]; then
       valid_profiles+=("$profile")
     else
       err "profile not found: $profile (looked in $SKILL_DIR/profiles/$profile)"
+      missing_profile=1
     fi
   done
+
+  # When both skill-dir vars are unset, SKILL_DIR collapses to a bare
+  # /skills/standards and every profile lookup fails against a path that looks
+  # like a bug rather than a missing env var. Name the real cause once.
+  if [[ "$missing_profile" -eq 1 && -z "${CLAUDE_SKILL_DIR:-}" && -z "${CLAUDE_PLUGIN_ROOT:-}" ]]; then
+    echo "  Hint: neither CLAUDE_PLUGIN_ROOT nor CLAUDE_SKILL_DIR is set, so profiles were sought under the bare path '$SKILL_DIR'. Set CLAUDE_PLUGIN_ROOT to the plugin root (the directory containing skills/standards/profiles/)." >&2
+  fi
 
   while IFS= read -r key; do
     [[ -n "$key" ]] || continue
