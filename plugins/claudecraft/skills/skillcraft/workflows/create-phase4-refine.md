@@ -11,7 +11,7 @@ Lint, run evals, and iterate until the skill passes. This phase is autonomous â€
 ## Step 1: Lint Checks
 
 ```bash
-craboodle lint <skill-dir>/evals
+craboodle lint <skill-dir>
 ```
 
 Fix any flagged issues. Run `craboodle lint --help` for options.
@@ -19,7 +19,7 @@ Fix any flagged issues. Run `craboodle lint --help` for options.
 ## Step 2: Run Evals
 
 ```bash
-craboodle run <skill-dir>/evals
+craboodle run <skill-dir>
 ```
 
 Run `craboodle run --help` for all available options.

@@ -162,7 +162,7 @@ Always lint checks before spending money on eval runs:
 
 - **Review rules first**: `pincenez lint --help` — shows the full anti-pattern definitions with examples and check-writing guidance. Read this before writing checks to avoid common issues.
 - **Single checks file**: `pincenez lint checks.yaml` — catches anti-patterns in one checks file
-- **Full eval suite**: `craboodle lint <evals-dir>` — checks all scenarios
+- **Full eval suite**: `craboodle lint <root>` — checks all scenarios
 
 Linting catches vague, compound, tautological, always-passes, unverifiable, over-specific, and unfalsifiable checks before they waste LLM calls. Fix flagged issues, then run. One class of flag is fixed by declaring rather than rewriting: a tautological/always_passes flag on a deliberate presence anchor or regression baseline means the check is missing its `note:` intent declaration — add it and re-lint; don't delete a legitimate anchor.
 

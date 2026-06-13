@@ -121,12 +121,12 @@ Loading the `claude-code-evals` skill (done in the top GATE) is not the same as 
 
 For every bundle-level check, add a `note:` field naming the components (or load surface) the check exercises (e.g., `note: "skills/release-notes + hooks/slack-post — composition"`). This mirrors the `note:` discipline in `claude-code-evals/references/config-type-patterns.md` § Plugins and makes Step 10 attribution faster. For Regression-bucket checks, also declare the regression-baseline intent in the note — those checks are presence-anchored by design (see `claude-code-evals/references/check-design.md` § Check Patterns), and the declaration is what tells lint the WHETHER form is deliberate.
 
-**Write incrementally**: Write the first scenario, then lint it with `craboodle lint --scenario <id> <plugin-root>/evals`. Fix any issues before writing the remaining scenarios — anti-pattern tendencies caught on the first scenario won't propagate to the rest. Then write the remaining scenarios in parallel, following the same patterns.
+**Write incrementally**: Write the first scenario, then lint it with `craboodle lint --scenario <id> <plugin-root>`. Fix any issues before writing the remaining scenarios — anti-pattern tendencies caught on the first scenario won't propagate to the rest. Then write the remaining scenarios in parallel, following the same patterns.
 
 ## Step 8: Lint
 
 ```bash
-craboodle lint <plugin-root>/evals
+craboodle lint <plugin-root>
 ```
 
 Confirm zero issues across the full suite. If the incremental lint in Step 7 was clean, this should pass on the first run.
@@ -138,7 +138,7 @@ If lint flags `tautological` or `always_passes` on a deliberate presence anchor 
 **GATE — Lint validates form; run validates substance. Do NOT report completion or present a final summary until a run has completed and results are reviewed.**
 
 ```bash
-craboodle run --repeats 1 <plugin-root>/evals
+craboodle run --repeats 1 <plugin-root>
 ```
 
 Review the output. If all scenarios pass, proceed to Final Report. If failures occur, continue to Step 10.

@@ -110,8 +110,8 @@ When loaded during editing of any file within a skill directory, apply only thes
 **Lint validates form; run validates substance.** Evals that pass lint but have never been run have the same evidentiary value as tests that have never been executed.
 
 1. **During authoring**: use `craboodle lint --scenario <id> <skill-dir>` to iterate on check quality on just the scenario being authored (cheap, no LLM agent sessions). For a final full-suite sweep, drop `--scenario` and lint the whole `<skill-dir>`.
-2. **Smoke test**: run `craboodle run --repeats 1 --scenario <one-scenario> <skill-dir>/evals` to catch fundamental config/check mismatches early (~1-2 min)
-3. **Before declaring done**: run `craboodle run <skill-dir>/evals` — full suite, default repetitions
+2. **Smoke test**: run `craboodle run --repeats 1 --scenario <one-scenario> <skill-dir>` to catch fundamental config/check mismatches early (~1-2 min)
+3. **Before declaring done**: run `craboodle run <skill-dir>` — full suite, default repetitions
 4. Review craboodle's YAML output and exit code (0 = pass, 3 = below `min_pass_rate`)
 5. If results show low pass rates or unexpected failures, iterate on the scenarios before declaring done
 6. **In plan mode**: the plan MUST include "run evals" as an explicit final step

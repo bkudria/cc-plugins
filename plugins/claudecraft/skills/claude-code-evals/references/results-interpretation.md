@@ -36,7 +36,7 @@ Key fields:
 Redirect to a file, then query:
 
 ```bash
-craboodle run evals > /tmp/results.yaml
+craboodle run my-evals/ > /tmp/results.yaml
 yq '.scenarios[] | {id, pass_rate, cost_usd}' /tmp/results.yaml
 ```
 
