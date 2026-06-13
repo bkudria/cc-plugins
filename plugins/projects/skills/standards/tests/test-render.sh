@@ -318,6 +318,26 @@ out=$(render_state "$results")
 assert_contains "skipped-line: surfaces suggested_total" "5 suggested standards skipped" "$out"
 assert_contains "skipped-line: mentions required failures" "required failures" "$out"
 
+# --- Test SK1b: scopes_collected==["required"] AND suggested_total > 0 AND NO required FAIL
+#                → skipped line still appears, but with the neutral reason — NOT a false
+#                  "required failures present" claim (the suggested round was simply not run) ---
+results=$(cat <<'EOF'
+{
+  "resolved": [
+    {"id": "base/readme", "status": "PASS", "detail": "ok", "description": ".", "intrinsic_required": true}
+  ],
+  "scopes_collected": ["required"],
+  "suggested_total": 4,
+  "required_overrides": [],
+  "disabled_count": 0
+}
+EOF
+)
+out=$(render_state "$results")
+assert_contains     "skipped-line: present even with no failures" "4 suggested standards skipped" "$out"
+assert_contains     "skipped-line: neutral reason when no required failure" "suggested round not run" "$out"
+assert_not_contains "skipped-line: does not claim required failures when none failed" "required failures present" "$out"
+
 # --- Test SK2: scopes_collected==["required"] AND suggested_total == 0 → no skipped line ---
 results=$(cat <<'EOF'
 {
