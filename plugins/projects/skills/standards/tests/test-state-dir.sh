@@ -44,6 +44,20 @@ check:
     Verify thingy at $PROJECT_ROOT. Report met or unmet.
 EOF
 
+cat > "$SKILL_TMP/profiles/testfx/optional.yaml" <<'EOF'
+required: false
+description: "An optional .opt file exists."
+check:
+  script: |
+    cd "$PROJECT_ROOT"
+    if [[ -f .opt ]]; then
+      echo ".opt present"
+      exit 0
+    fi
+    echo ".opt missing"
+    exit 1
+EOF
+
 # --- Test 1: --init prints a fresh, empty, existing directory path ---
 state1=$("$RUNNER" --init)
 state2=$("$RUNNER" --init)
@@ -209,6 +223,47 @@ notes_pos=$(printf '%s' "$prompt_contents" | awk '/Maintainer notes/ {print NR; 
 check_pos=$(printf '%s' "$prompt_contents" | awk '/Verify thingy at/ {print NR; exit}')
 [[ -n "$notes_pos" && -n "$check_pos" && "$notes_pos" -lt "$check_pos" ]] && order_ok=1 || order_ok=0
 assert_eq "notes block appears before check body in rendered prompt" "1" "$order_ok"
+rm -rf "$proj" "$state"
+
+# --- Test 12: end-to-end override + disable against the real pipeline ---
+# Drives init→collect→merge→gate→render on a project.yaml that uses BOTH
+# `required:` overrides (upgrade the intrinsic-SUGG testfx/optional to required)
+# and `disabled:` (drop the intrinsic-required testfx/manual). Exercises the
+# disable-a-required-standard, override+PASS→gate-0, and disabled-count-render
+# paths together with real evidence rather than hand-crafted JSON.
+proj=$(mktemp -d)
+cat > "$proj/project.yaml" <<'EOF'
+profiles: [testfx]
+required:
+  - testfx/optional
+disabled:
+  testfx/manual: "Out of scope for this project"
+EOF
+touch "$proj/.marker" "$proj/.opt"
+state=$("$RUNNER" --init)
+CLAUDE_SKILL_DIR="$SKILL_TMP" "$RUNNER" --collect "$proj" "$state" --scope required >/dev/null
+"$RUNNER" --merge "$state" >/dev/null
+# disabled required standard: counted and absent everywhere
+dc=$(jq -r '.disabled_count' "$state/merged.json")
+assert_eq "e2e: disabled required standard counted" "1" "$dc"
+manual_present=$(jq '[(.resolved[],.pending[]) | select(.id=="testfx/manual")] | length' "$state/merged.json")
+assert_eq "e2e: disabled standard absent from merged" "0" "$manual_present"
+# overridden SUGG standard: present, intrinsic_required=false, PASS
+opt_intrinsic=$(jq -r '.resolved[] | select(.id=="testfx/optional") | .intrinsic_required' "$state/merged.json")
+opt_status=$(jq -r '.resolved[] | select(.id=="testfx/optional") | .status' "$state/merged.json")
+assert_eq "e2e: overridden standard keeps intrinsic_required=false" "false" "$opt_intrinsic"
+assert_eq "e2e: overridden standard PASSes" "PASS" "$opt_status"
+has_override=$(jq '[.required_overrides[] | select(.=="testfx/optional")] | length' "$state/merged.json")
+assert_eq "e2e: required_overrides carries the upgraded standard" "1" "$has_override"
+# gate: every effective-required entry PASSed → exit 0
+set +e
+"$RUNNER" --gate "$state" >/dev/null 2>&1
+rc=$?
+set -e
+assert_exit_code "e2e: gate exits 0 when overridden standard PASSes" "0" "$rc"
+# render: disabled-count line present
+out=$("$RUNNER" --render "$state")
+assert_contains "e2e: render reports the disabled count" "1 standards disabled in project.yaml" "$out"
 rm -rf "$proj" "$state"
 
 summary
