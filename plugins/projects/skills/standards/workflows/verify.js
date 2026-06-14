@@ -53,8 +53,18 @@ const dispatchVerifier = (p) =>
     { label: 'verify:' + p.id, phase: 'Verify', model: 'haiku' }
   )
 
+/* test-seam:pure-fn:start */
+// Count verifiers that actually ran. parallel() yields null for an agent that
+// died (terminal API error / skipped); any other result means it ran — INCLUDING
+// an empty string, since verifiers are told "your chat reply is ignored" and end
+// on a Write, so a silent "" return is a success. Counting truthiness wrongly
+// drops those and reports healthy verifiers as errored.
+const countDispatched = (results) =>
+  results.filter((r) => r !== null && r !== undefined).length
+/* test-seam:pure-fn:end */
+
 const results = await parallel(pending.map((p) => () => dispatchVerifier(p)))
-const dispatched = results.filter(Boolean).length
+const dispatched = countDispatched(results)
 if (dispatched < pending.length) {
   log((pending.length - dispatched) + ' verifier(s) errored; --merge treats any missing ' +
     'response file as FAIL (failure to verify is itself a failure).')
