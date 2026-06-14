@@ -56,6 +56,8 @@ Canonical taxonomy: `craboodle run --help` (shared with scuttlerun and pincenez)
 | 5 | Budget exhausted (`max_budget_usd`) |
 | 130 | Interrupted (SIGINT) |
 
+> A scuttlerun **rep** can hit its budget mid-run: the SDK surfaces it as a runtime error (`"Reached maximum budget"` in the rep's `errors` block), so the rep crashes and feeds the `4` reliability gate — it does *not* raise code `5`, which is craboodle's own `max_budget_usd` cap on the whole run.
+
 ---
 
 ## Decision Framework

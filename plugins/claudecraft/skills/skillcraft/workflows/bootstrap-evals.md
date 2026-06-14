@@ -142,9 +142,10 @@ Exit-code meanings: `craboodle run --help` (canonical), or `claude-code-evals/re
 |-----------|--------|
 | 0 | Done |
 | 1 | Fix the offending YAML |
-| 2 | Read the error message on stderr; fix what it names (often an `evals.yaml` load failure) |
+| 2 | Read the error message on stderr; fix what it names — an `evals.yaml` load failure, or a rep that exhausted its budget (`"Reached maximum budget"`) |
 | 3 | Diagnose and fix (see below) |
-| 4 | Check tool installation and skill load path; if reps failed, inspect the scenario `errors` block |
+| 4 | Check tool installation and skill load path; if reps failed, inspect the scenario `errors` block (a budget-exhausted rep lands here) |
+| 5 | Budget exhausted (`max_budget_usd`) — narrow scope or raise the cap |
 
 **GATE — When exit code is 3, you MUST produce a per-check diagnosis table before the Final Report. Do NOT emit "Bootstrap complete" or any final summary until every failing check has a Skill-vs-Check attribution recorded in the Diagnosis section of the report template.**
 
