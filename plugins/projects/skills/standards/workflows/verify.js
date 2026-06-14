@@ -54,21 +54,26 @@ const dispatchVerifier = (p) =>
   )
 
 /* test-seam:pure-fn:start */
-// Count verifiers that actually ran. parallel() yields null for an agent that
-// died (terminal API error / skipped); any other result means it ran — INCLUDING
-// an empty string, since verifiers are told "your chat reply is ignored" and end
-// on a Write, so a silent "" return is a success. Counting truthiness wrongly
-// drops those and reports healthy verifiers as errored.
-const countDispatched = (results) =>
-  results.filter((r) => r !== null && r !== undefined).length
+// parallel() preserves order (results[i] pairs with pending[i]) and yields null for
+// an agent that died (terminal API error / skipped). A verifier "ran" iff its result
+// is neither null nor undefined — INCLUDING an empty string, since verifiers are told
+// "your chat reply is ignored" and end on a Write, so a silent "" return is a success.
+const ran = (r) => r !== null && r !== undefined
+// How many verifiers ran (truthiness would wrongly drop the silent-"" successes).
+const countDispatched = (results) => results.filter(ran).length
+// Which standards failed to dispatch, by id — so the shortfall is actionable, not a
+// bare number. Pairs each result with its pending entry by position.
+const failedIds = (results, pending) =>
+  pending.filter((_, i) => !ran(results[i])).map((p) => p.id)
 /* test-seam:pure-fn:end */
 
 const results = await parallel(pending.map((p) => () => dispatchVerifier(p)))
 const dispatched = countDispatched(results)
-if (dispatched < pending.length) {
-  log((pending.length - dispatched) + ' verifier(s) errored; --merge treats any missing ' +
-    'response file as FAIL (failure to verify is itself a failure).')
+const failed = failedIds(results, pending)
+if (failed.length) {
+  log(failed.length + ' verifier(s) failed to dispatch (' + failed.join(', ') + '); ' +
+    '--merge treats any missing response file as FAIL (failure to verify is itself a failure).')
 }
 log('Dispatched ' + dispatched + '/' + pending.length + ' verifier(s) for scope "' + scope + '".')
 
-return { scope, requested: pending.length, dispatched }
+return { scope, requested: pending.length, dispatched, failed }
