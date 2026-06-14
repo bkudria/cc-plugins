@@ -33,6 +33,7 @@ required: true
 description: "Script-based probe."
 check:
   script: |
+    cd "$PROJECT_ROOT"
     exit 0
 EOF
 

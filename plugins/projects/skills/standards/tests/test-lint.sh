@@ -20,6 +20,7 @@ required: true
 description: "A .marker file exists at the project root."
 check:
   script: |
+    cd "$PROJECT_ROOT"
     exit 0
 EOF
 cat > "$SKILL_TMP/profiles/testfx/optional.yaml" <<'EOF'
@@ -34,6 +35,7 @@ required: true
 description: "Extra standard."
 check:
   script: |
+    cd "$PROJECT_ROOT"
     exit 0
 EOF
 
@@ -308,6 +310,7 @@ notes: |
   Some maintainer-facing context.
 check:
   script: |
+    cd "$PROJECT_ROOT"
     exit 0
 EOF
 set +e
@@ -316,5 +319,41 @@ rc=$?
 set -e
 assert_exit_code "--skill accepts optional notes" "0" "$rc"
 rm -rf "$SKILL_TMP/profiles/okfx"
+
+# --- Test 12: --skill rejects a script body that never references PROJECT_ROOT ---
+mkdir -p "$SKILL_TMP/profiles/badfx5"
+cat > "$SKILL_TMP/profiles/badfx5/no-root-script.yaml" <<'EOF'
+required: true
+description: "Script body forgot to anchor on the project root."
+check:
+  script: |
+    exit 0
+EOF
+set +e
+err=$(run_lint --skill 2>&1)
+rc=$?
+set -e
+assert_exit_code "--skill rejects script body missing PROJECT_ROOT" "1" "$rc"
+assert_contains "--skill error names the bad file" "badfx5/no-root-script" "$err"
+assert_contains "--skill error mentions PROJECT_ROOT" "PROJECT_ROOT" "$err"
+rm -rf "$SKILL_TMP/profiles/badfx5"
+
+# --- Test 13: --skill rejects a prompt body that never references PROJECT_ROOT ---
+mkdir -p "$SKILL_TMP/profiles/badfx6"
+cat > "$SKILL_TMP/profiles/badfx6/no-root-prompt.yaml" <<'EOF'
+required: false
+description: "Prompt body forgot to anchor on the project root."
+check:
+  prompt: |
+    Verify the project follows the convention.
+EOF
+set +e
+err=$(run_lint --skill 2>&1)
+rc=$?
+set -e
+assert_exit_code "--skill rejects prompt body missing PROJECT_ROOT" "1" "$rc"
+assert_contains "--skill error names the bad file" "badfx6/no-root-prompt" "$err"
+assert_contains "--skill error mentions PROJECT_ROOT" "PROJECT_ROOT" "$err"
+rm -rf "$SKILL_TMP/profiles/badfx6"
 
 summary

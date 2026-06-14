@@ -25,6 +25,7 @@ required: true
 description: "Probe standard used to verify CLAUDE_PLUGIN_ROOT path resolution."
 check:
   script: |
+    cd "$PROJECT_ROOT"
     exit 0
 EOF
 
