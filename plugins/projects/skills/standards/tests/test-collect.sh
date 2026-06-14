@@ -48,7 +48,7 @@ required: true
 description: "A manual standard verified by prompt."
 check:
   prompt: |
-    Verify thingy at $PROJECT_ROOT.
+    Verify thingy at $PROJECT_ROOT. Report met or unmet.
 EOF
 
 run_collect_scope() {
@@ -265,7 +265,7 @@ required: false
 description: "A suggestion verified by prompt."
 check:
   prompt: |
-    Verify thingy at $PROJECT_ROOT.
+    Verify thingy at $PROJECT_ROOT. Report met or unmet.
 EOF
 proj=$(mktemp -d)
 cat > "$proj/project.yaml" <<'EOF'
@@ -300,7 +300,7 @@ required: false
 description: "A suggestion verified by prompt."
 check:
   prompt: |
-    Verify thingy at $PROJECT_ROOT.
+    Verify thingy at $PROJECT_ROOT. Report met or unmet.
 EOF
 proj=$(mktemp -d)
 cat > "$proj/project.yaml" <<'EOF'
@@ -447,7 +447,7 @@ mkdir -p "$SKILL_TMP/profiles/big"
 big_body=""
 # Build a ~1500-char body using a deterministic filler.
 for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
-  big_body+="Verify standard at \$PROJECT_ROOT and confirm it meets the bar. "
+  big_body+="Verify standard at \$PROJECT_ROOT; report met or unmet. "
 done
 for i in $(seq 1 50); do
   cat > "$SKILL_TMP/profiles/big/std-$i.yaml" <<EOF
