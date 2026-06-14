@@ -47,7 +47,7 @@ The runner reads `<project-root>/project.yaml` (and exits with a descriptive err
 
 `suggested_total` is the count of would-have-been-suggested standards that round 1 *deliberately skipped* — render uses it to surface the skipped count if the gate later trips.
 
-**GATE — No prompt extraction. Do NOT write prompt content to bash output, `/tmp/...`, or any side file. The pending entries carry only file *paths* (`prompt_path`, `response_path`) plus `id`/`required`/`description` — never prompt text. That index is exactly what gets handed to the workflow. Do NOT `cat`, `for`-loop dump, or echo any `prompt_path` file through Bash; the verifier agents inside the workflow Read those files themselves.**
+**GATE — No prompt extraction. Do NOT write prompt content to bash output, `/tmp/...`, or any side file. The pending entries carry only file *paths* (`prompt_path`, `response_path`) plus `id`/`required`/`description` — never prompt text. That index is exactly what gets handed to the workflow. Do NOT `cat`, `for`-loop dump, or echo any `prompt_path` file through Bash — nor pull its contents into your own context with any file-reading tool (e.g. `Read`, `Grep`, `Glob`); the verifier agents inside the workflow Read those files themselves.**
 
 Extract the pending index (paths and ids only — no prompt content) and hand it to the verification workflow. The workflow fans out one `model: 'haiku'` verifier per pending entry; each agent Reads its `prompt_path` file, obeys the embedded directive, and Writes `{"met": true|false, "detail": "<one-line>"}` to its `response_path`. The runner has already baked the description, prompt body, and that write-directive into each prompt file. The `parallel()` inside the script makes the fan-out mechanical — there is no per-entry dispatch to drive or count by hand.
 
@@ -105,7 +105,7 @@ ${CLAUDE_PLUGIN_ROOT}/skills/standards/scripts/run-audit.sh --collect <project-r
 
 The runner walks the same profiles but **filters to effective-suggested standards only** (intrinsic `required: false` AND id NOT in project.yaml's `required:` overrides). Output is `<state-dir>/collect-suggested.json` with the same shape as round 1 (minus `suggested_total`).
 
-**GATE — No prompt extraction (round 2). Same rule as round 1: the pending entries carry only `prompt_path`/`response_path`, never prompt text. Do NOT `cat`, `for`-loop dump, or echo any prompt file through Bash; the workflow's verifier agents Read them.**
+**GATE — No prompt extraction (round 2). Same rule as round 1: the pending entries carry only `prompt_path`/`response_path`, never prompt text. Do NOT `cat`, `for`-loop dump, or echo any prompt file through Bash — nor read it into your own context with any file-reading tool (e.g. `Read`, `Grep`, `Glob`); the workflow's verifier agents Read them.**
 
 Extract this round's pending index and hand it to the same workflow with `scope: "suggested"`:
 
