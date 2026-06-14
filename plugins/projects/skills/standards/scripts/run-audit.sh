@@ -456,7 +456,7 @@ merge() {
   [[ -d "$responses_dir" ]] || mkdir -p "$responses_dir"
 
   # Combine resolved + pending across all sources. Top-level scalars
-  # (disabled_count, required_overrides, suggested_total, project_context)
+  # (disabled_count, required_overrides, suggested_total)
   # are taken from the first source (collect-required.json under the new
   # flow; collect.json under legacy).
   local resolved='[]' pending='[]'
