@@ -65,6 +65,7 @@ assert_contains "project_context names Node.js" "Node.js" "$context"
 assert_contains "prompt file carries detected-context block" "Detected project context" "$prompt"
 assert_contains "prompt file names Node.js"          "Node.js"                     "$prompt"
 assert_contains "prompt file names primary manifest" "package.json"                "$prompt"
+assert_contains "Node defaults package manager to npm" "Package manager: npm"      "$prompt"
 rm -rf "$proj" "$state"
 
 # --- Test 2: Node + pnpm-lock.yaml → package manager identified ---
@@ -81,7 +82,7 @@ CLAUDE_SKILL_DIR="$SKILL_TMP" "$RUNNER" --collect "$proj" "$state" --scope requi
 out=$(cat "$state/collect-required.json")
 prompt_path=$(printf '%s' "$out" | jq -r '.pending[0].prompt_path')
 prompt=$(cat "$prompt_path" 2>/dev/null || echo "")
-assert_contains "prompt file names pnpm package manager" "pnpm" "$prompt"
+assert_contains "prompt file names pnpm package manager" "Package manager: pnpm" "$prompt"
 rm -rf "$proj" "$state"
 
 # --- Test 3: Ruby project (Gemfile) ---
@@ -93,6 +94,7 @@ echo "source 'https://rubygems.org'" > "$proj/Gemfile"
 out=$(run_collect_required "$proj")
 context=$(printf '%s' "$out" | jq -r '.project_context // ""')
 assert_contains "project_context names Ruby" "Ruby" "$context"
+assert_contains "project_context names Bundler" "Package manager: Bundler" "$context"
 rm -rf "$proj"
 
 # --- Test 4: Python project (pyproject.toml) ---
@@ -104,6 +106,7 @@ echo "[project]" > "$proj/pyproject.toml"
 out=$(run_collect_required "$proj")
 context=$(printf '%s' "$out" | jq -r '.project_context // ""')
 assert_contains "project_context names Python" "Python" "$context"
+assert_contains "Python defaults package manager to pip" "Package manager: pip" "$context"
 rm -rf "$proj"
 
 # --- Test 5: Rust project (Cargo.toml) ---
@@ -115,6 +118,7 @@ echo "[package]" > "$proj/Cargo.toml"
 out=$(run_collect_required "$proj")
 context=$(printf '%s' "$out" | jq -r '.project_context // ""')
 assert_contains "project_context names Rust" "Rust" "$context"
+assert_contains "project_context names Cargo" "Package manager: Cargo" "$context"
 rm -rf "$proj"
 
 # --- Test 6: Go project (go.mod) ---
@@ -126,6 +130,7 @@ echo "module example.com/x" > "$proj/go.mod"
 out=$(run_collect_required "$proj")
 context=$(printf '%s' "$out" | jq -r '.project_context // ""')
 assert_contains "project_context names Go" "Go" "$context"
+assert_contains "project_context names go modules" "Package manager: go modules" "$context"
 rm -rf "$proj"
 
 # --- Test 7: Project with no recognised manifest → context_block is empty,
@@ -211,5 +216,56 @@ assert_contains "project_context lists package.json" "package.json" "$context"
 assert_contains "project_context lists src/cli.ts"   "src/cli.ts"    "$context"
 assert_contains "project_context lists bin/foo"      "bin/foo"       "$context"
 rm -rf "$proj"
+
+# --- Test 11: Deno project (deno.json) ---
+proj=$(mktemp -d)
+cat > "$proj/project.yaml" <<'EOF'
+profiles: [probe]
+EOF
+echo '{}' > "$proj/deno.json"
+out=$(run_collect_required "$proj")
+context=$(printf '%s' "$out" | jq -r '.project_context // ""')
+assert_contains "project_context names Deno" "Deno" "$context"
+assert_contains "project_context names deno package manager" "Package manager: deno" "$context"
+rm -rf "$proj"
+
+# --- Test 12: Dart project (pubspec.yaml) ---
+proj=$(mktemp -d)
+cat > "$proj/project.yaml" <<'EOF'
+profiles: [probe]
+EOF
+echo "name: x" > "$proj/pubspec.yaml"
+out=$(run_collect_required "$proj")
+context=$(printf '%s' "$out" | jq -r '.project_context // ""')
+assert_contains "project_context names Dart" "Dart" "$context"
+assert_contains "project_context names pub package manager" "Package manager: pub" "$context"
+rm -rf "$proj"
+
+# --- Test 13: Swift project (Package.swift) ---
+proj=$(mktemp -d)
+cat > "$proj/project.yaml" <<'EOF'
+profiles: [probe]
+EOF
+echo "// swift-tools-version:5.9" > "$proj/Package.swift"
+out=$(run_collect_required "$proj")
+context=$(printf '%s' "$out" | jq -r '.project_context // ""')
+assert_contains "project_context names Swift" "Swift" "$context"
+assert_contains "project_context names SwiftPM package manager" "Package manager: SwiftPM" "$context"
+rm -rf "$proj"
+
+# --- Test 14: Python package-manager disambiguation by lockfile ---
+for pair in "uv.lock:uv" "poetry.lock:Poetry" "pdm.lock:PDM" "Pipfile.lock:Pipenv"; do
+  lock="${pair%%:*}"; expected="${pair##*:}"
+  proj=$(mktemp -d)
+  cat > "$proj/project.yaml" <<'EOF'
+profiles: [probe]
+EOF
+  echo "[project]" > "$proj/pyproject.toml"
+  touch "$proj/$lock"
+  out=$(run_collect_required "$proj")
+  context=$(printf '%s' "$out" | jq -r '.project_context // ""')
+  assert_contains "Python with $lock names $expected" "Package manager: $expected" "$context"
+  rm -rf "$proj"
+done
 
 summary
