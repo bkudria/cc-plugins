@@ -47,7 +47,7 @@ The runner reads `<project-root>/project.yaml` (and exits with a descriptive err
 
 `suggested_total` is the count of would-have-been-suggested standards that round 1 *deliberately skipped* — render uses it to surface the skipped count if the gate later trips.
 
-**GATE — No prompt extraction. Do NOT write prompt content to bash output, `/tmp/...`, or any side file. The pending entries carry only file *paths* (`prompt_path`, `response_path`) plus `id`/`required`/`description` — never prompt text. That index is exactly what gets handed to the workflow. Do NOT `cat`, `for`-loop dump, or echo any `prompt_path` file through Bash; the verifier agents inside the workflow Read those files themselves.**
+**GATE — No prompt extraction. Do NOT write prompt content to bash output, `/tmp/...`, or any side file. The pending entries carry only file *paths* (`prompt_path`, `response_path`) plus `id`/`required`/`description` — never prompt text. That index is exactly what gets handed to the workflow. Do NOT `cat`, `for`-loop dump, or echo any `prompt_path` file through Bash — nor pull its contents into your own context with any file-reading tool (e.g. `Read`, `Grep`, `Glob`); the verifier agents inside the workflow Read those files themselves.**
 
 Extract the pending index (paths and ids only — no prompt content) and hand it to the verification workflow. The workflow fans out one `model: 'haiku'` verifier per pending entry; each agent Reads its `prompt_path` file, obeys the embedded directive, and Writes `{"met": true|false, "detail": "<one-line>"}` to its `response_path`. The runner has already baked the description, prompt body, and that write-directive into each prompt file. The `parallel()` inside the script makes the fan-out mechanical — there is no per-entry dispatch to drive or count by hand.
 
@@ -64,7 +64,11 @@ Workflow({
 })
 ```
 
-**The `Workflow` call is non-blocking.** It returns a task id immediately; the fan-out then runs in the background. After invoking it, stop and wait — do not verify any standard yourself, and do not read the prompt or response files. You are re-prompted when the genuine `<task-notification>` arrives with `status: completed`; by then every verifier has written its `response_path`. Only then run merge:
+**The `Workflow` call is non-blocking.** It returns a task id immediately; the fan-out then runs in the background. After invoking it, stop and wait — do not verify any standard yourself, and do not read the prompt or response files. You are re-prompted when the genuine `<task-notification>` arrives with `status: completed`.
+
+**Reconcile the fan-out before merging.** The workflow result carries `requested` and `dispatched` counts (both scalar, so they survive notification truncation). If `dispatched == requested`, every verifier ran — proceed to merge. If `dispatched < requested`, at least `requested − dispatched` verifiers never ran: their `response_path` files are absent, and `--merge` records any missing response as FAIL — so an *undispatched* standard would surface as a false FAIL rather than a real verdict. Before merging, re-dispatch `verify.js` (same `scope`) for just the pending entries whose `response_path` file does not yet exist — test for the file's existence only; do not read its contents (the no-prompt-extraction GATE still holds). Merge once every pending standard has a response. If a standard is still unwritten after a re-dispatch (`dispatched == requested`, yet its response is missing), a verifier genuinely failed to write it — let it merge as a real FAIL per the rule below rather than retrying forever, and say which standard could not be verified.
+
+Then run merge:
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/skills/standards/scripts/run-audit.sh --merge "$STATE_DIR"
@@ -101,7 +105,7 @@ ${CLAUDE_PLUGIN_ROOT}/skills/standards/scripts/run-audit.sh --collect <project-r
 
 The runner walks the same profiles but **filters to effective-suggested standards only** (intrinsic `required: false` AND id NOT in project.yaml's `required:` overrides). Output is `<state-dir>/collect-suggested.json` with the same shape as round 1 (minus `suggested_total`).
 
-**GATE — No prompt extraction (round 2). Same rule as round 1: the pending entries carry only `prompt_path`/`response_path`, never prompt text. Do NOT `cat`, `for`-loop dump, or echo any prompt file through Bash; the workflow's verifier agents Read them.**
+**GATE — No prompt extraction (round 2). Same rule as round 1: the pending entries carry only `prompt_path`/`response_path`, never prompt text. Do NOT `cat`, `for`-loop dump, or echo any prompt file through Bash — nor read it into your own context with any file-reading tool (e.g. `Read`, `Grep`, `Glob`); the workflow's verifier agents Read them.**
 
 Extract this round's pending index and hand it to the same workflow with `scope: "suggested"`:
 
@@ -118,7 +122,7 @@ Workflow({
 })
 ```
 
-As in round 1 the call is non-blocking: dispatch, then stop and wait for the `<task-notification>`. When it completes, every verifier has written its `response_path`; run merge again:
+As in round 1 the call is non-blocking: dispatch, then stop and wait for the `<task-notification>`. When it completes, reconcile `dispatched` against `requested` exactly as in round 1 — re-dispatch any pending standard whose `response_path` is still absent before merging. Then run merge again:
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/skills/standards/scripts/run-audit.sh --merge "$STATE_DIR"
@@ -137,7 +141,7 @@ The runner emits, in order:
 - A markdown table with three columns (`Standard`, `Status`, `Detail`) listing only `FAIL` and `SUGG` rows, sorted FAIL → SUGG, alphabetical by id within each bucket. PASS rows are intentionally omitted from the table — the per-status count line preserves the PASS total.
 - A blank line, then a per-status count: `X PASS, Y FAIL, Z SUGG`.
 - Optionally, a single line `N standards disabled in project.yaml` (omitted when N == 0).
-- Optionally, a single line `N suggested standards skipped (required failures present)` — emitted iff `scopes_collected` lacks `"suggested"` AND `suggested_total > 0` (i.e., round 2 was gated out and there were suggesteds to skip).
+- Optionally, a single line `N suggested standards skipped (<reason>)` — emitted iff `scopes_collected` lacks `"suggested"` AND `suggested_total > 0` (i.e., round 2 did not run and there were suggesteds to skip). The `<reason>` is `required failures present` when the audit has at least one `FAIL`, otherwise `suggested round not run`.
 - Optionally, a "lock-in" suggestion block. Triggers iff round 2 ran (`scopes_collected` includes `"suggested"`) AND zero `FAIL` AND zero `SUGG` AND at least one PASSing standard is SUGG-style (its YAML has `required: false`) AND not already in the project's `required:` list.
 
 The render step never invents `MANUAL`, `SKIP`, or `DISABLED` rows. Every row in the table is `FAIL` or `SUGG`. PASS rows and disabled standards are absent from the table; their existence is signaled only by the count line below the table.
@@ -163,6 +167,14 @@ ${CLAUDE_PLUGIN_ROOT}/skills/standards/scripts/run-audit.sh --check "$STATE_DIR"
 `--check` exits **0** when the audit passes (no `FAIL` rows), **1** when ≥1 `FAIL` row is present, and **≥2** for operational errors (missing `merged.json`, malformed JSON, unresolved pending entries). CI pipelines use `--check`'s exit code directly without grepping stdout.
 
 `--gate` (used between rounds) and `--check` (used at the end) have the same exit-code shape but answer different questions: `--gate` filters to effective-required entries only; `--check` looks at every entry in merged.json. Don't conflate them.
+
+## After the audit
+
+The audit ends at the render and pass/fail signal above. The read-only **GATE** at the top of this mode governs the audit itself and applies only through render — nothing in this mode edits the project under audit.
+
+Implementing the prioritized fix plan is a **separate activity, outside audit mode**. Switching from auditing to implementing is a deliberate mode change, not a continuation of the audit: the read-only constraint lifts (project files may now be edited), and the fixes follow the project's own testing and commit discipline — this skill does not prescribe which. Do not begin editing under the audit's read-only contract.
+
+Re-auditing after fixes is a **fresh audit run**, not a resume of this one. Start again at step 1a with a new `--init` state directory; the two-round flow (required → gate → suggested) is a single run that is never re-collected in place, and a prior run's state directory is never reused for a post-fix re-audit.
 
 ## Notes
 

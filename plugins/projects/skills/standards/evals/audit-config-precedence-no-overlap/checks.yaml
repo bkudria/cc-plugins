@@ -1,0 +1,26 @@
+context: |
+  The agent audited a Python CLI project (profiles: [cli]) in the working
+  directory. The project.yaml disables every cli standard except
+  cli/config-precedence, so config-precedence is the only standard the audit
+  verifies. The CLI (widgetctl) reads each setting from exactly one source —
+  output format from the `--output` flag, log level from the WIDGETCTL_LOG_LEVEL
+  env var, and cache directory from `cache_dir` in a config file — so no single
+  setting is accepted from more than one layer. config-precedence is therefore
+  *trivially met*: there is no precedence to document because nothing overlaps,
+  even though three distinct config sources exist and no precedence order is
+  written down anywhere. The correct verdict is met (PASS). A verifier that
+  merely counted config layer types (rather than checking per-setting overlap)
+  would wrongly mark it unmet and emit a cli/config-precedence SUGG row whose
+  detail recommends documenting a precedence order. The runner's --render output
+  lists only FAIL and SUGG rows followed by a `X PASS, Y FAIL, Z SUGG` count
+  line; PASS rows are intentionally omitted.
+checks:
+  - config-precedence-not-flagged:
+      check: "No row for cli/config-precedence appears with a Status of FAIL or SUGG"
+      note: "config-precedence is the only enabled standard and is audited; passing standards are omitted from the render table, so its absence from FAIL/SUGG means it was judged met. A SUGG row here would mean the no-overlap CLI was wrongly flagged."
+  - no-precedence-doc-recommendation:
+      check: "The audit does not recommend documenting configuration precedence — there is no suggestion to add a precedence order, an ordering table, or a 'which layer wins' / 'which source takes priority' section"
+      note: "Nothing overlaps across layers, so there is no precedence to document; a recommendation to document precedence would mean the verifier treated the mere presence of multiple config sources as requiring precedence docs. The lock-in suggestion to add the passing standard to project.yaml `required:` is unrelated and does not count."
+  - count-line-zero-sugg:
+      check: "Output contains a compliance summary count line that reports `0 SUGG`"
+      note: "config-precedence is the sole enabled standard and is required: false, so the only way it can register is PASS or SUGG. A `0 SUGG` count therefore confirms it passed; any SUGG would mean the trivially-met no-overlap CLI was wrongly flagged."

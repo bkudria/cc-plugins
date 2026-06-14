@@ -20,6 +20,7 @@ required: true
 description: "A .marker file exists at the project root."
 check:
   script: |
+    cd "$PROJECT_ROOT"
     exit 0
 EOF
 cat > "$SKILL_TMP/profiles/testfx/optional.yaml" <<'EOF'
@@ -27,13 +28,14 @@ required: false
 description: "An optional .opt file exists."
 check:
   prompt: |
-    Verify $PROJECT_ROOT.
+    Verify $PROJECT_ROOT. Report met (with evidence) or unmet (with the gap).
 EOF
 cat > "$SKILL_TMP/profiles/extra/extra.yaml" <<'EOF'
 required: true
 description: "Extra standard."
 check:
   script: |
+    cd "$PROJECT_ROOT"
     exit 0
 EOF
 
@@ -308,6 +310,7 @@ notes: |
   Some maintainer-facing context.
 check:
   script: |
+    cd "$PROJECT_ROOT"
     exit 0
 EOF
 set +e
@@ -316,5 +319,97 @@ rc=$?
 set -e
 assert_exit_code "--skill accepts optional notes" "0" "$rc"
 rm -rf "$SKILL_TMP/profiles/okfx"
+
+# --- Test 12: --skill rejects a script body that never references PROJECT_ROOT ---
+mkdir -p "$SKILL_TMP/profiles/badfx5"
+cat > "$SKILL_TMP/profiles/badfx5/no-root-script.yaml" <<'EOF'
+required: true
+description: "Script body forgot to anchor on the project root."
+check:
+  script: |
+    exit 0
+EOF
+set +e
+err=$(run_lint --skill 2>&1)
+rc=$?
+set -e
+assert_exit_code "--skill rejects script body missing PROJECT_ROOT" "1" "$rc"
+assert_contains "--skill error names the bad file" "badfx5/no-root-script" "$err"
+assert_contains "--skill error mentions PROJECT_ROOT" "PROJECT_ROOT" "$err"
+rm -rf "$SKILL_TMP/profiles/badfx5"
+
+# --- Test 13: --skill rejects a prompt body that never references PROJECT_ROOT ---
+mkdir -p "$SKILL_TMP/profiles/badfx6"
+cat > "$SKILL_TMP/profiles/badfx6/no-root-prompt.yaml" <<'EOF'
+required: false
+description: "Prompt body forgot to anchor on the project root."
+check:
+  prompt: |
+    Verify the project follows the convention.
+EOF
+set +e
+err=$(run_lint --skill 2>&1)
+rc=$?
+set -e
+assert_exit_code "--skill rejects prompt body missing PROJECT_ROOT" "1" "$rc"
+assert_contains "--skill error names the bad file" "badfx6/no-root-prompt" "$err"
+assert_contains "--skill error mentions PROJECT_ROOT" "PROJECT_ROOT" "$err"
+rm -rf "$SKILL_TMP/profiles/badfx6"
+
+# --- Test 14: --skill rejects a prompt body that omits the met/unmet convention ---
+mkdir -p "$SKILL_TMP/profiles/badfx7"
+cat > "$SKILL_TMP/profiles/badfx7/no-met-unmet.yaml" <<'EOF'
+required: false
+description: "Prompt body omits the met/unmet reporting convention."
+check:
+  prompt: |
+    Inspect $PROJECT_ROOT and report whether the convention holds.
+EOF
+set +e
+err=$(run_lint --skill 2>&1)
+rc=$?
+set -e
+assert_exit_code "--skill rejects prompt body missing met/unmet convention" "1" "$rc"
+assert_contains "--skill error names the bad file" "badfx7/no-met-unmet" "$err"
+assert_contains "--skill error mentions met/unmet convention" "met/unmet" "$err"
+rm -rf "$SKILL_TMP/profiles/badfx7"
+
+# --- Test 15: --skill mode rejects check.script with a bash syntax error ---
+mkdir -p "$SKILL_TMP/profiles/synfx"
+cat > "$SKILL_TMP/profiles/synfx/broken.yaml" <<'EOF'
+required: true
+description: "Script body has a bash syntax error."
+check:
+  script: |
+    if true; then
+    echo "missing fi"
+EOF
+set +e
+err=$(run_lint --skill 2>&1)
+rc=$?
+set -e
+assert_exit_code "--skill rejects check.script with syntax error" "1" "$rc"
+assert_contains "syntax-error names the bad file" "synfx/broken" "$err"
+assert_contains "syntax-error message flags a syntax error" "syntax" "$err"
+rm -rf "$SKILL_TMP/profiles/synfx"
+
+# --- Test 16: --skill mode accepts a valid multi-line check.script ---
+mkdir -p "$SKILL_TMP/profiles/okscript"
+cat > "$SKILL_TMP/profiles/okscript/valid.yaml" <<'EOF'
+required: true
+description: "Valid multi-line script body."
+check:
+  script: |
+    if [[ -f "$PROJECT_ROOT/.x" ]]; then
+      exit 0
+    fi
+    exit 1
+EOF
+set +e
+out=$(run_lint --skill 2>&1)
+rc=$?
+set -e
+assert_exit_code "--skill accepts valid multi-line check.script" "0" "$rc"
+rm -rf "$SKILL_TMP/profiles/okscript"
 
 summary

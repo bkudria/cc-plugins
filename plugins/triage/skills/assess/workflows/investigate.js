@@ -70,7 +70,7 @@ const MAX_VERIFY_TARGETS = 6
 const MAX_GROUND_TARGETS = 6
 const VERIFY_LENSES = {
   grounding: 'Grounding/citation accuracy. Independently re-derive this observation\'s cited evidence from source using your read-only tools. Do the named files, line numbers, and values actually exist and say what the observation claims? Verdict "drop" if the evidence is fabricated or does not support the claim; "correct" if it is partially right with a fixable inaccuracy; "holds" if fully grounded.',
-  overclaim: 'Over-claim / significance inflation. Judge whether the observation\'s framing and significance are justified by its evidence, or inflated. Is a "high" significance genuinely load-bearing, or is this working-as-designed, minor, or speculative? Verdict "correct" to downgrade or reframe; "drop" if it is not a real issue; "holds" if proportionate.',
+  overclaim: 'Over-claim / significance inflation. Judge whether the observation\'s framing and significance are justified by its evidence, or inflated. Is a "high" significance genuinely load-bearing, or is this working-as-designed, minor, or speculative? Verdict "drop" (confidence high or medium) if it is working-as-designed or not a real issue — this removes it. Verdict "correct" with correctedSignificance set to the LOWER level (high→medium or medium→low) when the issue is real but its significance is inflated — significance is only ever lowered, never raised; add a "correction" only if the claim wording itself also needs fixing. Verdict "holds" if proportionate.',
   reliability: 'Reliability / truncation. Judge whether this observation could rest on tool output that was truncated, timed out, or silently failed. Use your tools to check whether the underlying source is larger or different than the evidence implies. Record any concern in reliabilityConcern; verdict "drop" if the basis is likely unreliable; "holds" if solid.',
 }
 const EFFORT_LENSES = {
@@ -112,14 +112,19 @@ const withRetry = async (label, fn) => {
 // Derive the run's status + normalized coverage from the raw degradation signals.
 // Pure (signals in, plain object out — no injected globals), so it is the first
 // unit to cover when a JS test harness lands.
-//   'failed'   — no usable synthesis (planner died, or synth failed after retry).
-//   'degraded' — produced output but lost coverage (areas dropped) or skipped/lost verify.
+//   'failed'   — no usable synthesis (planner died, or synth failed after retry), or an
+//                empty-observation run that ALSO lost coverage (a broken run, not a
+//                legitimately empty one).
+//   'degraded' — produced output but lost coverage (areas dropped), skipped/lost verify,
+//                or shipped findings whose citations did not ground.
 //   'ok'       — no losses (a legitimately empty result is still 'ok'; its document
 //                shape is owned elsewhere).
 /* test-seam:pure-fn:start */
-const degradationSummary = ({ plannedAreas, droppedAreas, synthOk, verifyFailed, verifyLost }) => {
+const degradationSummary = ({ plannedAreas, droppedAreas, synthOk, verifyFailed, verifyLost, ungrounded, noObservations }) => {
+  const lostCoverage = droppedAreas.length > 0 || verifyFailed || verifyLost || ungrounded > 0
   const status = !synthOk ? 'failed'
-    : (droppedAreas.length > 0 || verifyFailed || verifyLost) ? 'degraded'
+    : (noObservations && lostCoverage) ? 'failed'
+    : lostCoverage ? 'degraded'
     : 'ok'
   return { status, coverage: { planned: plannedAreas, completed: plannedAreas - droppedAreas.length, dropped: droppedAreas } }
 }
@@ -145,6 +150,23 @@ const summarizeAudit = ({ status, observationCount, synthInputCount, findingsCou
     ungrounded: grounding && Array.isArray(grounding.ungrounded) ? grounding.ungrounded.length : 0,
     reliabilityFlags: Array.isArray(reliabilityFlags) ? reliabilityFlags.length : 0,
   }
+}
+/* test-seam:pure-fn:end */
+
+// Disclose run-level reliability shortfalls in the audit trail: advisory critics (plan,
+// completeness) that crashed on both attempts and so silently no-op'd, and adversarial
+// verification that came back PARTIAL (some lens verdicts lost but not all — total loss is
+// handled separately by verifyLost). Pure (signals in, flag strings out); these flags surface
+// in the result but do not, by themselves, change the run status.
+/* test-seam:pure-fn:start */
+const runReliabilityFlags = ({ planCriticFailed, completenessCriticFailed, verdictsReceived, verdictsExpected }) => {
+  const flags = []
+  if (planCriticFailed) flags.push('plan critic failed after retry; the decomposition was not validated')
+  if (completenessCriticFailed) flags.push('completeness critic failed after retry; coverage sufficiency was not validated')
+  if (verdictsExpected > 0 && verdictsReceived > 0 && verdictsReceived < verdictsExpected) {
+    flags.push('adversarial verification was partial: ' + verdictsReceived + ' of ' + verdictsExpected + ' lens verdict(s) returned')
+  }
+  return flags
 }
 /* test-seam:pure-fn:end */
 
@@ -176,6 +198,10 @@ const renderAssessment = ({ assessmentTitle, scopeSummary, areasCovered, finding
 
 // ---- Plan -------------------------------------------------------------------
 phase('Plan')
+// Run-level reliability tracking: advisory critics that crashed on both attempts (and so
+// silently no-op'd) are recorded here and surfaced as flags near the return.
+let planCriticFailed = false
+let completenessCriticFailed = false
 const PLAN_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -307,7 +333,10 @@ if (overallEffort !== 'low' && areas.length >= PLAN_CRITIC_MIN_AREAS) {
     { label: 'plan-critic', phase: 'Plan', schema: PLAN_REVIEW_SCHEMA }
   ))
   const issues = (review && review.issues) || []
-  if (review && review.sound === false && issues.length) {
+  if (!review) {
+    planCriticFailed = true
+    log('Plan critic unavailable (failed after retry); proceeding with the original decomposition.')
+  } else if (review.sound === false && issues.length) {
     log('Plan critic flagged ' + issues.length + ' issue(s) (' + issues.map((i) => i.kind).join(', ') +
       '); revising once.')
     const revisionNote =
@@ -450,6 +479,11 @@ if (criticRounds > 0 && allObs.length) {
       'sufficient, set complete=true and return an empty gaps list. At most ' + MAX_GAPS_PER_ROUND + ' gaps.',
       { label: 'completeness-critic', phase: 'Completeness', schema: GAP_SCHEMA }
     ))
+    if (!critique) {
+      completenessCriticFailed = true
+      log('Completeness critic unavailable (failed after retry); stopping gap rounds.')
+      break
+    }
     const fresh = ((critique && critique.gaps) || [])
       .filter((g) => g && g.name && !areaNames.includes(g.name))
       .slice(0, headroom)
@@ -533,6 +567,7 @@ const VERDICT_SCHEMA = {
     confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
     rationale: { type: 'string', description: 'Why, citing what you independently checked' },
     correction: { type: 'string', description: 'If verdict is "correct": the corrected claim' },
+    correctedSignificance: { type: 'string', enum: ['high', 'medium', 'low'], description: 'If verdict is "correct" and the significance is inflated: the corrected, LOWER level (high→medium or medium→low). Downgrade-only — an equal or higher level is ignored.' },
     reliabilityConcern: { type: 'string', description: 'If the basis may be truncated or failed: describe it' },
   },
 }
@@ -542,8 +577,9 @@ const VERDICT_SCHEMA = {
 // Rails: only a high/medium-confidence `drop` removes an observation; a low-confidence
 // `drop` and any reliabilityConcern become flags the synthesizer still sees; a `correct`
 // is folded as an annotation (the original claim is preserved in the action record),
-// never a destructive body rewrite. Across lenses on one observation a qualifying drop
-// wins over correct wins over holds.
+// never a destructive body rewrite, and may lower an inflated significance via
+// correctedSignificance (downgrade-only — never raised). Across lenses on one observation
+// a qualifying drop wins over correct wins over holds.
 /* test-seam:pure-fn:start */
 const applyVerdicts = (obs, verdicts) => {
   const keyOf = (x) => x.area + ' ' + x.title
@@ -564,11 +600,30 @@ const applyVerdicts = (obs, verdicts) => {
     const corrections = vs
       .filter((v) => v.verdict === 'correct' && v.correction)
       .map((v) => ({ lens: v.lens, was: o.body, now: v.correction, why: v.rationale }))
-    const keptObs = { area: o.area, title: o.title, body: o.body, evidence: o.evidence, significance: o.significance }
-    if (corrections.length || flags.length) keptObs.verificationNotes = { corrections, flags }
+    // Significance downgrade (downgrade-only): a `correct` verdict may lower an
+    // inflated significance via correctedSignificance, never raise it. Rank ascends
+    // by severity (high < medium < low); a strictly larger rank is a real downgrade.
+    const sigRank = { high: 0, medium: 1, low: 2 }
+    const rankOf = (s) => (s in sigRank ? sigRank[s] : -1)
+    const downgrades = vs.filter((v) =>
+      v.verdict === 'correct' && v.correctedSignificance && rankOf(v.correctedSignificance) > rankOf(o.significance))
+    // Most-severe downgrade wins (largest rank), so no lens's downgrade is overridden by a milder one.
+    const downgrade = downgrades.reduce((best, v) =>
+      (!best || rankOf(v.correctedSignificance) > rankOf(best.correctedSignificance) ? v : best), null)
+    const significance = downgrade ? downgrade.correctedSignificance : o.significance
+    const significanceDowngrade = downgrade
+      ? { lens: downgrade.lens, was: o.significance, now: significance, why: downgrade.rationale }
+      : null
+    const keptObs = { area: o.area, title: o.title, body: o.body, evidence: o.evidence, significance }
+    if (corrections.length || flags.length || significanceDowngrade) {
+      keptObs.verificationNotes = { corrections, flags }
+      if (significanceDowngrade) keptObs.verificationNotes.significanceDowngrade = significanceDowngrade
+    }
     kept.push(keptObs)
-    if (corrections.length || flags.length) {
-      actions.push({ area: o.area, title: o.title, action: corrections.length ? 'corrected' : 'flagged', corrections, flags })
+    if (corrections.length || flags.length || significanceDowngrade) {
+      const action = { area: o.area, title: o.title, action: (corrections.length || significanceDowngrade) ? 'corrected' : 'flagged', corrections, flags }
+      if (significanceDowngrade) action.significanceDowngrade = significanceDowngrade
+      actions.push(action)
     }
   })
   return { kept, actions }
@@ -611,6 +666,7 @@ const selectVerifyTargets = (obs, maxK) => {
 const lenses = EFFORT_LENSES[overallEffort] || []
 let verification
 let verdicts = []
+let verdictsExpected = 0
 let auditActions = []
 let verifiedObs = allObs
 let verifyFailed = false
@@ -649,6 +705,7 @@ if (!lenses.length || !allObs.length) {
       { label: 'verify:' + lens + '#' + i, phase: 'Verify', schema: VERDICT_SCHEMA, model: 'sonnet' }
     ).then((v) => v && Object.assign({ area: o.area, title: o.title, lens: lens }, v))
   )))
+  verdictsExpected = verdictJobs.length
   verdicts = (await parallel(verdictJobs)).filter(Boolean)
   // Enforce the keyed verdicts in code, then verify the reconciled set.
   const reconciled = applyVerdicts(allObs, verdicts)
@@ -724,7 +781,10 @@ const coverageNote = droppedAreaNames.length
     'from these observations: ' + droppedAreaNames.join(', ') + '. Note this incompleteness briefly in the Summary; ' +
     'do not imply the assessment is exhaustive.\n\n'
   : ''
-const synth = await withRetry('synthesize', () => agent(
+// Empty-observation runs skip the (expensive) synthesizer entirely — there is nothing to
+// synthesize — and render a deterministic empty assessment below; the cheap write-agent still
+// persists it so Phase 3 has a file to read.
+const synth = allObs.length ? await withRetry('synthesize', () => agent(
   'You are synthesizing investigation observations into a final numbered assessment, returned as STRUCTURED DATA.\n\n' +
   'Scope: ' + scope + '\n' +
   'Areas covered: ' + completedAreaNames.join(', ') + '\n\n' +
@@ -763,10 +823,14 @@ const synth = await withRetry('synthesize', () => agent(
   'INTERNAL — used to ground the finding against source; they are never shown to the reader.\n' +
   '- summary: a brief overall assessment paragraph.',
   { label: 'synthesize', phase: 'Synthesize', schema: SYNTH_SCHEMA }
-))
+)) : null
 
-const synthStructured = !!(synth && Array.isArray(synth.findings))
-const markdown = synthStructured ? renderAssessment(synth) : ''
+// On the empty-observation path synth is null and the document is rendered deterministically;
+// otherwise it is rendered from the synthesizer's structured output.
+const synthStructured = allObs.length === 0 || !!(synth && Array.isArray(synth.findings))
+const markdown = allObs.length === 0
+  ? renderAssessment({ assessmentTitle: scope, scopeSummary: scope, areasCovered: completedAreaNames.join(', ') || 'none', findings: [], summary: 'The investigation completed but produced no observations.' })
+  : (synthStructured ? renderAssessment(synth) : '')
 // The workflow script has no filesystem access, so persisting the rendered document goes
 // through a minimal write-agent: one verbatim Write, no reasoning. The file is trustworthy
 // only if BOTH the structured synthesis AND this write succeeded.
@@ -780,12 +844,11 @@ const wrote = synthStructured
     ))
   : null
 const synthOk = !!(synthStructured && wrote && wrote.written)
-const { status, coverage } = degradationSummary({ plannedAreas: dispatchedAreas, droppedAreas: droppedAreaNames, synthOk, verifyFailed, verifyLost })
 const finalPath = (wrote && wrote.path) || outPath
-const findingsCount = synthStructured ? synth.findings.length : 0
+const findingsCount = synth && Array.isArray(synth.findings) ? synth.findings.length : 0
 log('Synthesis ' + (synthOk
   ? 'written to ' + finalPath + ' (' + findingsCount + ' findings)'
-  : 'FAILED — no trustworthy file') + '; status=' + status + '.')
+  : 'FAILED — no trustworthy file') + '.')
 
 // ---- Ground (post-synthesis citation grounding; gated; flag-only) -----------
 // The synthesizer reshapes observations into findings (merge / split / renumber) with no
@@ -848,6 +911,28 @@ if (overallEffort !== 'low' && synthFindings.length) {
     groundTargets.length + '), ' + ungrounded.length + ' citation(s) unresolved.')
 }
 
+// Status is derived only now — after grounding — so ungrounded citations can degrade the run
+// (grounding runs post-synthesis). An empty-observation run that also lost coverage escalates to
+// 'failed'; a legitimately empty one stays 'ok'. Reliability flags merge the run-level signals
+// (critic nulls, partial verification) with the verify-stage flags into one surfaced list; they
+// disclose shortfalls in the audit trail but do not, by themselves, set the status.
+const { status, coverage } = degradationSummary({
+  plannedAreas: dispatchedAreas,
+  droppedAreas: droppedAreaNames,
+  synthOk,
+  verifyFailed,
+  verifyLost,
+  ungrounded: grounding.ungrounded.length,
+  noObservations: allObs.length === 0,
+})
+const reliabilityFlags = [
+  ...runReliabilityFlags({ planCriticFailed, completenessCriticFailed, verdictsReceived: verdicts.length, verdictsExpected }),
+  ...((verification && verification.reliabilityFlags) || []),
+]
+log('Run status=' + status + (reliabilityFlags.length ? '; ' + reliabilityFlags.length + ' reliability flag(s).' : '.'))
+// Audit summary is built from the surfaced signals — including the merged reliabilityFlags above —
+// so its counts match what the result actually exposes. Positioned before the large markdown field
+// so it survives notification truncation.
 const auditSummary = summarizeAudit({
   status,
   observationCount: allObs.length,
@@ -855,7 +940,7 @@ const auditSummary = summarizeAudit({
   findingsCount,
   auditActions,
   grounding,
-  reliabilityFlags: verification && verification.reliabilityFlags,
+  reliabilityFlags,
 })
 
 return {
@@ -865,6 +950,7 @@ return {
   areas: areaNames,
   status,
   coverage,
+  reliabilityFlags,
   observationCount: allObs.length,
   findingsCount,
   auditSummary,

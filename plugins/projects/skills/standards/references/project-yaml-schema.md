@@ -165,16 +165,16 @@ check:
 
 ### Script contract
 
-- `$PROJECT_ROOT` is set when the script runs.
+- `$PROJECT_ROOT` is set when the script runs; lint requires the script body to reference it (a body that never does would inspect the wrong directory).
 - Script runs under `set -euo pipefail`. Standards may relax that internally if needed.
 - Exit 0 = met. Exit non-zero = unmet.
 - Stdout's last non-empty line = the row's `Detail`.
 
 ### Prompt contract
 
-- `$PROJECT_ROOT` placeholder is interpolated at runtime (literal string substitution, before sending the prompt to the sub-agent).
+- `$PROJECT_ROOT` placeholder is interpolated at runtime (literal string substitution, before sending the prompt to the sub-agent); lint requires the prompt body to reference it.
 - The prompt's responsibility is **what** to verify and what evidence to surface. The audit workflow (`workflows/audit.md` step 2) wraps every prompt with a response-format directive that requires the verifier to use the Write tool to save its verdict — exactly one raw JSON object of the form `{"met": bool, "detail": string}`, with no fenced code block and no surrounding prose — to its `response_path`. **Do not specify a response format inside the prompt itself** — the wrapper handles it, and a duplicated/conflicting instruction in the prompt would compete with the wrapper.
-- Convention: phrase the reporting expectation as "Report met (with `<evidence>`) or unmet (with `<gap>`)". This produces a natural one-line `detail` that the verifier emits as the JSON object's `detail` field. Every existing prompt-based standard follows this pattern.
+- Convention: phrase the reporting expectation as "Report met (with `<evidence>`) or unmet (with `<gap>`)". This produces a natural one-line `detail` that the verifier emits as the JSON object's `detail` field. Every existing prompt-based standard follows this pattern, and lint enforces it by requiring the prompt body to contain the word `unmet`.
 - The audit workflow combines `met` with the standard's `required:` flag to produce `PASS`/`FAIL`/`SUGG`. There is no intermediate `MANUAL` row in the audit table — prompt-based standards resolve to one of the three statuses before the table is rendered.
 
 ### When to use script vs prompt

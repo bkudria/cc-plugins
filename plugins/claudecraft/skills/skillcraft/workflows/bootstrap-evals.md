@@ -84,12 +84,12 @@ The agent-under-test `model:` determines what your evals measure. Haiku (scuttle
 Scaffold the eval directory:
 
 ```bash
-craboodle init <skill-dir>/evals
+craboodle init <skill-dir>
 ```
 
 This creates `evals.yaml` with `version: "1"`, commented pipeline knobs (`min_pass_rate`, `max_budget_usd`, `repeats`, `artifact_retention_days`), and a commented `scenarios.base` template. Then:
 
-1. **Fill in `scenarios.base`** — under `scenarios.base` in `evals.yaml`, add model, tools, and inject the skill under test via `project.skills`. The `tools:` array must include both scuttlerun's defaults (`Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion, Skill`) **plus** every tool you noted in Step 2 — listing your additions alone replaces the defaults rather than extending them. Omitting a tool the skill mandates doesn't just fail at smoke-run — it produces misleading check failures attributed to the skill, so never trim the list to bound cost (see `claude-code-evals/references/config-type-patterns.md` § Skills). Run `scuttlerun --help` for the full schema. For how `scenarios.base`, `scenario.yaml`, CLI flags, and scuttlerun defaults compose (deep-merge for objects, replace for arrays, defaults applied last), see `claude-code-evals/references/config-precedence.md`.
+1. **Fill in `scenarios.base`** — under `scenarios.base` in `evals.yaml`, add model, tools, and inject the skill under test via `project.skills`. The `tools:` array must include both scuttlerun's defaults (run `scuttlerun --help` for the current list) **plus** every tool you noted in Step 2 — listing your additions alone replaces the defaults rather than extending them. Omitting a tool the skill mandates doesn't just fail at smoke-run — it produces misleading check failures attributed to the skill, so never trim the list to bound cost (see `claude-code-evals/references/config-type-patterns.md` § Skills). Run `scuttlerun --help` for the full schema. For how `scenarios.base`, `scenario.yaml`, CLI flags, and scuttlerun defaults compose (deep-merge for objects, replace for arrays, defaults applied last), see `claude-code-evals/references/config-precedence.md`.
 2. **Edit the pipeline knobs in `evals.yaml` (top level)** — uncomment `min_pass_rate` and set a reachable value. Reachable pass rates are `k/(checks × reps)`; e.g. with 3 checks × 1 rep the only reachable values are `{0, 0.33, 0.67, 1.0}`, so `0.8` would collapse to requiring a perfect `1.0`.
 
 ### If `evals/` exists from scaffolding
@@ -106,19 +106,19 @@ For each approved scenario, create:
 - `evals/<scenario-id>/scenario.yaml` — prompt and any scuttlerun overrides (fixtures via `project.files`, tool restrictions, etc.)
 - `evals/<scenario-id>/checks.yaml` — context and checks in id-as-key format
 
-**GATE — STOP. Before writing any check, you MUST Read `claude-code-evals/references/check-design.md` § Pre-Write Checklist AND § Common Slips in this session.** The reference contains six self-tests that every check must pass before being written. Apply every self-test to every check — do not skip self-tests on checks that "look obviously fine"; over-specific and compound are the most common lint failures and they hide in checks that look concrete. Catching anti-patterns here is free; catching them via `craboodle lint` has previously cost 5 lint cycles and several minutes of re-authoring when the checklist was skipped at first-pass authorship.
+**GATE — STOP. Before writing any check, you MUST Read `claude-code-evals/references/check-design.md` § Pre-Write Checklist AND run `pincenez lint --help` in this session.** The reference contains six self-tests that every check must pass before being written. Apply every self-test to every check — do not skip self-tests on checks that "look obviously fine"; over-specific and compound are the most common lint failures and they hide in checks that look concrete. Catching anti-patterns here is free; catching them via `craboodle lint` has previously cost 5 lint cycles and several minutes of re-authoring when the checklist was skipped at first-pass authorship.
 
-Loading the `claude-code-evals` skill (done in Step 1) is not the same as having the Pre-Write Checklist in context. If you have not Read the § Pre-Write Checklist AND § Common Slips sections of check-design.md during this session, Read them now before continuing.
+Loading the `claude-code-evals` skill (done in Step 1) is not the same as having the Pre-Write Checklist in context. If you have not Read the § Pre-Write Checklist section of check-design.md and run `pincenez lint --help` during this session, do so now before continuing.
 
-**Write incrementally**: Write the first scenario, then lint it with `craboodle lint --scenario <id> <skill-dir>/evals`. Fix any issues before writing the remaining scenarios — anti-pattern tendencies caught on the first scenario won't propagate to the rest. Then write the remaining scenarios in parallel, following the same patterns.
+**Write incrementally**: Write the first scenario, then lint it with `craboodle lint --scenario <id> <skill-dir>`. Fix any issues before writing the remaining scenarios — anti-pattern tendencies caught on the first scenario won't propagate to the rest. Then write the remaining scenarios in parallel, following the same patterns.
 
 ## Step 7: Lint
 
 ```bash
-craboodle lint <skill-dir>/evals
+craboodle lint <skill-dir>
 ```
 
-Confirm zero issues across the full suite. If the incremental lint in Step 6 was clean, this should pass on the first run.
+Confirm zero issues across the full suite. If the incremental lint in Step 6 was clean, this will usually pass on the first run — but lint is advisory and non-deterministic, so an unexpected flag on re-run may be lint variance rather than a regression (see the *Evaluation is probabilistic* note in `claude-code-evals` and `pincenez lint --help`). Re-run and judge a surprise flag on its merits before acting on it.
 
 If lint flags `tautological` or `always_passes` on a deliberate presence anchor or regression baseline, the fix is to declare the intent in the check's `note:` and re-lint — not to delete or weaken the check (see `claude-code-evals/references/check-design.md` § Check Patterns). The bar stays zero issues: declared intent clears the flag because calibrated lint stops flagging, not because the issue is waived.
 
@@ -127,10 +127,10 @@ If lint flags `tautological` or `always_passes` on a deliberate presence anchor 
 **GATE — Lint validates form; run validates substance. Do NOT report completion or present a final summary until a full-reps run has completed and results are reviewed.**
 
 ```bash
-craboodle run <skill-dir>/evals
+craboodle run <skill-dir>
 ```
 
-This uses default repetitions (3). A `craboodle run --repeats 1 <skill-dir>/evals` smoke is allowed during authoring as a fast pre-check, but **does not satisfy this gate** — the Final Report is filed against the full-reps run.
+This uses default repetitions (3). A `craboodle run --repeats 1 <skill-dir>` smoke is allowed during authoring as a fast pre-check, but **does not satisfy this gate** — the Final Report is filed against the full-reps run.
 
 Review the output. If all scenarios pass at default reps, proceed to Final Report. If failures occur, continue to Step 9.
 
@@ -156,7 +156,7 @@ To distinguish: read the scuttlerun transcript at `<artifact_dir>/<scenario-id>/
 
 Iteration rules:
 1. Fix one thing at a time (skill OR check, not both)
-2. When a rewrite responds to a lint flag, re-apply the full Pre-Write Checklist to the rewrite before moving on — rewrites commonly reintroduce a different anti-pattern (see `claude-code-evals/references/check-design.md` § Common Slips)
+2. When a rewrite responds to a lint flag, re-apply the full Pre-Write Checklist to the rewrite before moving on — rewrites commonly reintroduce a different anti-pattern (run `pincenez lint --help` for worked examples)
 3. Re-run targeted scenarios after each fix
 4. Stop when: exit code 0, or pass rate improvement < 0.05 for 2 iterations
 

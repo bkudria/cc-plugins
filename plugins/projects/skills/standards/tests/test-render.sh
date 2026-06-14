@@ -318,6 +318,26 @@ out=$(render_state "$results")
 assert_contains "skipped-line: surfaces suggested_total" "5 suggested standards skipped" "$out"
 assert_contains "skipped-line: mentions required failures" "required failures" "$out"
 
+# --- Test SK1b: scopes_collected==["required"] AND suggested_total > 0 AND NO required FAIL
+#                → skipped line still appears, but with the neutral reason — NOT a false
+#                  "required failures present" claim (the suggested round was simply not run) ---
+results=$(cat <<'EOF'
+{
+  "resolved": [
+    {"id": "base/readme", "status": "PASS", "detail": "ok", "description": ".", "intrinsic_required": true}
+  ],
+  "scopes_collected": ["required"],
+  "suggested_total": 4,
+  "required_overrides": [],
+  "disabled_count": 0
+}
+EOF
+)
+out=$(render_state "$results")
+assert_contains     "skipped-line: present even with no failures" "4 suggested standards skipped" "$out"
+assert_contains     "skipped-line: neutral reason when no required failure" "suggested round not run" "$out"
+assert_not_contains "skipped-line: does not claim required failures when none failed" "required failures present" "$out"
+
 # --- Test SK2: scopes_collected==["required"] AND suggested_total == 0 → no skipped line ---
 results=$(cat <<'EOF'
 {
@@ -390,5 +410,22 @@ skip_pos=$(printf '%s\n' "$out" | grep -n "suggested standards skipped" | head -
 disabled_pos=$(printf '%s\n' "$out" | grep -n "standards disabled" | head -1 | cut -d: -f1)
 assert_eq "skipped line appears after count line" "true" "$([[ -n "$skip_pos" && -n "$count_pos" && $skip_pos -gt $count_pos ]] && echo true || echo false)"
 assert_eq "skipped line appears after disabled line" "true" "$([[ -n "$skip_pos" && -n "$disabled_pos" && $skip_pos -gt $disabled_pos ]] && echo true || echo false)"
+
+# --- Test 12: literal pipes in detail are escaped so the markdown row keeps 3 cells ---
+results=$(cat <<'EOF'
+{
+  "resolved": [
+    {"id": "base/pipes",  "status": "FAIL", "detail": "found a | b", "description": "."},
+    {"id": "base/pipes2", "status": "SUGG", "detail": "x | y | z",   "description": "."}
+  ],
+  "disabled_count": 0
+}
+EOF
+)
+out=$(render_state "$results" || true)
+table_section=$(printf '%s' "$out" | awk '/^\| Standard/{flag=1; next} /^$/{if(flag){flag=0}} flag')
+assert_contains     "single pipe in detail escaped as backslash-pipe" 'found a \| b'          "$table_section"
+assert_contains     "every pipe in detail escaped (global)"           'x \| y \| z'            "$table_section"
+assert_not_contains "unescaped pipe no longer splits the cell"        "| FAIL | found a | b |" "$table_section"
 
 summary

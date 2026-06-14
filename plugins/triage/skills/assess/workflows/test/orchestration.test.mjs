@@ -1,0 +1,114 @@
+// Integration suite for the investigate.js ORCHESTRATION — the agent()-driven stages and
+// the failure-to-status mapping the pure unit suite (investigate.test.mjs) only ever
+// exercises as signal-in/object-out. Each scenario rides one coherent happy fixture
+// (see _harness.mjs) and overrides exactly one agent label to drive a single failure
+// branch, then asserts on the workflow's real return value. Deterministic: no LLM, no IO.
+
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { runWorkflow, withOverrides, THROW } from './_harness.mjs'
+
+const med = (overrides) => runWorkflow({ args: { scope: 's', effort: 'medium' }, agent: withOverrides(overrides) })
+const high = (overrides) => runWorkflow({ args: { scope: 's', effort: 'high' }, agent: withOverrides(overrides) })
+
+test('ok baseline: a fully happy run reports ok with findings and no reliability flags', async () => {
+  const { result, calls } = await med()
+  assert.equal(result.status, 'ok')
+  assert.equal(result.findingsCount, 2)
+  assert.deepEqual(result.reliabilityFlags, [])
+  // Sanity: medium effort actually exercised the gated stages this suite drives.
+  assert.ok(calls.includes('plan-critic'))
+  assert.ok(calls.includes('completeness-critic'))
+  assert.ok(calls.some((l) => l.startsWith('verify:')))
+  assert.ok(calls.some((l) => l.startsWith('ground#')))
+})
+
+test('plan-critic null: advisory critic crash flags but does not degrade the run', async () => {
+  const { result, calls } = await med({ 'plan-critic': THROW })
+  assert.ok(calls.includes('plan-critic')) // the failure was actually injected
+  assert.equal(result.status, 'ok') // critic is advisory — null does not lower status
+  assert.ok(result.reliabilityFlags.some((f) => /plan critic failed after retry/.test(f)))
+})
+
+test('completeness-critic null: advisory critic crash flags but does not degrade the run', async () => {
+  const { result, calls } = await med({ 'completeness-critic': THROW })
+  assert.ok(calls.includes('completeness-critic'))
+  assert.equal(result.status, 'ok')
+  assert.ok(result.reliabilityFlags.some((f) => /completeness critic failed after retry/.test(f)))
+})
+
+test('area drop: an investigator that fails drops its area and degrades the run', async () => {
+  const { result } = await med({ 'area:beta': THROW })
+  assert.equal(result.status, 'degraded')
+  assert.ok(result.coverage.dropped.includes('beta'))
+  assert.equal(result.coverage.completed, result.coverage.planned - 1)
+})
+
+test('verify-consolidation failure: a thrown consolidation degrades the run and flags it', async () => {
+  const { result } = await med({ verify: THROW })
+  assert.equal(result.status, 'degraded')
+  assert.ok(result.reliabilityFlags.some((f) => /consolidation verification failed and was skipped/.test(f)))
+})
+
+test('total verdict loss: every lens verdict lost degrades the run and flags it', async () => {
+  const { result, calls } = await med({ 'verify:': THROW })
+  assert.ok(calls.some((l) => l.startsWith('verify:'))) // lens jobs were dispatched...
+  assert.equal(result.verification.enforced, false) // ...but none survived
+  assert.equal(result.status, 'degraded')
+  assert.ok(result.reliabilityFlags.some((f) => /every verdict was lost/.test(f)))
+})
+
+test('ungrounded citations: a finding citation that does not resolve degrades the run', async () => {
+  const ungrounded = { ungrounded: [{ citation: 'x.js:1', problem: 'missing', detail: 'no such line' }] }
+  const { result, calls } = await med({ 'ground#': () => ungrounded })
+  assert.ok(calls.some((l) => l.startsWith('ground#')))
+  assert.equal(result.status, 'degraded')
+  assert.ok(result.grounding.ungrounded.length > 0)
+})
+
+test('synthesis failure: a synthesizer that fails after retry produces a failed run', async () => {
+  const { result } = await med({ synthesize: THROW })
+  assert.equal(result.status, 'failed')
+  assert.equal(result.error, 'synthesis failed')
+})
+
+test('write failure: a failed persist makes the run failed even though synthesis succeeded', async () => {
+  const { result } = await med({ 'write-assessment': THROW })
+  assert.equal(result.status, 'failed')
+  assert.equal(result.error, 'synthesis failed')
+})
+
+test('empty observations (legitimate): no observations, no coverage loss, stays ok', async () => {
+  const empty = (_p, opts) => ({ area: opts.label.slice(opts.label.indexOf(':') + 1), observations: [] })
+  const { result } = await med({ 'area:': empty })
+  assert.equal(result.status, 'ok') // a legitimately empty result is not a failure
+  assert.equal(result.observationCount, 0)
+  assert.equal(result.findingsCount, 0)
+  assert.match(result.markdown, /produced no observations/)
+})
+
+test('empty observations + coverage loss: emptiness with dropped areas escalates to failed', async () => {
+  const { result } = await med({ 'area:': THROW }) // every area fails → empty AND fully dropped
+  assert.equal(result.status, 'failed')
+  assert.equal(result.observationCount, 0)
+  assert.equal(result.coverage.dropped.length, 3)
+})
+
+test('high effort: the overclaim lens is dispatched at high but not at medium', async () => {
+  const hi = await high()
+  assert.ok(hi.calls.some((l) => l.startsWith('verify:overclaim#')))
+  const lo = await med()
+  assert.ok(!lo.calls.some((l) => l.startsWith('verify:overclaim#')))
+})
+
+test('high effort: the completeness loop runs at most EFFORT_ROUNDS.high (2) gap rounds', async () => {
+  let round = 0
+  const alwaysGap = () => { round += 1; return { complete: false, gaps: [{ name: 'gap-' + round, rationale: 'r' }] } }
+  const { result, calls } = await high({ 'completeness-critic': alwaysGap })
+  // The critic keeps reporting a gap, but the round cap stops the loop at exactly 2.
+  assert.equal(calls.filter((l) => l === 'completeness-critic').length, 2)
+  assert.ok(calls.includes('gap:gap-1'))
+  assert.ok(calls.includes('gap:gap-2'))
+  // 3 initial areas + 2 dispatched gap rounds.
+  assert.equal(result.coverage.planned, 5)
+})

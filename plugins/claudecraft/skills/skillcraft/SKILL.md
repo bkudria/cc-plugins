@@ -85,7 +85,7 @@ When loaded during editing of any file within a skill directory, apply only thes
 1. Check: does the skill have `evals/*/scenario.yaml` (any scenarios)?
 2. If NO evals exist: **STOP.** Run the Bootstrap Evals workflow (`workflows/bootstrap-evals.md`) before proceeding. After bootstrap completes, return here and continue from step 3.
 3. If evals exist but no scenario covers the behavior being changed:
-   **GATE — Load `claude-code-evals` before drafting the scenario.** Drafting a scenario requires check design rules and scenario schema knowledge from the `claude-code-evals` skill. Use the Skill tool to load it now. Do NOT begin drafting until it is loaded. Loading `claude-code-evals` is not the same as having read `references/check-design.md § Pre-Write Checklist` and `§ Common Slips` — if those sections are not in this session's context, Read them before writing any check. Then draft and add 1 scenario targeting that behavior; present to user for approval.
+   **GATE — Load `claude-code-evals` before drafting the scenario.** Drafting a scenario requires check design rules and scenario schema knowledge from the `claude-code-evals` skill. Use the Skill tool to load it now. Do NOT begin drafting until it is loaded. Loading `claude-code-evals` is not the same as having read `references/check-design.md § Pre-Write Checklist` and run `pincenez lint --help` — if the checklist is not in this session's context, Read it and run `pincenez lint --help` before writing any check. Then draft and add 1 scenario targeting that behavior; present to user for approval.
 4. **Capture the pre-edit snapshot.** Snapshots are ephemeral (kept only for the duration of this edit; never committed). Create a per-edit directory so repeated edits in the same session do not collide:
    ```bash
    SNAP=$(mktemp -d -t <skill-name>-snap)
@@ -110,8 +110,8 @@ When loaded during editing of any file within a skill directory, apply only thes
 **Lint validates form; run validates substance.** Evals that pass lint but have never been run have the same evidentiary value as tests that have never been executed.
 
 1. **During authoring**: use `craboodle lint --scenario <id> <skill-dir>` to iterate on check quality on just the scenario being authored (cheap, no LLM agent sessions). For a final full-suite sweep, drop `--scenario` and lint the whole `<skill-dir>`.
-2. **Smoke test**: run `craboodle run --repeats 1 --scenario <one-scenario> <skill-dir>/evals` to catch fundamental config/check mismatches early (~1-2 min)
-3. **Before declaring done**: run `craboodle run <skill-dir>/evals` — full suite, default repetitions
+2. **Smoke test**: run `craboodle run --repeats 1 --scenario <one-scenario> <skill-dir>` to catch fundamental config/check mismatches early (~1-2 min)
+3. **Before declaring done**: run `craboodle run <skill-dir>` — full suite, default repetitions
 4. Review craboodle's YAML output and exit code (0 = pass, 3 = below `min_pass_rate`)
 5. If results show low pass rates or unexpected failures, iterate on the scenarios before declaring done
 6. **In plan mode**: the plan MUST include "run evals" as an explicit final step

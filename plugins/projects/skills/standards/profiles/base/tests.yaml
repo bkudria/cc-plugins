@@ -1,10 +1,10 @@
 required: true
 description: A conventional test directory exists at the project root.
 notes: |
-  Looks for any of: spec/, test/, tests/, __tests__/. Presence of a
-  conventional test directory is the only signal — framework choice and
-  internal test layout are out of scope. This is distinct from the
-  tests-run standard, which actually executes the suite.
+  Presence of a conventional test directory is the only signal — framework
+  choice and internal test layout are out of scope. Distinct from the
+  tests-run standard, which actually executes the suite. (The directory
+  list lives in the script.)
 check:
   script: |
     cd "$PROJECT_ROOT"

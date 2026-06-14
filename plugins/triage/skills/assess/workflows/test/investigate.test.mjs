@@ -10,7 +10,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { helpers } from './_load.mjs'
 
-const { degradationSummary, renderAssessment, applyVerdicts, pickOverallQuestion, selectVerifyTargets, summarizeAudit } = helpers
+const { degradationSummary, renderAssessment, applyVerdicts, pickOverallQuestion, selectVerifyTargets, summarizeAudit, runReliabilityFlags } = helpers
 
 test('renderAssessment emits the deterministic assess<->iterate format contract', () => {
   const md = renderAssessment({
@@ -90,6 +90,38 @@ test('degradationSummary: failed overrides everything when synth did not succeed
   )
 })
 
+test('degradationSummary: degraded when citations failed to ground', () => {
+  const r = degradationSummary({ plannedAreas: 2, droppedAreas: [], synthOk: true, verifyFailed: false, ungrounded: 3 })
+  assert.equal(r.status, 'degraded')
+  assert.equal(r.coverage.completed, 2)
+})
+
+test('degradationSummary: ok when no citations are ungrounded', () => {
+  const r = degradationSummary({ plannedAreas: 2, droppedAreas: [], synthOk: true, verifyFailed: false, ungrounded: 0 })
+  assert.equal(r.status, 'ok')
+})
+
+test('degradationSummary: a zero-observation run that also lost coverage escalates to failed', () => {
+  // Empty + a real loss (a dropped area, or verify failure) is not a legitimately
+  // empty result — it is a broken run, so it escalates past 'degraded' to 'failed'.
+  assert.equal(
+    degradationSummary({ plannedAreas: 2, droppedAreas: ['auth'], synthOk: true, noObservations: true }).status,
+    'failed'
+  )
+  assert.equal(
+    degradationSummary({ plannedAreas: 2, droppedAreas: [], synthOk: true, verifyFailed: true, noObservations: true }).status,
+    'failed'
+  )
+})
+
+test('degradationSummary: a clean zero-observation run is still ok', () => {
+  // A legitimately empty investigation (no losses) stays 'ok' — preserved behavior.
+  assert.equal(
+    degradationSummary({ plannedAreas: 2, droppedAreas: [], synthOk: true, verifyFailed: false, noObservations: true }).status,
+    'ok'
+  )
+})
+
 const obs = (over = {}) => ({ area: 'A', title: 't1', body: 'b1', evidence: 'e1', significance: 'high', ...over })
 
 test('applyVerdicts: a high/medium-confidence drop removes the observation', () => {
@@ -143,6 +175,35 @@ test('applyVerdicts: across lenses, a qualifying drop wins over a correct', () =
     ]
   )
   assert.equal(kept.length, 0)
+})
+
+test('applyVerdicts: a medium-confidence drop removes the observation', () => {
+  const { kept, actions } = applyVerdicts(
+    [obs()],
+    [{ area: 'A', title: 't1', verdict: 'drop', confidence: 'medium', lens: 'L', rationale: 'working as designed' }]
+  )
+  assert.equal(kept.length, 0)
+  assert.equal(actions[0].action, 'dropped')
+  assert.equal(actions[0].confidence, 'medium')
+})
+
+test('applyVerdicts: a correct with a lower correctedSignificance downgrades the kept observation', () => {
+  const { kept, actions } = applyVerdicts(
+    [obs()], // significance: 'high'
+    [{ area: 'A', title: 't1', verdict: 'correct', correctedSignificance: 'medium', lens: 'L', rationale: 'inflated' }]
+  )
+  assert.equal(kept[0].significance, 'medium') // lowered from high
+  assert.deepEqual(kept[0].verificationNotes.significanceDowngrade, { lens: 'L', was: 'high', now: 'medium', why: 'inflated' })
+  assert.equal(actions[0].action, 'corrected')
+})
+
+test('applyVerdicts: correctedSignificance is downgrade-only — an equal or higher level is ignored', () => {
+  const { kept } = applyVerdicts(
+    [obs({ significance: 'medium' })],
+    [{ area: 'A', title: 't1', verdict: 'correct', correctedSignificance: 'high', lens: 'L', rationale: 'wants to raise' }]
+  )
+  assert.equal(kept[0].significance, 'medium') // never raised past the original
+  assert.equal(kept[0].verificationNotes, undefined) // no downgrade recorded, no other notes
 })
 
 // area-aware verify-target selection
@@ -265,4 +326,38 @@ test('summarizeAudit on a clean run reports zeros and passes the funnel counts t
     ungrounded: 0,
     reliabilityFlags: 0,
   })
+})
+
+// run-level reliability flags — disclose safeguards that silently no-op'd
+// (a critic that crashed on both attempts) or verification that came back partial.
+// These surface in the audit trail; they do not by themselves change status.
+test('runReliabilityFlags: a silently-skipped plan critic is flagged', () => {
+  const flags = runReliabilityFlags({ planCriticFailed: true })
+  assert.equal(flags.length, 1)
+  assert.match(flags[0], /plan critic/i)
+})
+
+test('runReliabilityFlags: a silently-skipped completeness critic is flagged', () => {
+  const flags = runReliabilityFlags({ completenessCriticFailed: true })
+  assert.equal(flags.length, 1)
+  assert.match(flags[0], /completeness critic/i)
+})
+
+test('runReliabilityFlags: partial verdict loss is flagged with received/expected counts', () => {
+  const flags = runReliabilityFlags({ verdictsReceived: 7, verdictsExpected: 10 })
+  assert.equal(flags.length, 1)
+  assert.match(flags[0], /\b7\b/)
+  assert.match(flags[0], /\b10\b/)
+})
+
+test('runReliabilityFlags: no partial flag on total loss or on complete verification', () => {
+  // Total loss (received 0) is handled separately by verifyLost; complete coverage
+  // has nothing to flag. Only a genuine partial (0 < received < expected) flags.
+  assert.deepEqual(runReliabilityFlags({ verdictsReceived: 0, verdictsExpected: 10 }), [])
+  assert.deepEqual(runReliabilityFlags({ verdictsReceived: 10, verdictsExpected: 10 }), [])
+  assert.deepEqual(runReliabilityFlags({ verdictsReceived: 7, verdictsExpected: 7 }), [])
+})
+
+test('runReliabilityFlags: a clean run yields no flags', () => {
+  assert.deepEqual(runReliabilityFlags({}), [])
 })

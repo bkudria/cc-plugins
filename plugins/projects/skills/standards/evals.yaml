@@ -3,6 +3,9 @@ min_pass_rate: 1.0
 repeats: 1
 max_budget_usd: 20.0
 
+# The pure helpers in workflows/verify.js (e.g. the dispatch tally) are unit-tested
+# directly (run: node --test workflows/test/*.test.mjs), not here.
+
 # Shared scuttlerun base config for every scenario under evals/.
 #
 # The audit delegates per-standard verification to a background Workflow
