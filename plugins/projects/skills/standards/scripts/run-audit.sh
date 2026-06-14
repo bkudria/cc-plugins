@@ -634,7 +634,7 @@ render() {
 
   echo "| Standard | Status | Detail |"
   echo "| --- | --- | --- |"
-  jq -r '.[] | select(.status != "PASS") | "| \(.id) | \(.status) | \(.detail) |"' <<<"$sorted"
+  jq -r '.[] | select(.status != "PASS") | "| \(.id) | \(.status) | \((.detail // "") / "|" | join("\\|")) |"' <<<"$sorted"
   echo
   echo "${pass_count} PASS, ${fail_count} FAIL, ${sugg_count} SUGG"
   if [[ "$disabled_count" -gt 0 ]]; then
