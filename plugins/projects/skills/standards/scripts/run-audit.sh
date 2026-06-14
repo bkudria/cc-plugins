@@ -128,10 +128,13 @@ detect_project_context() {
       pm="yarn"
     elif [[ -f "$root/package-lock.json" ]]; then
       pm="npm"
+    else
+      pm="npm"  # no lockfile: npm is the default for Node projects
     fi
   elif [[ -f "$root/Gemfile" ]]; then
     language="Ruby"
     manifest="Gemfile"
+    pm="Bundler"
   elif [[ -f "$root/pyproject.toml" ]]; then
     language="Python"
     manifest="pyproject.toml"
@@ -144,21 +147,42 @@ detect_project_context() {
   elif [[ -f "$root/Cargo.toml" ]]; then
     language="Rust"
     manifest="Cargo.toml"
+    pm="Cargo"
   elif [[ -f "$root/go.mod" ]]; then
     language="Go"
     manifest="go.mod"
+    pm="go modules"
   elif [[ -f "$root/deno.json" ]]; then
     language="Deno"
     manifest="deno.json"
+    pm="deno"
   elif [[ -f "$root/deno.jsonc" ]]; then
     language="Deno"
     manifest="deno.jsonc"
+    pm="deno"
   elif [[ -f "$root/pubspec.yaml" ]]; then
     language="Dart"
     manifest="pubspec.yaml"
+    pm="pub"
   elif [[ -f "$root/Package.swift" ]]; then
     language="Swift"
     manifest="Package.swift"
+    pm="SwiftPM"
+  fi
+
+  # Python uses many package managers; disambiguate by lockfile, default pip.
+  if [[ "$language" == "Python" ]]; then
+    if [[ -f "$root/uv.lock" ]]; then
+      pm="uv"
+    elif [[ -f "$root/poetry.lock" ]]; then
+      pm="Poetry"
+    elif [[ -f "$root/pdm.lock" ]]; then
+      pm="PDM"
+    elif [[ -f "$root/Pipfile.lock" ]]; then
+      pm="Pipenv"
+    else
+      pm="pip"
+    fi
   fi
 
   if [[ -z "$language" ]]; then
