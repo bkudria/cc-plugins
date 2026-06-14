@@ -209,6 +209,26 @@ assert_eq "disabled standard absent from suggested-resolved" "0" "$optional_in_s
 assert_eq "disabled standard absent from suggested-pending" "0" "$optional_in_sugg_pending"
 rm -rf "$proj"
 
+# --- Test 5b: disabling an intrinsically *required* standard omits + counts it ---
+# Test 5 disables an intrinsic-SUGG standard; this exercises the disable hatch
+# against an intrinsically required:true standard (testfx/manual), which a real
+# project may use to drop a required check it cannot satisfy.
+proj=$(mktemp -d)
+cat > "$proj/project.yaml" <<EOF
+profiles: [testfx]
+disabled:
+  testfx/manual: "Out of scope for this project"
+EOF
+touch "$proj/.marker"
+out=$(run_collect_scope "$proj" required)
+disabled_count=$(printf '%s' "$out" | jq -r '.disabled_count')
+manual_in_resolved=$(printf '%s' "$out" | jq '[.resolved[] | select(.id=="testfx/manual")] | length')
+manual_in_pending=$(printf '%s' "$out" | jq '[.pending[] | select(.id=="testfx/manual")] | length')
+assert_eq "disabling a required standard counts it" "1" "$disabled_count"
+assert_eq "disabled required standard absent from resolved" "0" "$manual_in_resolved"
+assert_eq "disabled required standard absent from pending" "0" "$manual_in_pending"
+rm -rf "$proj"
+
 # --- Test 6: malformed standard (neither script nor prompt) is a runner error ---
 mkdir -p "$SKILL_TMP/profiles/badfx"
 cat > "$SKILL_TMP/profiles/badfx/empty.yaml" <<'EOF'
