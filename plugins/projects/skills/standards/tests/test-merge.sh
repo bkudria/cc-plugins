@@ -616,4 +616,30 @@ mkdir -p "$dir/responses"
 dc=$(jq -r '.disabled_count' "$dir/merged.json")
 assert_eq "merge takes disabled_count from collect-required.json (first source)" "3" "$dc"
 
+# --- Test: --merge reads the recorded response_path field, not just the formula path ---
+# collect writes a response_path field and verify.js writes there; merge must read it back rather
+# than rebuild $responses_dir/$id.txt by formula. Point the field at a divergent location, write
+# the verdict ONLY there, and leave the formula path empty.
+dir=$(mktemp -d); TMPDIRS+=("$dir")
+alt="$dir/alt/base/z.txt"
+mkdir -p "$(dirname "$alt")"
+printf '%s' '{"met":true,"detail":"from recorded path"}' > "$alt"
+collect=$(cat <<EOF
+{
+  "resolved": [],
+  "pending": [
+    {"id": "base/z", "required": true, "description": "z", "response_path": "$alt"}
+  ],
+  "disabled_count": 0
+}
+EOF
+)
+echo "$collect" > "$dir/collect.json"
+mkdir -p "$dir/responses"   # formula dir exists, but base/z.txt is deliberately NOT written here
+out=$("$RUNNER" --merge "$dir" && cat "$dir/merged.json")
+status=$(echo "$out" | jq -r '.resolved[0].status')
+detail=$(echo "$out" | jq -r '.resolved[0].detail')
+assert_eq "merge honors recorded response_path → PASS" "PASS"               "$status"
+assert_eq "merge read the verdict from the recorded path" "from recorded path" "$detail"
+
 summary
