@@ -86,12 +86,21 @@ validate_standard() {
   if [[ "$has_script" == "true" ]]; then
     local script_body
     script_body=$(yq -r '.check.script' "$file" 2>/dev/null)
-    [[ -n "$script_body" && "$script_body" != "null" ]] || err "$id: 'check.script' is empty"
+    if [[ -z "$script_body" || "$script_body" == "null" ]]; then
+      err "$id: 'check.script' is empty"
+    elif [[ "$script_body" != *PROJECT_ROOT* ]]; then
+      err "$id: 'check.script' does not reference PROJECT_ROOT"
+    fi
   fi
   if [[ "$has_prompt" == "true" ]]; then
     local prompt_body
     prompt_body=$(yq -r '.check.prompt' "$file" 2>/dev/null)
-    [[ -n "$prompt_body" && "$prompt_body" != "null" ]] || err "$id: 'check.prompt' is empty"
+    if [[ -z "$prompt_body" || "$prompt_body" == "null" ]]; then
+      err "$id: 'check.prompt' is empty"
+    else
+      [[ "$prompt_body" == *PROJECT_ROOT* ]] || err "$id: 'check.prompt' does not reference PROJECT_ROOT"
+      [[ "${prompt_body,,}" == *unmet* ]] || err "$id: 'check.prompt' does not follow the met/unmet reporting convention"
+    fi
   fi
 
   local has_notes

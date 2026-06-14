@@ -41,7 +41,7 @@ notes: |
   ~/.config/thingy; check ~/.config first (XDG precedence).
 check:
   prompt: |
-    Verify thingy at $PROJECT_ROOT.
+    Verify thingy at $PROJECT_ROOT. Report met or unmet.
 EOF
 
 # --- Test 1: --init prints a fresh, empty, existing directory path ---
