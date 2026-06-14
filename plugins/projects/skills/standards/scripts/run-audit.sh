@@ -266,8 +266,11 @@ collect() {
   local runner_dir lint_script
   runner_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   lint_script="$runner_dir/lint-project-yaml.sh"
-  if [[ -x "$lint_script" ]]; then
-    "$lint_script" "$project_root/project.yaml" >/dev/null || exit 1
+  if [[ -f "$lint_script" ]]; then
+    bash "$lint_script" "$project_root/project.yaml" >/dev/null || exit 1
+  else
+    echo "Error: linter not found: $lint_script" >&2
+    exit 1
   fi
 
   local pyaml="$project_root/project.yaml"

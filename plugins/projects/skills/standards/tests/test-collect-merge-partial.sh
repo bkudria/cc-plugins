@@ -38,14 +38,14 @@ required: true
 description: "Alpha prompt-based standard."
 check:
   prompt: |
-    Verify alpha holds in $PROJECT_ROOT.
+    Verify alpha holds in $PROJECT_ROOT. Report met or unmet.
 EOF
 cat > "$skill/profiles/probe/beta.yaml" <<'EOF'
 required: true
 description: "Beta prompt-based standard."
 check:
   prompt: |
-    Verify beta holds in $PROJECT_ROOT.
+    Verify beta holds in $PROJECT_ROOT. Report met or unmet.
 EOF
 
 # --- A project selecting that profile -----------------------------------------
