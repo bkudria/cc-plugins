@@ -26,14 +26,8 @@ check:
   prompt: |
     Verify that the binary name(s) shipped by the project at
     $PROJECT_ROOT use lowercase letters, digits, and dashes only,
-    and do not collide with POSIX or coreutils commands. Detect
-    binary names from the language manifest:
-    - `Cargo.toml` `[[bin]]` `name` field,
-    - `package.json` `bin` (object keys or sole filename),
-    - `pyproject.toml` `[project.scripts]` keys,
-    - gemspec `executables`,
-    - files in `bin/` or `exe/`,
-    - Makefile install targets dropping into `$(PREFIX)/bin`.
+    and do not collide with POSIX or coreutils commands. Detect the
+    binary name(s) from the project's language manifest.
 
     For each name, verify (1) it matches `^[a-z][a-z0-9-]*$`,
     and (2) it is not in the set of POSIX utilities or common
