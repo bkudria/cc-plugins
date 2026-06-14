@@ -359,21 +359,44 @@ collect() {
       if [[ "$required" == "true" ]]; then intrinsic_bool=true; else intrinsic_bool=false; fi
 
       if [[ "$has_script" == "true" ]]; then
-        local script_body status detail exit_code stdout_capture
+        local script_body status detail exit_code stdout_capture stderr_capture stderr_file out_last err_last op_msg
         script_body=$(yq -r '.check.script' "$std_yaml")
+        stderr_file=$(mktemp)
         set +e
         stdout_capture=$(PROJECT_ROOT="$project_root" bash -c "set -euo pipefail
-$script_body" 2>&1)
+$script_body" 2>"$stderr_file")
         exit_code=$?
         set -e
-        detail=$(printf '%s\n' "$stdout_capture" | awk 'NF{last=$0} END{print last}')
+        stderr_capture=$(cat "$stderr_file")
+        rm -f "$stderr_file"
+        out_last=$(printf '%s\n' "$stdout_capture" | awk 'NF{last=$0} END{print last}')
+        err_last=$(printf '%s\n' "$stderr_capture" | awk 'NF{last=$0} END{print last}')
 
         if [[ "$exit_code" -eq 0 ]]; then
           status="PASS"
-        elif [[ "$effective_required" == "true" ]]; then
-          status="FAIL"
+          detail="$out_last"
         else
-          status="SUGG"
+          if [[ "$effective_required" == "true" ]]; then
+            status="FAIL"
+          else
+            status="SUGG"
+          fi
+          # Reserved exit codes mean the check could not run, as opposed to
+          # running and reporting the standard unmet; flag that in the detail.
+          case "$exit_code" in
+            127) op_msg="check could not run (command not found)" ;;
+            126) op_msg="check could not run (command not executable)" ;;
+            *)   op_msg="" ;;
+          esac
+          if [[ -n "$op_msg" && -n "$err_last" ]]; then
+            detail="$op_msg: $err_last"
+          elif [[ -n "$op_msg" ]]; then
+            detail="$op_msg"
+          elif [[ -n "$err_last" ]]; then
+            detail="$err_last"
+          else
+            detail="$out_last"
+          fi
         fi
 
         resolved_json=$(jq -c --arg id "$id" --arg s "$status" --arg d "$detail" --arg desc "$description" --argjson ir "$intrinsic_bool" \

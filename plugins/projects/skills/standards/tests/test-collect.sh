@@ -513,4 +513,93 @@ prompt_path_count=$(grep -c "prompt_path" "$WORKFLOW" || true)
 [[ $prompt_path_count -ge 2 ]] && enough_prompt_path=true || enough_prompt_path=false
 assert_eq "workflows/audit.md still references the per-entry prompt_path file handshake" "true" "$enough_prompt_path"
 
+# ===== Script stdout/stderr separation + operational-failure detail =====
+# A fixture profile whose script standards exercise the detail-composition and
+# exit-code paths: stdout/stderr separation, stderr-on-failure, stdout fallback,
+# and the reserved operational exit codes (127 = not found, 126 = not executable).
+mkdir -p "$SKILL_TMP/profiles/streamfx"
+
+cat > "$SKILL_TMP/profiles/streamfx/pass-trailing-stderr.yaml" <<'EOF'
+required: true
+description: "Passes with a trailing stderr warning."
+check:
+  script: |
+    echo "all good"
+    echo "deprecation: noisy warning" >&2
+    exit 0
+EOF
+
+cat > "$SKILL_TMP/profiles/streamfx/fail-stderr-hidden.yaml" <<'EOF'
+required: true
+description: "Fails with stderr diagnostics before later stdout."
+check:
+  script: |
+    echo "ERROR: dependency missing" >&2
+    echo "continuing anyway"
+    exit 1
+EOF
+
+cat > "$SKILL_TMP/profiles/streamfx/fail-stdout-only.yaml" <<'EOF'
+required: true
+description: "Fails with only stdout output."
+check:
+  script: |
+    echo "marker absent"
+    exit 1
+EOF
+
+cat > "$SKILL_TMP/profiles/streamfx/notfound.yaml" <<'EOF'
+required: true
+description: "Invokes a command that does not exist."
+check:
+  script: |
+    this_command_does_not_exist_xyz123
+EOF
+
+cat > "$SKILL_TMP/profiles/streamfx/notexec.yaml" <<'EOF'
+required: true
+description: "Invokes a non-executable file."
+check:
+  script: |
+    "$PROJECT_ROOT/blocked"
+EOF
+
+# --- Test ST1: PASS detail is the stdout last line, never a trailing stderr line ---
+proj=$(mktemp -d)
+cat > "$proj/project.yaml" <<'EOF'
+profiles: [streamfx]
+EOF
+echo "#!/bin/sh" > "$proj/blocked"   # exists but is left non-executable (mode 644)
+chmod 644 "$proj/blocked"
+out=$(run_collect_scope "$proj" required)
+
+pass_detail=$(printf '%s' "$out" | jq -r '.resolved[] | select(.id=="streamfx/pass-trailing-stderr") | .detail')
+pass_status=$(printf '%s' "$out" | jq -r '.resolved[] | select(.id=="streamfx/pass-trailing-stderr") | .status')
+assert_eq "PASS detail is stdout last line, not the trailing stderr warning" "all good" "$pass_detail"
+assert_eq "trailing-stderr standard still PASSes" "PASS" "$pass_status"
+
+# --- Test ST2: a failing check surfaces the stderr diagnostic, even when stdout follows ---
+hidden_detail=$(printf '%s' "$out" | jq -r '.resolved[] | select(.id=="streamfx/fail-stderr-hidden") | .detail')
+assert_eq "FAIL detail surfaces the stderr diagnostic" "ERROR: dependency missing" "$hidden_detail"
+assert_not_contains "ordinary FAIL is not flagged operational" "could not run" "$hidden_detail"
+
+# --- Test ST3: a failing check with no stderr falls back to the stdout last line ---
+stdout_only_detail=$(printf '%s' "$out" | jq -r '.resolved[] | select(.id=="streamfx/fail-stdout-only") | .detail')
+assert_eq "FAIL detail falls back to stdout when stderr is empty" "marker absent" "$stdout_only_detail"
+
+# --- Test ST4: exit 127 (command not found) is flagged operational in detail, status unchanged ---
+notfound_status=$(printf '%s' "$out" | jq -r '.resolved[] | select(.id=="streamfx/notfound") | .status')
+notfound_detail=$(printf '%s' "$out" | jq -r '.resolved[] | select(.id=="streamfx/notfound") | .detail')
+assert_eq "command-not-found standard still resolves FAIL (no new status tier)" "FAIL" "$notfound_status"
+assert_contains "command-not-found detail is flagged operational" "could not run" "$notfound_detail"
+
+# --- Test ST5: exit 126 (not executable) is flagged operational in detail, status unchanged ---
+notexec_status=$(printf '%s' "$out" | jq -r '.resolved[] | select(.id=="streamfx/notexec") | .status')
+notexec_detail=$(printf '%s' "$out" | jq -r '.resolved[] | select(.id=="streamfx/notexec") | .detail')
+assert_eq "non-executable standard still resolves FAIL (no new status tier)" "FAIL" "$notexec_status"
+assert_contains "non-executable detail is flagged operational" "could not run" "$notexec_detail"
+
+rm -rf "$proj"
+rm -rf "$SKILL_TMP/profiles/streamfx"
+
 summary
