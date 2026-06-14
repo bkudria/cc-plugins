@@ -128,10 +128,13 @@ detect_project_context() {
       pm="yarn"
     elif [[ -f "$root/package-lock.json" ]]; then
       pm="npm"
+    else
+      pm="npm"  # no lockfile: npm is the default for Node projects
     fi
   elif [[ -f "$root/Gemfile" ]]; then
     language="Ruby"
     manifest="Gemfile"
+    pm="Bundler"
   elif [[ -f "$root/pyproject.toml" ]]; then
     language="Python"
     manifest="pyproject.toml"
@@ -144,21 +147,42 @@ detect_project_context() {
   elif [[ -f "$root/Cargo.toml" ]]; then
     language="Rust"
     manifest="Cargo.toml"
+    pm="Cargo"
   elif [[ -f "$root/go.mod" ]]; then
     language="Go"
     manifest="go.mod"
+    pm="go modules"
   elif [[ -f "$root/deno.json" ]]; then
     language="Deno"
     manifest="deno.json"
+    pm="deno"
   elif [[ -f "$root/deno.jsonc" ]]; then
     language="Deno"
     manifest="deno.jsonc"
+    pm="deno"
   elif [[ -f "$root/pubspec.yaml" ]]; then
     language="Dart"
     manifest="pubspec.yaml"
+    pm="pub"
   elif [[ -f "$root/Package.swift" ]]; then
     language="Swift"
     manifest="Package.swift"
+    pm="SwiftPM"
+  fi
+
+  # Python uses many package managers; disambiguate by lockfile, default pip.
+  if [[ "$language" == "Python" ]]; then
+    if [[ -f "$root/uv.lock" ]]; then
+      pm="uv"
+    elif [[ -f "$root/poetry.lock" ]]; then
+      pm="Poetry"
+    elif [[ -f "$root/pdm.lock" ]]; then
+      pm="PDM"
+    elif [[ -f "$root/Pipfile.lock" ]]; then
+      pm="Pipenv"
+    else
+      pm="pip"
+    fi
   fi
 
   if [[ -z "$language" ]]; then
@@ -242,8 +266,11 @@ collect() {
   local runner_dir lint_script
   runner_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   lint_script="$runner_dir/lint-project-yaml.sh"
-  if [[ -x "$lint_script" ]]; then
-    "$lint_script" "$project_root/project.yaml" >/dev/null || exit 1
+  if [[ -f "$lint_script" ]]; then
+    bash "$lint_script" "$project_root/project.yaml" >/dev/null || exit 1
+  else
+    echo "Error: linter not found: $lint_script" >&2
+    exit 1
   fi
 
   local pyaml="$project_root/project.yaml"
@@ -335,21 +362,44 @@ collect() {
       if [[ "$required" == "true" ]]; then intrinsic_bool=true; else intrinsic_bool=false; fi
 
       if [[ "$has_script" == "true" ]]; then
-        local script_body status detail exit_code stdout_capture
+        local script_body status detail exit_code stdout_capture stderr_capture stderr_file out_last err_last op_msg
         script_body=$(yq -r '.check.script' "$std_yaml")
+        stderr_file=$(mktemp)
         set +e
         stdout_capture=$(PROJECT_ROOT="$project_root" bash -c "set -euo pipefail
-$script_body" 2>&1)
+$script_body" 2>"$stderr_file")
         exit_code=$?
         set -e
-        detail=$(printf '%s\n' "$stdout_capture" | awk 'NF{last=$0} END{print last}')
+        stderr_capture=$(cat "$stderr_file")
+        rm -f "$stderr_file"
+        out_last=$(printf '%s\n' "$stdout_capture" | awk 'NF{last=$0} END{print last}')
+        err_last=$(printf '%s\n' "$stderr_capture" | awk 'NF{last=$0} END{print last}')
 
         if [[ "$exit_code" -eq 0 ]]; then
           status="PASS"
-        elif [[ "$effective_required" == "true" ]]; then
-          status="FAIL"
+          detail="$out_last"
         else
-          status="SUGG"
+          if [[ "$effective_required" == "true" ]]; then
+            status="FAIL"
+          else
+            status="SUGG"
+          fi
+          # Reserved exit codes mean the check could not run, as opposed to
+          # running and reporting the standard unmet; flag that in the detail.
+          case "$exit_code" in
+            127) op_msg="check could not run (command not found)" ;;
+            126) op_msg="check could not run (command not executable)" ;;
+            *)   op_msg="" ;;
+          esac
+          if [[ -n "$op_msg" && -n "$err_last" ]]; then
+            detail="$op_msg: $err_last"
+          elif [[ -n "$op_msg" ]]; then
+            detail="$op_msg"
+          elif [[ -n "$err_last" ]]; then
+            detail="$err_last"
+          else
+            detail="$out_last"
+          fi
         fi
 
         resolved_json=$(jq -c --arg id "$id" --arg s "$status" --arg d "$detail" --arg desc "$description" --argjson ir "$intrinsic_bool" \
@@ -588,7 +638,7 @@ render() {
 
   echo "| Standard | Status | Detail |"
   echo "| --- | --- | --- |"
-  jq -r '.[] | select(.status != "PASS") | "| \(.id) | \(.status) | \(.detail) |"' <<<"$sorted"
+  jq -r '.[] | select(.status != "PASS") | "| \(.id) | \(.status) | \((.detail // "") / "|" | join("\\|")) |"' <<<"$sorted"
   echo
   echo "${pass_count} PASS, ${fail_count} FAIL, ${sugg_count} SUGG"
   if [[ "$disabled_count" -gt 0 ]]; then

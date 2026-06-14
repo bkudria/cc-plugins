@@ -48,7 +48,7 @@ required: true
 description: "A manual standard verified by prompt."
 check:
   prompt: |
-    Verify thingy at $PROJECT_ROOT.
+    Verify thingy at $PROJECT_ROOT. Report met or unmet.
 EOF
 
 run_collect_scope() {
@@ -209,6 +209,26 @@ assert_eq "disabled standard absent from suggested-resolved" "0" "$optional_in_s
 assert_eq "disabled standard absent from suggested-pending" "0" "$optional_in_sugg_pending"
 rm -rf "$proj"
 
+# --- Test 5b: disabling an intrinsically *required* standard omits + counts it ---
+# Test 5 disables an intrinsic-SUGG standard; this exercises the disable hatch
+# against an intrinsically required:true standard (testfx/manual), which a real
+# project may use to drop a required check it cannot satisfy.
+proj=$(mktemp -d)
+cat > "$proj/project.yaml" <<EOF
+profiles: [testfx]
+disabled:
+  testfx/manual: "Out of scope for this project"
+EOF
+touch "$proj/.marker"
+out=$(run_collect_scope "$proj" required)
+disabled_count=$(printf '%s' "$out" | jq -r '.disabled_count')
+manual_in_resolved=$(printf '%s' "$out" | jq '[.resolved[] | select(.id=="testfx/manual")] | length')
+manual_in_pending=$(printf '%s' "$out" | jq '[.pending[] | select(.id=="testfx/manual")] | length')
+assert_eq "disabling a required standard counts it" "1" "$disabled_count"
+assert_eq "disabled required standard absent from resolved" "0" "$manual_in_resolved"
+assert_eq "disabled required standard absent from pending" "0" "$manual_in_pending"
+rm -rf "$proj"
+
 # --- Test 6: malformed standard (neither script nor prompt) is a runner error ---
 mkdir -p "$SKILL_TMP/profiles/badfx"
 cat > "$SKILL_TMP/profiles/badfx/empty.yaml" <<'EOF'
@@ -265,7 +285,7 @@ required: false
 description: "A suggestion verified by prompt."
 check:
   prompt: |
-    Verify thingy at $PROJECT_ROOT.
+    Verify thingy at $PROJECT_ROOT. Report met or unmet.
 EOF
 proj=$(mktemp -d)
 cat > "$proj/project.yaml" <<'EOF'
@@ -300,7 +320,7 @@ required: false
 description: "A suggestion verified by prompt."
 check:
   prompt: |
-    Verify thingy at $PROJECT_ROOT.
+    Verify thingy at $PROJECT_ROOT. Report met or unmet.
 EOF
 proj=$(mktemp -d)
 cat > "$proj/project.yaml" <<'EOF'
@@ -447,7 +467,7 @@ mkdir -p "$SKILL_TMP/profiles/big"
 big_body=""
 # Build a ~1500-char body using a deterministic filler.
 for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
-  big_body+="Verify standard at \$PROJECT_ROOT and confirm it meets the bar. "
+  big_body+="Verify standard at \$PROJECT_ROOT; report met or unmet. "
 done
 for i in $(seq 1 50); do
   cat > "$SKILL_TMP/profiles/big/std-$i.yaml" <<EOF
@@ -492,5 +512,140 @@ assert_eq "workflows/audit.md no longer asks Claude to count Agent tool_use bloc
 prompt_path_count=$(grep -c "prompt_path" "$WORKFLOW" || true)
 [[ $prompt_path_count -ge 2 ]] && enough_prompt_path=true || enough_prompt_path=false
 assert_eq "workflows/audit.md still references the per-entry prompt_path file handshake" "true" "$enough_prompt_path"
+
+# --- Test 8: linter runs even when its execute bit is cleared (validation not silently skipped) ---
+# run-audit.sh derives the linter path from its own location, so stage copies of both scripts in a
+# temp dir and strip ONLY the linter copy's execute bit (the shipped scripts are untouched).
+stage=$(mktemp -d)
+cp "$REAL_SKILL_DIR/scripts/run-audit.sh"          "$stage/run-audit.sh"
+cp "$REAL_SKILL_DIR/scripts/lint-project-yaml.sh"  "$stage/lint-project-yaml.sh"
+chmod +x "$stage/run-audit.sh"
+chmod -x "$stage/lint-project-yaml.sh"
+proj=$(mktemp -d)
+cat > "$proj/project.yaml" <<'EOF'
+profiles: [testfx]
+name: example
+EOF
+touch "$proj/.marker" "$proj/.opt"
+state=$(mktemp -d)
+set +e
+err=$(CLAUDE_SKILL_DIR="$SKILL_TMP" "$stage/run-audit.sh" --collect "$proj" "$state" --scope required 2>&1 >/dev/null)
+rc=$?
+set -e
+assert_eq       "non-executable linter still rejects schema-invalid project.yaml" "1"          "$rc"
+assert_contains "validation ran despite the missing execute bit"                  "unexpected" "$err"
+rm -rf "$proj" "$state" "$stage"
+
+# --- Test 9: a genuinely missing linter is a hard error, not a silent skip ---
+stage=$(mktemp -d)
+cp "$REAL_SKILL_DIR/scripts/run-audit.sh" "$stage/run-audit.sh"
+chmod +x "$stage/run-audit.sh"
+# deliberately do NOT stage lint-project-yaml.sh alongside it
+proj=$(mktemp -d)
+cat > "$proj/project.yaml" <<'EOF'
+profiles: [testfx]
+EOF
+touch "$proj/.marker"
+state=$(mktemp -d)
+set +e
+err=$(CLAUDE_SKILL_DIR="$SKILL_TMP" "$stage/run-audit.sh" --collect "$proj" "$state" --scope required 2>&1 >/dev/null)
+rc=$?
+set -e
+assert_eq       "missing linter exits non-zero"        "1"                     "$rc"
+assert_contains "missing-linter error names the linter" "lint-project-yaml.sh" "$err"
+rm -rf "$proj" "$state" "$stage"
+
+# ===== Script stdout/stderr separation + operational-failure detail =====
+# A fixture profile whose script standards exercise the detail-composition and
+# exit-code paths: stdout/stderr separation, stderr-on-failure, stdout fallback,
+# and the reserved operational exit codes (127 = not found, 126 = not executable).
+mkdir -p "$SKILL_TMP/profiles/streamfx"
+
+cat > "$SKILL_TMP/profiles/streamfx/pass-trailing-stderr.yaml" <<'EOF'
+required: true
+description: "Passes with a trailing stderr warning."
+check:
+  script: |
+    # fixture exercises stdout/stderr only; no $PROJECT_ROOT paths needed
+    echo "all good"
+    echo "deprecation: noisy warning" >&2
+    exit 0
+EOF
+
+cat > "$SKILL_TMP/profiles/streamfx/fail-stderr-hidden.yaml" <<'EOF'
+required: true
+description: "Fails with stderr diagnostics before later stdout."
+check:
+  script: |
+    # fixture exercises stdout/stderr only; no $PROJECT_ROOT paths needed
+    echo "ERROR: dependency missing" >&2
+    echo "continuing anyway"
+    exit 1
+EOF
+
+cat > "$SKILL_TMP/profiles/streamfx/fail-stdout-only.yaml" <<'EOF'
+required: true
+description: "Fails with only stdout output."
+check:
+  script: |
+    # fixture exercises stdout/stderr only; no $PROJECT_ROOT paths needed
+    echo "marker absent"
+    exit 1
+EOF
+
+cat > "$SKILL_TMP/profiles/streamfx/notfound.yaml" <<'EOF'
+required: true
+description: "Invokes a command that does not exist."
+check:
+  script: |
+    # fixture exercises the command-not-found exit path; no $PROJECT_ROOT paths needed
+    this_command_does_not_exist_xyz123
+EOF
+
+cat > "$SKILL_TMP/profiles/streamfx/notexec.yaml" <<'EOF'
+required: true
+description: "Invokes a non-executable file."
+check:
+  script: |
+    "$PROJECT_ROOT/blocked"
+EOF
+
+# --- Test ST1: PASS detail is the stdout last line, never a trailing stderr line ---
+proj=$(mktemp -d)
+cat > "$proj/project.yaml" <<'EOF'
+profiles: [streamfx]
+EOF
+echo "#!/bin/sh" > "$proj/blocked"   # exists but is left non-executable (mode 644)
+chmod 644 "$proj/blocked"
+out=$(run_collect_scope "$proj" required)
+
+pass_detail=$(printf '%s' "$out" | jq -r '.resolved[] | select(.id=="streamfx/pass-trailing-stderr") | .detail')
+pass_status=$(printf '%s' "$out" | jq -r '.resolved[] | select(.id=="streamfx/pass-trailing-stderr") | .status')
+assert_eq "PASS detail is stdout last line, not the trailing stderr warning" "all good" "$pass_detail"
+assert_eq "trailing-stderr standard still PASSes" "PASS" "$pass_status"
+
+# --- Test ST2: a failing check surfaces the stderr diagnostic, even when stdout follows ---
+hidden_detail=$(printf '%s' "$out" | jq -r '.resolved[] | select(.id=="streamfx/fail-stderr-hidden") | .detail')
+assert_eq "FAIL detail surfaces the stderr diagnostic" "ERROR: dependency missing" "$hidden_detail"
+assert_not_contains "ordinary FAIL is not flagged operational" "could not run" "$hidden_detail"
+
+# --- Test ST3: a failing check with no stderr falls back to the stdout last line ---
+stdout_only_detail=$(printf '%s' "$out" | jq -r '.resolved[] | select(.id=="streamfx/fail-stdout-only") | .detail')
+assert_eq "FAIL detail falls back to stdout when stderr is empty" "marker absent" "$stdout_only_detail"
+
+# --- Test ST4: exit 127 (command not found) is flagged operational in detail, status unchanged ---
+notfound_status=$(printf '%s' "$out" | jq -r '.resolved[] | select(.id=="streamfx/notfound") | .status')
+notfound_detail=$(printf '%s' "$out" | jq -r '.resolved[] | select(.id=="streamfx/notfound") | .detail')
+assert_eq "command-not-found standard still resolves FAIL (no new status tier)" "FAIL" "$notfound_status"
+assert_contains "command-not-found detail is flagged operational" "could not run" "$notfound_detail"
+
+# --- Test ST5: exit 126 (not executable) is flagged operational in detail, status unchanged ---
+notexec_status=$(printf '%s' "$out" | jq -r '.resolved[] | select(.id=="streamfx/notexec") | .status')
+notexec_detail=$(printf '%s' "$out" | jq -r '.resolved[] | select(.id=="streamfx/notexec") | .detail')
+assert_eq "non-executable standard still resolves FAIL (no new status tier)" "FAIL" "$notexec_status"
+assert_contains "non-executable detail is flagged operational" "could not run" "$notexec_detail"
+
+rm -rf "$proj"
+rm -rf "$SKILL_TMP/profiles/streamfx"
 
 summary

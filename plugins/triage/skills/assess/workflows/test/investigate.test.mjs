@@ -10,7 +10,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { helpers } from './_load.mjs'
 
-const { degradationSummary, renderAssessment, applyVerdicts, pickOverallQuestion, selectVerifyTargets } = helpers
+const { degradationSummary, renderAssessment, applyVerdicts, pickOverallQuestion, selectVerifyTargets, runReliabilityFlags } = helpers
 
 test('renderAssessment emits the deterministic assess<->iterate format contract', () => {
   const md = renderAssessment({
@@ -87,6 +87,38 @@ test('degradationSummary: failed overrides everything when synth did not succeed
   assert.deepEqual(
     degradationSummary({ plannedAreas: 2, droppedAreas: ['a', 'b'], synthOk: false, verifyFailed: false }),
     { status: 'failed', coverage: { planned: 2, completed: 0, dropped: ['a', 'b'] } }
+  )
+})
+
+test('degradationSummary: degraded when citations failed to ground', () => {
+  const r = degradationSummary({ plannedAreas: 2, droppedAreas: [], synthOk: true, verifyFailed: false, ungrounded: 3 })
+  assert.equal(r.status, 'degraded')
+  assert.equal(r.coverage.completed, 2)
+})
+
+test('degradationSummary: ok when no citations are ungrounded', () => {
+  const r = degradationSummary({ plannedAreas: 2, droppedAreas: [], synthOk: true, verifyFailed: false, ungrounded: 0 })
+  assert.equal(r.status, 'ok')
+})
+
+test('degradationSummary: a zero-observation run that also lost coverage escalates to failed', () => {
+  // Empty + a real loss (a dropped area, or verify failure) is not a legitimately
+  // empty result — it is a broken run, so it escalates past 'degraded' to 'failed'.
+  assert.equal(
+    degradationSummary({ plannedAreas: 2, droppedAreas: ['auth'], synthOk: true, noObservations: true }).status,
+    'failed'
+  )
+  assert.equal(
+    degradationSummary({ plannedAreas: 2, droppedAreas: [], synthOk: true, verifyFailed: true, noObservations: true }).status,
+    'failed'
+  )
+})
+
+test('degradationSummary: a clean zero-observation run is still ok', () => {
+  // A legitimately empty investigation (no losses) stays 'ok' — preserved behavior.
+  assert.equal(
+    degradationSummary({ plannedAreas: 2, droppedAreas: [], synthOk: true, verifyFailed: false, noObservations: true }).status,
+    'ok'
   )
 })
 
@@ -215,4 +247,38 @@ test('pickOverallQuestion: a revision without a question falls back to plan/scop
     'Q'
   )
   assert.equal(pickOverallQuestion({ plan: null, revised: { overallQuestion: 'R' }, scope: 's' }), 'R')
+})
+
+// run-level reliability flags — disclose safeguards that silently no-op'd
+// (a critic that crashed on both attempts) or verification that came back partial.
+// These surface in the audit trail; they do not by themselves change status.
+test('runReliabilityFlags: a silently-skipped plan critic is flagged', () => {
+  const flags = runReliabilityFlags({ planCriticFailed: true })
+  assert.equal(flags.length, 1)
+  assert.match(flags[0], /plan critic/i)
+})
+
+test('runReliabilityFlags: a silently-skipped completeness critic is flagged', () => {
+  const flags = runReliabilityFlags({ completenessCriticFailed: true })
+  assert.equal(flags.length, 1)
+  assert.match(flags[0], /completeness critic/i)
+})
+
+test('runReliabilityFlags: partial verdict loss is flagged with received/expected counts', () => {
+  const flags = runReliabilityFlags({ verdictsReceived: 7, verdictsExpected: 10 })
+  assert.equal(flags.length, 1)
+  assert.match(flags[0], /\b7\b/)
+  assert.match(flags[0], /\b10\b/)
+})
+
+test('runReliabilityFlags: no partial flag on total loss or on complete verification', () => {
+  // Total loss (received 0) is handled separately by verifyLost; complete coverage
+  // has nothing to flag. Only a genuine partial (0 < received < expected) flags.
+  assert.deepEqual(runReliabilityFlags({ verdictsReceived: 0, verdictsExpected: 10 }), [])
+  assert.deepEqual(runReliabilityFlags({ verdictsReceived: 10, verdictsExpected: 10 }), [])
+  assert.deepEqual(runReliabilityFlags({ verdictsReceived: 7, verdictsExpected: 7 }), [])
+})
+
+test('runReliabilityFlags: a clean run yields no flags', () => {
+  assert.deepEqual(runReliabilityFlags({}), [])
 })
