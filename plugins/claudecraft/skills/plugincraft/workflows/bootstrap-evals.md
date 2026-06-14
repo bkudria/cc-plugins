@@ -115,9 +115,9 @@ For each approved bundle scenario from Step 4, create:
 - `evals/<scenario-id>/scenario.yaml` — prompt and any per-scenario scuttlerun overrides (fixtures via `project.files`, additional tools, etc.)
 - `evals/<scenario-id>/checks.yaml` — context and checks in id-as-key format
 
-**GATE — STOP. Before writing any check, you MUST Read `claude-code-evals/references/check-design.md` § Pre-Write Checklist AND § Common Slips in this session.** The reference contains six self-tests that every check must pass before being written. Apply every self-test to every check — do not skip self-tests on checks that "look obviously fine"; over-specific and compound are the most common lint failures and they hide in checks that look concrete. Catching anti-patterns here is free; catching them via `craboodle lint` costs a lint cycle per fix.
+**GATE — STOP. Before writing any check, you MUST Read `claude-code-evals/references/check-design.md` § Pre-Write Checklist AND run `pincenez lint --help` in this session.** The reference contains six self-tests that every check must pass before being written. Apply every self-test to every check — do not skip self-tests on checks that "look obviously fine"; over-specific and compound are the most common lint failures and they hide in checks that look concrete. Catching anti-patterns here is free; catching them via `craboodle lint` costs a lint cycle per fix.
 
-Loading the `claude-code-evals` skill (done in the top GATE) is not the same as having the Pre-Write Checklist in context. If you have not Read the § Pre-Write Checklist AND § Common Slips sections of check-design.md during this session, Read them now before continuing.
+Loading the `claude-code-evals` skill (done in the top GATE) is not the same as having the Pre-Write Checklist in context. If you have not Read the § Pre-Write Checklist section of check-design.md and run `pincenez lint --help` during this session, do so now before continuing.
 
 For every bundle-level check, add a `note:` field naming the components (or load surface) the check exercises (e.g., `note: "skills/release-notes + hooks/slack-post — composition"`). This mirrors the `note:` discipline in `claude-code-evals/references/config-type-patterns.md` § Plugins and makes Step 10 attribution faster. For Regression-bucket checks, also declare the regression-baseline intent in the note — those checks are presence-anchored by design (see `claude-code-evals/references/check-design.md` § Check Patterns), and the declaration is what tells lint the WHETHER form is deliberate.
 
@@ -166,7 +166,7 @@ To distinguish: read the scuttlerun transcript at `<artifact_dir>/<scenario-id>/
 
 Iteration rules:
 1. Fix one thing at a time (plugin OR component OR check, not multiple)
-2. When a rewrite responds to a lint flag, re-apply the full Pre-Write Checklist to the rewrite before moving on — rewrites commonly reintroduce a different anti-pattern (see `claude-code-evals/references/check-design.md` § Common Slips)
+2. When a rewrite responds to a lint flag, re-apply the full Pre-Write Checklist to the rewrite before moving on — rewrites commonly reintroduce a different anti-pattern (run `pincenez lint --help` for worked examples)
 3. Re-run targeted scenarios after each fix
 4. Stop when: exit code 0, or pass rate improvement < 0.05 for 2 iterations
 
