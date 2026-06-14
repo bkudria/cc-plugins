@@ -26,7 +26,7 @@ required: true
 description: "Probe standard verified by prompt."
 check:
   prompt: |
-    Verify thingy at $PROJECT_ROOT.
+    Verify thingy at $PROJECT_ROOT. Report met or unmet.
 EOF
 cat > "$SKILL_TMP/profiles/probe/script.yaml" <<'EOF'
 required: true
@@ -152,7 +152,7 @@ required: false
 description: "Second probe verified by prompt."
 check:
   prompt: |
-    Second verification at $PROJECT_ROOT.
+    Second verification at $PROJECT_ROOT. Report met or unmet.
 EOF
 proj=$(mktemp -d)
 cat > "$proj/project.yaml" <<'EOF'

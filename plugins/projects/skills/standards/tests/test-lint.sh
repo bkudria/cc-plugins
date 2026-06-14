@@ -28,7 +28,7 @@ required: false
 description: "An optional .opt file exists."
 check:
   prompt: |
-    Verify $PROJECT_ROOT.
+    Verify $PROJECT_ROOT. Report met (with evidence) or unmet (with the gap).
 EOF
 cat > "$SKILL_TMP/profiles/extra/extra.yaml" <<'EOF'
 required: true
@@ -355,5 +355,23 @@ assert_exit_code "--skill rejects prompt body missing PROJECT_ROOT" "1" "$rc"
 assert_contains "--skill error names the bad file" "badfx6/no-root-prompt" "$err"
 assert_contains "--skill error mentions PROJECT_ROOT" "PROJECT_ROOT" "$err"
 rm -rf "$SKILL_TMP/profiles/badfx6"
+
+# --- Test 14: --skill rejects a prompt body that omits the met/unmet convention ---
+mkdir -p "$SKILL_TMP/profiles/badfx7"
+cat > "$SKILL_TMP/profiles/badfx7/no-met-unmet.yaml" <<'EOF'
+required: false
+description: "Prompt body omits the met/unmet reporting convention."
+check:
+  prompt: |
+    Inspect $PROJECT_ROOT and report whether the convention holds.
+EOF
+set +e
+err=$(run_lint --skill 2>&1)
+rc=$?
+set -e
+assert_exit_code "--skill rejects prompt body missing met/unmet convention" "1" "$rc"
+assert_contains "--skill error names the bad file" "badfx7/no-met-unmet" "$err"
+assert_contains "--skill error mentions met/unmet convention" "met/unmet" "$err"
+rm -rf "$SKILL_TMP/profiles/badfx7"
 
 summary

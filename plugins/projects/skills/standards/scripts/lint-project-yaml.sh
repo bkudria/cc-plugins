@@ -97,8 +97,9 @@ validate_standard() {
     prompt_body=$(yq -r '.check.prompt' "$file" 2>/dev/null)
     if [[ -z "$prompt_body" || "$prompt_body" == "null" ]]; then
       err "$id: 'check.prompt' is empty"
-    elif [[ "$prompt_body" != *PROJECT_ROOT* ]]; then
-      err "$id: 'check.prompt' does not reference PROJECT_ROOT"
+    else
+      [[ "$prompt_body" == *PROJECT_ROOT* ]] || err "$id: 'check.prompt' does not reference PROJECT_ROOT"
+      [[ "${prompt_body,,}" == *unmet* ]] || err "$id: 'check.prompt' does not follow the met/unmet reporting convention"
     fi
   fi
 
