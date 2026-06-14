@@ -70,7 +70,7 @@ const MAX_VERIFY_TARGETS = 6
 const MAX_GROUND_TARGETS = 6
 const VERIFY_LENSES = {
   grounding: 'Grounding/citation accuracy. Independently re-derive this observation\'s cited evidence from source using your read-only tools. Do the named files, line numbers, and values actually exist and say what the observation claims? Verdict "drop" if the evidence is fabricated or does not support the claim; "correct" if it is partially right with a fixable inaccuracy; "holds" if fully grounded.',
-  overclaim: 'Over-claim / significance inflation. Judge whether the observation\'s framing and significance are justified by its evidence, or inflated. Is a "high" significance genuinely load-bearing, or is this working-as-designed, minor, or speculative? Verdict "correct" to downgrade or reframe; "drop" if it is not a real issue; "holds" if proportionate.',
+  overclaim: 'Over-claim / significance inflation. Judge whether the observation\'s framing and significance are justified by its evidence, or inflated. Is a "high" significance genuinely load-bearing, or is this working-as-designed, minor, or speculative? Verdict "drop" (confidence high or medium) if it is working-as-designed or not a real issue — this removes it. Verdict "correct" with correctedSignificance set to the LOWER level (high→medium or medium→low) when the issue is real but its significance is inflated — significance is only ever lowered, never raised; add a "correction" only if the claim wording itself also needs fixing. Verdict "holds" if proportionate.',
   reliability: 'Reliability / truncation. Judge whether this observation could rest on tool output that was truncated, timed out, or silently failed. Use your tools to check whether the underlying source is larger or different than the evidence implies. Record any concern in reliabilityConcern; verdict "drop" if the basis is likely unreliable; "holds" if solid.',
 }
 const EFFORT_LENSES = {
@@ -544,6 +544,7 @@ const VERDICT_SCHEMA = {
     confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
     rationale: { type: 'string', description: 'Why, citing what you independently checked' },
     correction: { type: 'string', description: 'If verdict is "correct": the corrected claim' },
+    correctedSignificance: { type: 'string', enum: ['high', 'medium', 'low'], description: 'If verdict is "correct" and the significance is inflated: the corrected, LOWER level (high→medium or medium→low). Downgrade-only — an equal or higher level is ignored.' },
     reliabilityConcern: { type: 'string', description: 'If the basis may be truncated or failed: describe it' },
   },
 }
@@ -553,8 +554,9 @@ const VERDICT_SCHEMA = {
 // Rails: only a high/medium-confidence `drop` removes an observation; a low-confidence
 // `drop` and any reliabilityConcern become flags the synthesizer still sees; a `correct`
 // is folded as an annotation (the original claim is preserved in the action record),
-// never a destructive body rewrite. Across lenses on one observation a qualifying drop
-// wins over correct wins over holds.
+// never a destructive body rewrite, and may lower an inflated significance via
+// correctedSignificance (downgrade-only — never raised). Across lenses on one observation
+// a qualifying drop wins over correct wins over holds.
 /* test-seam:pure-fn:start */
 const applyVerdicts = (obs, verdicts) => {
   const keyOf = (x) => x.area + ' ' + x.title
@@ -575,11 +577,30 @@ const applyVerdicts = (obs, verdicts) => {
     const corrections = vs
       .filter((v) => v.verdict === 'correct' && v.correction)
       .map((v) => ({ lens: v.lens, was: o.body, now: v.correction, why: v.rationale }))
-    const keptObs = { area: o.area, title: o.title, body: o.body, evidence: o.evidence, significance: o.significance }
-    if (corrections.length || flags.length) keptObs.verificationNotes = { corrections, flags }
+    // Significance downgrade (downgrade-only): a `correct` verdict may lower an
+    // inflated significance via correctedSignificance, never raise it. Rank ascends
+    // by severity (high < medium < low); a strictly larger rank is a real downgrade.
+    const sigRank = { high: 0, medium: 1, low: 2 }
+    const rankOf = (s) => (s in sigRank ? sigRank[s] : -1)
+    const downgrades = vs.filter((v) =>
+      v.verdict === 'correct' && v.correctedSignificance && rankOf(v.correctedSignificance) > rankOf(o.significance))
+    // Most-severe downgrade wins (largest rank), so no lens's downgrade is overridden by a milder one.
+    const downgrade = downgrades.reduce((best, v) =>
+      (!best || rankOf(v.correctedSignificance) > rankOf(best.correctedSignificance) ? v : best), null)
+    const significance = downgrade ? downgrade.correctedSignificance : o.significance
+    const significanceDowngrade = downgrade
+      ? { lens: downgrade.lens, was: o.significance, now: significance, why: downgrade.rationale }
+      : null
+    const keptObs = { area: o.area, title: o.title, body: o.body, evidence: o.evidence, significance }
+    if (corrections.length || flags.length || significanceDowngrade) {
+      keptObs.verificationNotes = { corrections, flags }
+      if (significanceDowngrade) keptObs.verificationNotes.significanceDowngrade = significanceDowngrade
+    }
     kept.push(keptObs)
-    if (corrections.length || flags.length) {
-      actions.push({ area: o.area, title: o.title, action: corrections.length ? 'corrected' : 'flagged', corrections, flags })
+    if (corrections.length || flags.length || significanceDowngrade) {
+      const action = { area: o.area, title: o.title, action: (corrections.length || significanceDowngrade) ? 'corrected' : 'flagged', corrections, flags }
+      if (significanceDowngrade) action.significanceDowngrade = significanceDowngrade
+      actions.push(action)
     }
   })
   return { kept, actions }

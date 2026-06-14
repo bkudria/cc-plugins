@@ -177,6 +177,35 @@ test('applyVerdicts: across lenses, a qualifying drop wins over a correct', () =
   assert.equal(kept.length, 0)
 })
 
+test('applyVerdicts: a medium-confidence drop removes the observation', () => {
+  const { kept, actions } = applyVerdicts(
+    [obs()],
+    [{ area: 'A', title: 't1', verdict: 'drop', confidence: 'medium', lens: 'L', rationale: 'working as designed' }]
+  )
+  assert.equal(kept.length, 0)
+  assert.equal(actions[0].action, 'dropped')
+  assert.equal(actions[0].confidence, 'medium')
+})
+
+test('applyVerdicts: a correct with a lower correctedSignificance downgrades the kept observation', () => {
+  const { kept, actions } = applyVerdicts(
+    [obs()], // significance: 'high'
+    [{ area: 'A', title: 't1', verdict: 'correct', correctedSignificance: 'medium', lens: 'L', rationale: 'inflated' }]
+  )
+  assert.equal(kept[0].significance, 'medium') // lowered from high
+  assert.deepEqual(kept[0].verificationNotes.significanceDowngrade, { lens: 'L', was: 'high', now: 'medium', why: 'inflated' })
+  assert.equal(actions[0].action, 'corrected')
+})
+
+test('applyVerdicts: correctedSignificance is downgrade-only — an equal or higher level is ignored', () => {
+  const { kept } = applyVerdicts(
+    [obs({ significance: 'medium' })],
+    [{ area: 'A', title: 't1', verdict: 'correct', correctedSignificance: 'high', lens: 'L', rationale: 'wants to raise' }]
+  )
+  assert.equal(kept[0].significance, 'medium') // never raised past the original
+  assert.equal(kept[0].verificationNotes, undefined) // no downgrade recorded, no other notes
+})
+
 // area-aware verify-target selection
 const vobs = (area, significance, title) => ({ area, title, body: 'b', evidence: 'e', significance })
 const countByArea = (targets) => targets.reduce((m, t) => ((m[t.o.area] = (m[t.o.area] || 0) + 1), m), {})
