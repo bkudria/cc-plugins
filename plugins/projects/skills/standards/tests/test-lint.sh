@@ -374,4 +374,42 @@ assert_contains "--skill error names the bad file" "badfx7/no-met-unmet" "$err"
 assert_contains "--skill error mentions met/unmet convention" "met/unmet" "$err"
 rm -rf "$SKILL_TMP/profiles/badfx7"
 
+# --- Test 15: --skill mode rejects check.script with a bash syntax error ---
+mkdir -p "$SKILL_TMP/profiles/synfx"
+cat > "$SKILL_TMP/profiles/synfx/broken.yaml" <<'EOF'
+required: true
+description: "Script body has a bash syntax error."
+check:
+  script: |
+    if true; then
+    echo "missing fi"
+EOF
+set +e
+err=$(run_lint --skill 2>&1)
+rc=$?
+set -e
+assert_exit_code "--skill rejects check.script with syntax error" "1" "$rc"
+assert_contains "syntax-error names the bad file" "synfx/broken" "$err"
+assert_contains "syntax-error message flags a syntax error" "syntax" "$err"
+rm -rf "$SKILL_TMP/profiles/synfx"
+
+# --- Test 16: --skill mode accepts a valid multi-line check.script ---
+mkdir -p "$SKILL_TMP/profiles/okscript"
+cat > "$SKILL_TMP/profiles/okscript/valid.yaml" <<'EOF'
+required: true
+description: "Valid multi-line script body."
+check:
+  script: |
+    if [[ -f "$PROJECT_ROOT/.x" ]]; then
+      exit 0
+    fi
+    exit 1
+EOF
+set +e
+out=$(run_lint --skill 2>&1)
+rc=$?
+set -e
+assert_exit_code "--skill accepts valid multi-line check.script" "0" "$rc"
+rm -rf "$SKILL_TMP/profiles/okscript"
+
 summary

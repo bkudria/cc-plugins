@@ -88,8 +88,12 @@ validate_standard() {
     script_body=$(yq -r '.check.script' "$file" 2>/dev/null)
     if [[ -z "$script_body" || "$script_body" == "null" ]]; then
       err "$id: 'check.script' is empty"
-    elif [[ "$script_body" != *PROJECT_ROOT* ]]; then
-      err "$id: 'check.script' does not reference PROJECT_ROOT"
+    else
+      [[ "$script_body" == *PROJECT_ROOT* ]] || err "$id: 'check.script' does not reference PROJECT_ROOT"
+      local syntax_err
+      if ! syntax_err=$(printf '%s\n' "$script_body" | bash -n 2>&1); then
+        err "$id: 'check.script' has a bash syntax error: $syntax_err"
+      fi
     fi
   fi
   if [[ "$has_prompt" == "true" ]]; then
