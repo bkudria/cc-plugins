@@ -141,7 +141,7 @@ The runner emits, in order:
 - A markdown table with three columns (`Standard`, `Status`, `Detail`) listing only `FAIL` and `SUGG` rows, sorted FAIL → SUGG, alphabetical by id within each bucket. PASS rows are intentionally omitted from the table — the per-status count line preserves the PASS total.
 - A blank line, then a per-status count: `X PASS, Y FAIL, Z SUGG`.
 - Optionally, a single line `N standards disabled in project.yaml` (omitted when N == 0).
-- Optionally, a single line `N suggested standards skipped (required failures present)` — emitted iff `scopes_collected` lacks `"suggested"` AND `suggested_total > 0` (i.e., round 2 was gated out and there were suggesteds to skip).
+- Optionally, a single line `N suggested standards skipped (<reason>)` — emitted iff `scopes_collected` lacks `"suggested"` AND `suggested_total > 0` (i.e., round 2 did not run and there were suggesteds to skip). The `<reason>` is `required failures present` when the audit has at least one `FAIL`, otherwise `suggested round not run`.
 - Optionally, a "lock-in" suggestion block. Triggers iff round 2 ran (`scopes_collected` includes `"suggested"`) AND zero `FAIL` AND zero `SUGG` AND at least one PASSing standard is SUGG-style (its YAML has `required: false`) AND not already in the project's `required:` list.
 
 The render step never invents `MANUAL`, `SKIP`, or `DISABLED` rows. Every row in the table is `FAIL` or `SUGG`. PASS rows and disabled standards are absent from the table; their existence is signaled only by the count line below the table.

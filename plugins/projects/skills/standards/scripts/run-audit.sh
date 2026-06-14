@@ -53,8 +53,10 @@
 #   run-audit.sh --render <state-dir>
 #       Reads <state-dir>/merged.json and emits the markdown audit table,
 #       per-status counts, optional disabled-count line, and (when round 2
-#       was skipped due to required failures) a count of suggested standards
-#       skipped. Always exits 0 on successful render. For CI pass/fail
+#       did not run and there were suggesteds to skip) a count of suggested
+#       standards skipped, annotated with the reason — "required failures
+#       present" when the audit has at least one FAIL, otherwise "suggested
+#       round not run". Always exits 0 on successful render. For CI pass/fail
 #       signal, use --check.
 #
 #   run-audit.sh --check <state-dir>
@@ -651,7 +653,15 @@ render() {
     echo "${disabled_count} standards disabled in project.yaml"
   fi
   if [[ "$has_suggested_scope" == "false" && "$suggested_total" -gt 0 ]]; then
-    echo "${suggested_total} suggested standards skipped (required failures present)"
+    # A standard is FAIL only when it is effective-required (a failing suggested
+    # standard becomes SUGG), so fail_count>0 is exactly "a required standard
+    # failed" — the same predicate --gate uses to skip round 2. Only assert that
+    # reason when it actually holds; otherwise the round was simply not run.
+    if [[ "$fail_count" -gt 0 ]]; then
+      echo "${suggested_total} suggested standards skipped (required failures present)"
+    else
+      echo "${suggested_total} suggested standards skipped (suggested round not run)"
+    fi
   fi
 
   # Lock-in suggestion fires only when the suggested round actually ran:
