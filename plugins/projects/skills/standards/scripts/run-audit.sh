@@ -484,7 +484,8 @@ merge() {
     required=$(jq -r ".[$i].required" <<<"$pending")
     description=$(jq -r ".[$i].description // \"\"" <<<"$pending")
     intrinsic_required=$(jq -r ".[$i].intrinsic_required // false" <<<"$pending")
-    response_path="$responses_dir/$id.txt"
+    response_path=$(jq -r ".[$i].response_path // \"\"" <<<"$pending")
+    [[ -n "$response_path" ]] || response_path="$responses_dir/$id.txt"
 
     if [[ ! -f "$response_path" ]]; then
       status="FAIL"
