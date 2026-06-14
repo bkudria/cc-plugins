@@ -130,6 +130,29 @@ const degradationSummary = ({ plannedAreas, droppedAreas, synthOk, verifyFailed,
 }
 /* test-seam:pure-fn:end */
 
+// Flat scalar audit summary for Phase 3: collapses the run's verification, grounding,
+// and funnel signals into a notification-safe set of counts (the nested verification/
+// grounding objects are truncated from the completion notification). The observations→
+// synthesized→findings funnel is reported as raw counts so the reduction is visible
+// without claiming a single "filtered" number (merge/split make it non-linear). Pure
+// (signals in, plain object out), so it is unit-tested alongside degradationSummary.
+/* test-seam:pure-fn:start */
+const summarizeAudit = ({ status, observationCount, synthInputCount, findingsCount, auditActions, grounding, reliabilityFlags }) => {
+  const count = (action) => auditActions.filter((a) => a.action === action).length
+  return {
+    status,
+    observations: observationCount,
+    synthesized: synthInputCount,
+    findings: findingsCount,
+    corrected: count('corrected'),
+    dropped: count('dropped'),
+    flagged: count('flagged'),
+    ungrounded: grounding && Array.isArray(grounding.ungrounded) ? grounding.ungrounded.length : 0,
+    reliabilityFlags: Array.isArray(reliabilityFlags) ? reliabilityFlags.length : 0,
+  }
+}
+/* test-seam:pure-fn:end */
+
 // Disclose run-level reliability shortfalls in the audit trail: advisory critics (plan,
 // completeness) that crashed on both attempts and so silently no-op'd, and adversarial
 // verification that came back PARTIAL (some lens verdicts lost but not all — total loss is
@@ -907,6 +930,18 @@ const reliabilityFlags = [
   ...((verification && verification.reliabilityFlags) || []),
 ]
 log('Run status=' + status + (reliabilityFlags.length ? '; ' + reliabilityFlags.length + ' reliability flag(s).' : '.'))
+// Audit summary is built from the surfaced signals — including the merged reliabilityFlags above —
+// so its counts match what the result actually exposes. Positioned before the large markdown field
+// so it survives notification truncation.
+const auditSummary = summarizeAudit({
+  status,
+  observationCount: allObs.length,
+  synthInputCount: verifiedObs.length,
+  findingsCount,
+  auditActions,
+  grounding,
+  reliabilityFlags,
+})
 
 return {
   scope,
@@ -918,6 +953,7 @@ return {
   reliabilityFlags,
   observationCount: allObs.length,
   findingsCount,
+  auditSummary,
   outPath: finalPath,
   markdown,
   ...(synthOk ? {} : { error: 'synthesis failed' }),
