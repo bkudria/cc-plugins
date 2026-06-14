@@ -84,7 +84,7 @@ The agent-under-test `model:` determines what your evals measure. Haiku (scuttle
 Scaffold the eval directory:
 
 ```bash
-craboodle init <skill-dir>/evals
+craboodle init <skill-dir>
 ```
 
 This creates `evals.yaml` with `version: "1"`, commented pipeline knobs (`min_pass_rate`, `max_budget_usd`, `repeats`, `artifact_retention_days`), and a commented `scenarios.base` template. Then:
@@ -110,12 +110,12 @@ For each approved scenario, create:
 
 Loading the `claude-code-evals` skill (done in Step 1) is not the same as having the Pre-Write Checklist in context. If you have not Read the § Pre-Write Checklist section of check-design.md and run `pincenez lint --help` during this session, do so now before continuing.
 
-**Write incrementally**: Write the first scenario, then lint it with `craboodle lint --scenario <id> <skill-dir>/evals`. Fix any issues before writing the remaining scenarios — anti-pattern tendencies caught on the first scenario won't propagate to the rest. Then write the remaining scenarios in parallel, following the same patterns.
+**Write incrementally**: Write the first scenario, then lint it with `craboodle lint --scenario <id> <skill-dir>`. Fix any issues before writing the remaining scenarios — anti-pattern tendencies caught on the first scenario won't propagate to the rest. Then write the remaining scenarios in parallel, following the same patterns.
 
 ## Step 7: Lint
 
 ```bash
-craboodle lint <skill-dir>/evals
+craboodle lint <skill-dir>
 ```
 
 Confirm zero issues across the full suite. If the incremental lint in Step 6 was clean, this will usually pass on the first run — but lint is advisory and non-deterministic, so an unexpected flag on re-run may be lint variance rather than a regression (see the *Evaluation is probabilistic* note in `claude-code-evals` and `pincenez lint --help`). Re-run and judge a surprise flag on its merits before acting on it.
@@ -127,10 +127,10 @@ If lint flags `tautological` or `always_passes` on a deliberate presence anchor 
 **GATE — Lint validates form; run validates substance. Do NOT report completion or present a final summary until a full-reps run has completed and results are reviewed.**
 
 ```bash
-craboodle run <skill-dir>/evals
+craboodle run <skill-dir>
 ```
 
-This uses default repetitions (3). A `craboodle run --repeats 1 <skill-dir>/evals` smoke is allowed during authoring as a fast pre-check, but **does not satisfy this gate** — the Final Report is filed against the full-reps run.
+This uses default repetitions (3). A `craboodle run --repeats 1 <skill-dir>` smoke is allowed during authoring as a fast pre-check, but **does not satisfy this gate** — the Final Report is filed against the full-reps run.
 
 Review the output. If all scenarios pass at default reps, proceed to Final Report. If failures occur, continue to Step 9.
 
