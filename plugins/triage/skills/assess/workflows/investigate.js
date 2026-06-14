@@ -391,6 +391,19 @@ const OBS_SCHEMA = {
     },
   },
 }
+// ---- model-tier strategy ----------------------------------------------------
+// Two tiers. The mechanical / IO-bound roles pin `model: 'sonnet'` (the cheap tier):
+// the area & gap investigators (here), the per-lens verifiers ('verify:<lens>#i'), the
+// grounding agents ('ground#n'), and the verbatim write-agent ('write-assessment') — they
+// read, cross-check, or transcribe; none reason about the assessment as a whole. The
+// judgment roles omit `model` and inherit the caller's top tier (Opus in production):
+// the planner, plan-critic/revise, completeness-critic, consolidation verifier ('verify'),
+// and synthesizer.
+// Known limitation: under evals the harness pins ONE base model (evals.yaml:
+// `model: claude-sonnet-4-5`), which overrides per-agent inheritance — so the judgment
+// roles also run on the base and the two-tier split is never exercised by evals. It is a
+// production cost optimization; its structure is locked instead by the deterministic
+// harness (workflows/test/orchestration.test.mjs, "model tiers" test).
 // Investigate one area, observation-only. Shared by the initial fan-out and the
 // completeness-critic gap rounds so both dispatch an identical prompt/schema/model.
 const investigateArea = (a, phaseName) =>
@@ -840,7 +853,8 @@ const wrote = synthStructured
       'Do NOT edit, reformat, summarize, re-order, or add anything — write it byte-for-byte as given. Then return ' +
       'whether the write succeeded and the path written.\n\n' +
       '----- BEGIN DOCUMENT -----\n' + markdown + '\n----- END DOCUMENT -----',
-      { label: 'write-assessment', phase: 'Synthesize', schema: WRITE_SCHEMA }
+      // Cheap tier: a verbatim Write with no reasoning (see model-tier strategy above).
+      { label: 'write-assessment', phase: 'Synthesize', schema: WRITE_SCHEMA, model: 'sonnet' }
     ))
   : null
 const synthOk = !!(synthStructured && wrote && wrote.written)
