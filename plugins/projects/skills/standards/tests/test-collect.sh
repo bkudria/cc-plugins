@@ -493,4 +493,46 @@ prompt_path_count=$(grep -c "prompt_path" "$WORKFLOW" || true)
 [[ $prompt_path_count -ge 2 ]] && enough_prompt_path=true || enough_prompt_path=false
 assert_eq "workflows/audit.md still references the per-entry prompt_path file handshake" "true" "$enough_prompt_path"
 
+# --- Test 8: linter runs even when its execute bit is cleared (validation not silently skipped) ---
+# run-audit.sh derives the linter path from its own location, so stage copies of both scripts in a
+# temp dir and strip ONLY the linter copy's execute bit (the shipped scripts are untouched).
+stage=$(mktemp -d)
+cp "$REAL_SKILL_DIR/scripts/run-audit.sh"          "$stage/run-audit.sh"
+cp "$REAL_SKILL_DIR/scripts/lint-project-yaml.sh"  "$stage/lint-project-yaml.sh"
+chmod +x "$stage/run-audit.sh"
+chmod -x "$stage/lint-project-yaml.sh"
+proj=$(mktemp -d)
+cat > "$proj/project.yaml" <<'EOF'
+profiles: [testfx]
+name: example
+EOF
+touch "$proj/.marker" "$proj/.opt"
+state=$(mktemp -d)
+set +e
+err=$(CLAUDE_SKILL_DIR="$SKILL_TMP" "$stage/run-audit.sh" --collect "$proj" "$state" --scope required 2>&1 >/dev/null)
+rc=$?
+set -e
+assert_eq       "non-executable linter still rejects schema-invalid project.yaml" "1"          "$rc"
+assert_contains "validation ran despite the missing execute bit"                  "unexpected" "$err"
+rm -rf "$proj" "$state" "$stage"
+
+# --- Test 9: a genuinely missing linter is a hard error, not a silent skip ---
+stage=$(mktemp -d)
+cp "$REAL_SKILL_DIR/scripts/run-audit.sh" "$stage/run-audit.sh"
+chmod +x "$stage/run-audit.sh"
+# deliberately do NOT stage lint-project-yaml.sh alongside it
+proj=$(mktemp -d)
+cat > "$proj/project.yaml" <<'EOF'
+profiles: [testfx]
+EOF
+touch "$proj/.marker"
+state=$(mktemp -d)
+set +e
+err=$(CLAUDE_SKILL_DIR="$SKILL_TMP" "$stage/run-audit.sh" --collect "$proj" "$state" --scope required 2>&1 >/dev/null)
+rc=$?
+set -e
+assert_eq       "missing linter exits non-zero"        "1"                     "$rc"
+assert_contains "missing-linter error names the linter" "lint-project-yaml.sh" "$err"
+rm -rf "$proj" "$state" "$stage"
+
 summary
