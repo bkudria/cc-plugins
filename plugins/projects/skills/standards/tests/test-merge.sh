@@ -584,4 +584,36 @@ status_sugg=$(jq -r '.resolved[] | select(.id=="base/p-sugg") | .status' "$dir/m
 assert_eq "merge resolves required pending across both collect files" "PASS" "$status_req"
 assert_eq "merge resolves suggested pending across both collect files" "SUGG" "$status_sugg"
 
+# --- Test M6: disabled_count comes from the first source (collect-required.json) ---
+# --merge reads disabled_count from sources[0], and the sources array is built
+# with collect-required.json first. Both collects carry the full count by design,
+# but feeding DIFFERING counts pins the contract: a regression that summed the
+# sources or read the last one would be caught here.
+collect_req=$(cat <<'EOF'
+{
+  "resolved": [],
+  "pending": [],
+  "required_overrides": [],
+  "disabled_count": 3,
+  "suggested_total": 0
+}
+EOF
+)
+collect_sugg=$(cat <<'EOF'
+{
+  "resolved": [],
+  "pending": [],
+  "required_overrides": [],
+  "disabled_count": 99
+}
+EOF
+)
+dir=$(mktemp -d); TMPDIRS+=("$dir")
+echo "$collect_req"  > "$dir/collect-required.json"
+echo "$collect_sugg" > "$dir/collect-suggested.json"
+mkdir -p "$dir/responses"
+"$RUNNER" --merge "$dir" >/dev/null
+dc=$(jq -r '.disabled_count' "$dir/merged.json")
+assert_eq "merge takes disabled_count from collect-required.json (first source)" "3" "$dc"
+
 summary

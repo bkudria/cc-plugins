@@ -194,7 +194,7 @@ checks:
 
 **What to test**: The agent delegates work to sub-agents and coordinates results correctly.
 
-**Inject via**: Add `Agent` via `additional_tools` in scenario.yaml (or under `scenarios.base.additional_tools` in evals.yaml to enable it across every scenario). Optionally configure sub-agent definitions via `sdk.agents`.
+**Inject via**: `Agent` is already one of scuttlerun's defaults, so no tool grant is needed — sub-agent delegation works out of the box. Optionally configure sub-agent definitions via `sdk.agents`.
 
 **Key challenge**: Sub-agent behavior is only visible through the transcript. Assert on observable delegation patterns (Agent tool calls) and coordination outcomes (final result incorporates sub-agent work).
 

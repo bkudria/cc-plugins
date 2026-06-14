@@ -25,6 +25,7 @@ required: true
 description: "Probe standard used to verify CLAUDE_PLUGIN_ROOT path resolution."
 check:
   script: |
+    cd "$PROJECT_ROOT"
     exit 0
 EOF
 
@@ -49,5 +50,19 @@ if [[ -f "$state/collect-required.json" ]]; then
 else
   assert_contains "collect-required.json written via fallback path" "collect-required.json" "missing"
 fi
+
+# --- Both CLAUDE_SKILL_DIR and CLAUDE_PLUGIN_ROOT unset → actionable error ----
+# With both vars unset, SKILL_DIR collapses to the bare /skills/standards (which
+# does not exist), so collect cannot find the profile. It must fail AND name the
+# unset env var + the resolved looked-in path — not a cryptic "profile not found:
+# probe" that reads like a path bug.
+state2=$(mktemp -d)
+trap 'rm -rf "$PLUGIN_ROOT" "$proj" "$state" "$state2"' EXIT
+rc=0
+err=$(env -u CLAUDE_SKILL_DIR -u CLAUDE_PLUGIN_ROOT \
+  "$RUNNER" --collect "$proj" "$state2" --scope required 2>&1 >/dev/null) || rc=$?
+assert_exit_code "collect fails when both skill-dir vars are unset" 1 "$rc"
+assert_contains  "error names CLAUDE_PLUGIN_ROOT when both vars unset" "CLAUDE_PLUGIN_ROOT" "$err"
+assert_contains  "error shows the resolved looked-in path" "skills/standards/profiles/probe" "$err"
 
 summary

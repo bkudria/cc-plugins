@@ -6,12 +6,13 @@ notes: |
   When a CLI accepts the same setting from multiple layers, users
   need to know which layer wins.
 
-  Trivially met for CLIs with only one config layer (just flags,
-  or just a single config file). For CLIs with multiple layers,
-  the precedence must be documented (in `--help`, the README, or
-  a docs page) AND match the implementation. A documented
-  deviation from the canonical order is acceptable as long as it
-  is intentional and explained.
+  Trivially met when no single setting is accepted from more than
+  one layer (e.g. the CLI has only flags, or each setting lives in
+  exactly one place). When settings do overlap across layers, the
+  precedence must be documented (in `--help`, the README, or a
+  docs page) AND match the implementation. A documented deviation
+  from the canonical order is acceptable as long as it is
+  intentional and explained.
 
   Default severity is SUGG. CLIs with rich config schemes (deploy
   tools, build systems, package managers) should pin to FAIL —
@@ -20,14 +21,20 @@ notes: |
 check:
   prompt: |
     Verify that the CLI at $PROJECT_ROOT documents its configuration
-    precedence. First detect how many config layers the CLI has —
-    flags, env vars, project-level config files, user-level config
-    files, system-wide config. If only one layer exists (e.g., just
-    flags), report met with that fact. Otherwise, search the
-    README, `--help` output, and `docs/` for an explicit ordering
-    statement (table, ordered list, or prose). The standard meets
-    if precedence is documented AND the documented ordering matches
-    the implementation OR a deliberate deviation from the canonical
-    order (flags > env > project > user > system) is explained. Report met (with the documentation location and
-    the ordering observed) or unmet (with the layers detected and
-    the absence of any precedence documentation).
+    precedence. Precedence only matters when the same setting can be
+    supplied from more than one layer — for example a flag and an env
+    var, or an env var and a config file — and those layers can
+    disagree, so users need to know which layer wins. First determine
+    whether any single setting is accepted from more than one layer
+    (flags, env vars, project-level config, user-level config,
+    system-wide config). If no setting overlaps across layers — the
+    CLI has only one layer, or each setting lives in exactly one place
+    — report met with that fact. Otherwise, search the README,
+    `--help` output, and `docs/` for an explicit ordering statement
+    (table, ordered list, or prose) covering the overlapping settings.
+    The standard meets if precedence is documented AND the documented
+    ordering matches the implementation OR a deliberate deviation from
+    the canonical order (flags > env > project > user > system) is
+    explained. Report met (with the documentation location and the
+    ordering observed) or unmet (with the overlapping settings
+    detected and the absence of any precedence documentation).

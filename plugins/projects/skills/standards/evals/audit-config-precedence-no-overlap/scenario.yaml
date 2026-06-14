@@ -1,0 +1,98 @@
+prompt: |
+  Audit this project against its standards. The project is the current working
+  directory; its project.yaml declares `profiles: [cli]`. Run the audit and
+  show the results.
+
+project:
+  git_init: true
+  files:
+    project.yaml: |
+      profiles:
+        - cli
+      disabled:
+        cli/argument-passthrough: "Out of scope: this scenario isolates cli/config-precedence verdict quality."
+        cli/binary-name: "Out of scope: this scenario isolates cli/config-precedence verdict quality."
+        cli/color-control: "Out of scope: this scenario isolates cli/config-precedence verdict quality."
+        cli/command-naming: "Out of scope: this scenario isolates cli/config-precedence verdict quality."
+        cli/deprecation-warnings: "Out of scope: this scenario isolates cli/config-precedence verdict quality."
+        cli/error-suggestions: "Out of scope: this scenario isolates cli/config-precedence verdict quality."
+        cli/exit-codes: "Out of scope: this scenario isolates cli/config-precedence verdict quality."
+        cli/flag-over-argument: "Out of scope: this scenario isolates cli/config-precedence verdict quality."
+        cli/general-env-vars: "Out of scope: this scenario isolates cli/config-precedence verdict quality."
+        cli/help-flag: "Out of scope: this scenario isolates cli/config-precedence verdict quality."
+        cli/interactive-tty-gating: "Out of scope: this scenario isolates cli/config-precedence verdict quality."
+        cli/network-timeouts: "Out of scope: this scenario isolates cli/config-precedence verdict quality."
+        cli/no-secret-flags: "Out of scope: this scenario isolates cli/config-precedence verdict quality."
+        cli/non-interactive-mode: "Out of scope: this scenario isolates cli/config-precedence verdict quality."
+        cli/pager-tty-gating: "Out of scope: this scenario isolates cli/config-precedence verdict quality."
+        cli/progress-feedback: "Out of scope: this scenario isolates cli/config-precedence verdict quality."
+        cli/scrut-tests: "Out of scope: this scenario isolates cli/config-precedence verdict quality."
+        cli/shell-completion: "Out of scope: this scenario isolates cli/config-precedence verdict quality."
+        cli/signal-handling: "Out of scope: this scenario isolates cli/config-precedence verdict quality."
+        cli/stdin-input-support: "Out of scope: this scenario isolates cli/config-precedence verdict quality."
+        cli/stdout-stderr-split: "Out of scope: this scenario isolates cli/config-precedence verdict quality."
+        cli/subcommand-consistency: "Out of scope: this scenario isolates cli/config-precedence verdict quality."
+        cli/telemetry-disclosure: "Out of scope: this scenario isolates cli/config-precedence verdict quality."
+        cli/version-flag: "Out of scope: this scenario isolates cli/config-precedence verdict quality."
+        cli/xdg-paths: "Out of scope: this scenario isolates cli/config-precedence verdict quality."
+    README.md: |
+      # widgetctl
+
+      A tiny CLI for managing widgets.
+
+      ## Installation
+
+      Install with `pip install widgetctl`.
+
+      ## Usage
+
+      `widgetctl --output json`
+
+      ## Configuration
+
+      widgetctl reads each setting from exactly one source. No setting is
+      accepted from more than one place, so there is no precedence to resolve
+      between sources:
+
+      | Setting         | Source                                                   |
+      |-----------------|----------------------------------------------------------|
+      | output format   | `--output` flag only                                     |
+      | log level       | `WIDGETCTL_LOG_LEVEL` environment variable only          |
+      | cache directory | `cache_dir` in `~/.config/widgetctl/config.toml` only    |
+    widgetctl/cli.py: |
+      """widgetctl — each setting comes from exactly one configuration source."""
+      import argparse
+      import os
+      import tomllib
+      from pathlib import Path
+
+
+      def load_config() -> dict:
+          path = Path.home() / ".config" / "widgetctl" / "config.toml"
+          if path.exists():
+              with path.open("rb") as f:
+                  return tomllib.load(f)
+          return {}
+
+
+      def main() -> None:
+          parser = argparse.ArgumentParser(prog="widgetctl")
+          # --output is the ONLY setting accepted as a flag.
+          parser.add_argument("--output", choices=["text", "json"], default="text")
+          args = parser.parse_args()
+
+          # WIDGETCTL_LOG_LEVEL is the ONLY setting read from the environment.
+          log_level = os.environ.get("WIDGETCTL_LOG_LEVEL", "info")
+
+          # cache_dir is the ONLY setting read from the config file.
+          cache_dir = load_config().get("cache_dir", str(Path.home() / ".cache" / "widgetctl"))
+
+          print(f"output={args.output} log_level={log_level} cache_dir={cache_dir}")
+
+
+      if __name__ == "__main__":
+          main()
+    config.sample.toml: |
+      # Example ~/.config/widgetctl/config.toml
+      # The config file supplies exactly one setting: the cache directory.
+      cache_dir = "/var/cache/widgetctl"

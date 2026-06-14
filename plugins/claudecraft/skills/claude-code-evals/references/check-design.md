@@ -129,7 +129,7 @@ Different configuration types add value in different ways. Target checks accordi
 
 ## Pre-Write Checklist
 
-Apply these tests to each check **before writing it to a file**, and again to any rewrite you produce in response to a lint flag — don't narrow focus to the flagged row; re-run every self-test, because rewrites frequently reintroduce a different anti-pattern (see Common Slips below). Catching anti-patterns here is free; catching them via `craboodle lint` costs a lint cycle per fix.
+Apply these tests to each check **before writing it to a file**, and again to any rewrite you produce in response to a lint flag — don't narrow focus to the flagged row; re-run every self-test, because rewrites frequently reintroduce a different anti-pattern (run `pincenez lint --help` for worked examples of these slips). Catching anti-patterns here is free; catching them via `craboodle lint` costs a lint cycle per fix.
 
 | Anti-Pattern | Self-Test | If Yes |
 |---|---|---|
@@ -140,19 +140,6 @@ Apply these tests to each check **before writing it to a file**, and again to an
 | **Unverifiable** | Can the grader observe this in the output? Signals: "understood", "considered", "thought about". | Rewrite as observable behavior: what the agent produced, not what it reasoned. |
 | **Over-specific** | Does this check mandate a specific function/operator/tool when the outcome is what matters? Signals: "uses [function name]" as a requirement, "uses X rather than Y" when Y isn't actually wrong. | Rewrite to test the outcome or behavior. Optionally mention specific approaches as non-exhaustive examples: "achieves X (e.g., via ireduce or map\|add)". |
 | **Unfalsifiable** | Could any realistic transcript make this check FAIL? Signals: "no X without Y", "never X unless Y", or an ordering clause whose subject (X) the agent might simply never do. | Pair it with a Presence check asserting X occurs, so the negative/ordering claim has something to constrain — or drop it if no realistic transcript could fail it. Give the added Presence anchor a `note:` declaring the pairing, so lint reads it as deliberate. |
-
-### Common Slips
-
-Patterns that look like single checks but fail lint as compound, vague, or unfalsifiable. Recognize them on sight. The "Capitalized AND after a fix" row catalogues the rewrite failure mode specifically — re-run the full Pre-Write Checklist against every rewrite, not just the flagged row.
-
-| Pattern | Why it slips | Example | Fix |
-|---|---|---|---|
-| **Likewise-joined intervals** | "likewise"/"also" isn't in the usual "and/both" signal set, but it joins two independent claims. | "Between the edits to A and B there is an AskUserQuestion; **likewise** between B and C" | Two checks: one per interval. |
-| **Before/after-clause embedding** | A temporal clause quietly adds a second claim (the ordering). | "The agent asks about item 2 **before making any edit to** hello.py" | Split: (1) asks about item 2; (2) the ask precedes any edit to hello.py. |
-| **Abstract-noun stand-ins** | Nouns like "investigation", "presentation", "review" sound concrete but need a grader to infer what counts. | "investigation before presentation" | Replace with observable: "at least one Read/Grep/Bash call against the file before writing findings". |
-| **Capitalized "AND" after a fix** | Re-authoring a compound check often introduces a second compound in the "fix" (the agent sees the first conjunction, misses the next). | "...makes an investigative tool call **AND** asks a separate AskUserQuestion" | Apply the enumeration test to the rewrite, not just the original. |
-| **Enumerated list as requirement** | A short list of specific tools, files, or syntaxes looks concrete but disallows equivalent alternatives — lint treats "X or Y" as "only X or Y" when an outcome-equivalent Z exists. | "**Read or Grep** tool call targeting notes.md" (misses `cat`/`head`/`Bash`); "**pyproject.toml, setup.py, setup.cfg, or requirements.txt**" (misses `package.json`, `Cargo.toml`, `go.mod`); "**ATX-style headings (`#`)**" (misses setext); "'**trailing whitespace' or 'version: 1.0'**" (misses other concrete triggers) | Ask: would an equivalent alternative satisfy the intent? If yes, rewrite as the outcome ("any file-reading tool call against notes.md", "a project-manifest file") and keep the enumeration as non-exhaustive examples ("e.g., Read, Grep, or Bash cat"). |
-| **Vacuous negative-universal** | A "no X without Y" / "never X unless Y" check reads as strict but passes trivially when X never occurs — it can't fail on a bad transcript. | "**No** edit to `config.py` **without a preceding** AskUserQuestion" — passes in any run that never touches `config.py`. | Pair with a Presence check for the subject: (1) "an edit to `config.py` occurs"; (2) the no-edit-without-ask claim. |
 
 ---
 

@@ -133,6 +133,27 @@ rc=$?
 set -e
 assert_exit_code "gate ignores FAIL on intrinsic-suggested-and-not-overridden entries" "0" "$rc"
 
+# --- Test 6b: a PASS with intrinsic_required=false that IS in required_overrides → exit 0 ---
+# The override upgrades the standard to effective-required; since it PASSed, the
+# gate must still exit 0 so round 2 (suggested) proceeds. This is the override +
+# PASS path — the complement of Test 5 (override + FAIL → exit 1).
+results=$(cat <<'EOF'
+{
+  "resolved": [
+    {"id": "base/readme",   "status": "PASS", "detail": "ok", "description": ".", "intrinsic_required": true},
+    {"id": "base/lockfile", "status": "PASS", "detail": "ok", "description": ".", "intrinsic_required": false}
+  ],
+  "required_overrides": ["base/lockfile"],
+  "disabled_count": 0
+}
+EOF
+)
+set +e
+gate_state "$results" >/dev/null 2>&1
+rc=$?
+set -e
+assert_exit_code "gate exits 0 when an overridden-to-required standard PASSes" "0" "$rc"
+
 # --- Test 7: malformed JSON → exit 2 (operational error) ---
 state=$(mktemp -d)
 printf '%s' '{not valid json' > "$state/merged.json"

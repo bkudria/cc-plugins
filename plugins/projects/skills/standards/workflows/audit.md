@@ -64,7 +64,11 @@ Workflow({
 })
 ```
 
-**The `Workflow` call is non-blocking.** It returns a task id immediately; the fan-out then runs in the background. After invoking it, stop and wait — do not verify any standard yourself, and do not read the prompt or response files. You are re-prompted when the genuine `<task-notification>` arrives with `status: completed`; by then every verifier has written its `response_path`. Only then run merge:
+**The `Workflow` call is non-blocking.** It returns a task id immediately; the fan-out then runs in the background. After invoking it, stop and wait — do not verify any standard yourself, and do not read the prompt or response files. You are re-prompted when the genuine `<task-notification>` arrives with `status: completed`.
+
+**Reconcile the fan-out before merging.** The workflow result carries `requested` and `dispatched` counts (both scalar, so they survive notification truncation). If `dispatched == requested`, every verifier ran — proceed to merge. If `dispatched < requested`, at least `requested − dispatched` verifiers never ran: their `response_path` files are absent, and `--merge` records any missing response as FAIL — so an *undispatched* standard would surface as a false FAIL rather than a real verdict. Before merging, re-dispatch `verify.js` (same `scope`) for just the pending entries whose `response_path` file does not yet exist — test for the file's existence only; do not read its contents (the no-prompt-extraction GATE still holds). Merge once every pending standard has a response. If a standard is still unwritten after a re-dispatch (`dispatched == requested`, yet its response is missing), a verifier genuinely failed to write it — let it merge as a real FAIL per the rule below rather than retrying forever, and say which standard could not be verified.
+
+Then run merge:
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/skills/standards/scripts/run-audit.sh --merge "$STATE_DIR"
@@ -118,7 +122,7 @@ Workflow({
 })
 ```
 
-As in round 1 the call is non-blocking: dispatch, then stop and wait for the `<task-notification>`. When it completes, every verifier has written its `response_path`; run merge again:
+As in round 1 the call is non-blocking: dispatch, then stop and wait for the `<task-notification>`. When it completes, reconcile `dispatched` against `requested` exactly as in round 1 — re-dispatch any pending standard whose `response_path` is still absent before merging. Then run merge again:
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/skills/standards/scripts/run-audit.sh --merge "$STATE_DIR"
@@ -163,6 +167,14 @@ ${CLAUDE_PLUGIN_ROOT}/skills/standards/scripts/run-audit.sh --check "$STATE_DIR"
 `--check` exits **0** when the audit passes (no `FAIL` rows), **1** when ≥1 `FAIL` row is present, and **≥2** for operational errors (missing `merged.json`, malformed JSON, unresolved pending entries). CI pipelines use `--check`'s exit code directly without grepping stdout.
 
 `--gate` (used between rounds) and `--check` (used at the end) have the same exit-code shape but answer different questions: `--gate` filters to effective-required entries only; `--check` looks at every entry in merged.json. Don't conflate them.
+
+## After the audit
+
+The audit ends at the render and pass/fail signal above. The read-only **GATE** at the top of this mode governs the audit itself and applies only through render — nothing in this mode edits the project under audit.
+
+Implementing the prioritized fix plan is a **separate activity, outside audit mode**. Switching from auditing to implementing is a deliberate mode change, not a continuation of the audit: the read-only constraint lifts (project files may now be edited), and the fixes follow the project's own testing and commit discipline — this skill does not prescribe which. Do not begin editing under the audit's read-only contract.
+
+Re-auditing after fixes is a **fresh audit run**, not a resume of this one. Start again at step 1a with a new `--init` state directory; the two-round flow (required → gate → suggested) is a single run that is never re-collected in place, and a prior run's state directory is never reused for a post-fix re-audit.
 
 ## Notes
 

@@ -6,14 +6,17 @@ context: |
   and base/code-quality), so there are zero FAIL and zero SUGG rows. base/lockfile
   is a SUGG-style standard (required: false) whose check passes and is not in the
   project's required list, so the audit emits a lock-in suggestion. The render
-  shows an empty FAIL/SUGG table, a count line ending `0 FAIL, 0 SUGG`, and the
-  lock-in block.
+  shows an empty FAIL/SUGG table, a count line ending `0 FAIL, 0 SUGG`, a line
+  reporting that 5 standards are disabled in project.yaml, and the lock-in block.
 checks:
   - table-header-three-columns:
       check: "Output contains a compliance table header row with the columns Standard, Status, and Detail"
       note: "Render is verbatim even when all-pass; the table has no data rows but the header still appears"
   - count-line-zero-fail-zero-sugg:
       check: "Output contains a count line ending in `0 FAIL, 0 SUGG`"
+  - disabled-count-line:
+      check: "Output contains a line reporting that 5 standards are disabled in project.yaml"
+      note: "project.yaml disables 5 standards; render emits a disabled-count line whenever the count is greater than zero"
   - lock-in-line:
       check: "Output contains a lock-in suggestion line — a sentence about enforcing the passing standards going forward by adding to project.yaml"
       note: "Triggered by zero-FAIL, zero-SUGG with at least one PASSing SUGG-style standard not yet in required"

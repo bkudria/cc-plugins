@@ -112,16 +112,38 @@ const withRetry = async (label, fn) => {
 // Derive the run's status + normalized coverage from the raw degradation signals.
 // Pure (signals in, plain object out — no injected globals), so it is the first
 // unit to cover when a JS test harness lands.
-//   'failed'   — no usable synthesis (planner died, or synth failed after retry).
-//   'degraded' — produced output but lost coverage (areas dropped) or skipped/lost verify.
+//   'failed'   — no usable synthesis (planner died, or synth failed after retry), or an
+//                empty-observation run that ALSO lost coverage (a broken run, not a
+//                legitimately empty one).
+//   'degraded' — produced output but lost coverage (areas dropped), skipped/lost verify,
+//                or shipped findings whose citations did not ground.
 //   'ok'       — no losses (a legitimately empty result is still 'ok'; its document
 //                shape is owned elsewhere).
 /* test-seam:pure-fn:start */
-const degradationSummary = ({ plannedAreas, droppedAreas, synthOk, verifyFailed, verifyLost }) => {
+const degradationSummary = ({ plannedAreas, droppedAreas, synthOk, verifyFailed, verifyLost, ungrounded, noObservations }) => {
+  const lostCoverage = droppedAreas.length > 0 || verifyFailed || verifyLost || ungrounded > 0
   const status = !synthOk ? 'failed'
-    : (droppedAreas.length > 0 || verifyFailed || verifyLost) ? 'degraded'
+    : (noObservations && lostCoverage) ? 'failed'
+    : lostCoverage ? 'degraded'
     : 'ok'
   return { status, coverage: { planned: plannedAreas, completed: plannedAreas - droppedAreas.length, dropped: droppedAreas } }
+}
+/* test-seam:pure-fn:end */
+
+// Disclose run-level reliability shortfalls in the audit trail: advisory critics (plan,
+// completeness) that crashed on both attempts and so silently no-op'd, and adversarial
+// verification that came back PARTIAL (some lens verdicts lost but not all — total loss is
+// handled separately by verifyLost). Pure (signals in, flag strings out); these flags surface
+// in the result but do not, by themselves, change the run status.
+/* test-seam:pure-fn:start */
+const runReliabilityFlags = ({ planCriticFailed, completenessCriticFailed, verdictsReceived, verdictsExpected }) => {
+  const flags = []
+  if (planCriticFailed) flags.push('plan critic failed after retry; the decomposition was not validated')
+  if (completenessCriticFailed) flags.push('completeness critic failed after retry; coverage sufficiency was not validated')
+  if (verdictsExpected > 0 && verdictsReceived > 0 && verdictsReceived < verdictsExpected) {
+    flags.push('adversarial verification was partial: ' + verdictsReceived + ' of ' + verdictsExpected + ' lens verdict(s) returned')
+  }
+  return flags
 }
 /* test-seam:pure-fn:end */
 
@@ -153,6 +175,10 @@ const renderAssessment = ({ assessmentTitle, scopeSummary, areasCovered, finding
 
 // ---- Plan -------------------------------------------------------------------
 phase('Plan')
+// Run-level reliability tracking: advisory critics that crashed on both attempts (and so
+// silently no-op'd) are recorded here and surfaced as flags near the return.
+let planCriticFailed = false
+let completenessCriticFailed = false
 const PLAN_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -284,7 +310,10 @@ if (overallEffort !== 'low' && areas.length >= PLAN_CRITIC_MIN_AREAS) {
     { label: 'plan-critic', phase: 'Plan', schema: PLAN_REVIEW_SCHEMA }
   ))
   const issues = (review && review.issues) || []
-  if (review && review.sound === false && issues.length) {
+  if (!review) {
+    planCriticFailed = true
+    log('Plan critic unavailable (failed after retry); proceeding with the original decomposition.')
+  } else if (review.sound === false && issues.length) {
     log('Plan critic flagged ' + issues.length + ' issue(s) (' + issues.map((i) => i.kind).join(', ') +
       '); revising once.')
     const revisionNote =
@@ -427,6 +456,11 @@ if (criticRounds > 0 && allObs.length) {
       'sufficient, set complete=true and return an empty gaps list. At most ' + MAX_GAPS_PER_ROUND + ' gaps.',
       { label: 'completeness-critic', phase: 'Completeness', schema: GAP_SCHEMA }
     ))
+    if (!critique) {
+      completenessCriticFailed = true
+      log('Completeness critic unavailable (failed after retry); stopping gap rounds.')
+      break
+    }
     const fresh = ((critique && critique.gaps) || [])
       .filter((g) => g && g.name && !areaNames.includes(g.name))
       .slice(0, headroom)
@@ -588,6 +622,7 @@ const selectVerifyTargets = (obs, maxK) => {
 const lenses = EFFORT_LENSES[overallEffort] || []
 let verification
 let verdicts = []
+let verdictsExpected = 0
 let auditActions = []
 let verifiedObs = allObs
 let verifyFailed = false
@@ -626,6 +661,7 @@ if (!lenses.length || !allObs.length) {
       { label: 'verify:' + lens + '#' + i, phase: 'Verify', schema: VERDICT_SCHEMA, model: 'sonnet' }
     ).then((v) => v && Object.assign({ area: o.area, title: o.title, lens: lens }, v))
   )))
+  verdictsExpected = verdictJobs.length
   verdicts = (await parallel(verdictJobs)).filter(Boolean)
   // Enforce the keyed verdicts in code, then verify the reconciled set.
   const reconciled = applyVerdicts(allObs, verdicts)
@@ -701,7 +737,10 @@ const coverageNote = droppedAreaNames.length
     'from these observations: ' + droppedAreaNames.join(', ') + '. Note this incompleteness briefly in the Summary; ' +
     'do not imply the assessment is exhaustive.\n\n'
   : ''
-const synth = await withRetry('synthesize', () => agent(
+// Empty-observation runs skip the (expensive) synthesizer entirely — there is nothing to
+// synthesize — and render a deterministic empty assessment below; the cheap write-agent still
+// persists it so Phase 3 has a file to read.
+const synth = allObs.length ? await withRetry('synthesize', () => agent(
   'You are synthesizing investigation observations into a final numbered assessment, returned as STRUCTURED DATA.\n\n' +
   'Scope: ' + scope + '\n' +
   'Areas covered: ' + completedAreaNames.join(', ') + '\n\n' +
@@ -740,10 +779,14 @@ const synth = await withRetry('synthesize', () => agent(
   'INTERNAL — used to ground the finding against source; they are never shown to the reader.\n' +
   '- summary: a brief overall assessment paragraph.',
   { label: 'synthesize', phase: 'Synthesize', schema: SYNTH_SCHEMA }
-))
+)) : null
 
-const synthStructured = !!(synth && Array.isArray(synth.findings))
-const markdown = synthStructured ? renderAssessment(synth) : ''
+// On the empty-observation path synth is null and the document is rendered deterministically;
+// otherwise it is rendered from the synthesizer's structured output.
+const synthStructured = allObs.length === 0 || !!(synth && Array.isArray(synth.findings))
+const markdown = allObs.length === 0
+  ? renderAssessment({ assessmentTitle: scope, scopeSummary: scope, areasCovered: completedAreaNames.join(', ') || 'none', findings: [], summary: 'The investigation completed but produced no observations.' })
+  : (synthStructured ? renderAssessment(synth) : '')
 // The workflow script has no filesystem access, so persisting the rendered document goes
 // through a minimal write-agent: one verbatim Write, no reasoning. The file is trustworthy
 // only if BOTH the structured synthesis AND this write succeeded.
@@ -757,12 +800,11 @@ const wrote = synthStructured
     ))
   : null
 const synthOk = !!(synthStructured && wrote && wrote.written)
-const { status, coverage } = degradationSummary({ plannedAreas: dispatchedAreas, droppedAreas: droppedAreaNames, synthOk, verifyFailed, verifyLost })
 const finalPath = (wrote && wrote.path) || outPath
-const findingsCount = synthStructured ? synth.findings.length : 0
+const findingsCount = synth && Array.isArray(synth.findings) ? synth.findings.length : 0
 log('Synthesis ' + (synthOk
   ? 'written to ' + finalPath + ' (' + findingsCount + ' findings)'
-  : 'FAILED — no trustworthy file') + '; status=' + status + '.')
+  : 'FAILED — no trustworthy file') + '.')
 
 // ---- Ground (post-synthesis citation grounding; gated; flag-only) -----------
 // The synthesizer reshapes observations into findings (merge / split / renumber) with no
@@ -825,6 +867,26 @@ if (overallEffort !== 'low' && synthFindings.length) {
     groundTargets.length + '), ' + ungrounded.length + ' citation(s) unresolved.')
 }
 
+// Status is derived only now — after grounding — so ungrounded citations can degrade the run
+// (grounding runs post-synthesis). An empty-observation run that also lost coverage escalates to
+// 'failed'; a legitimately empty one stays 'ok'. Reliability flags merge the run-level signals
+// (critic nulls, partial verification) with the verify-stage flags into one surfaced list; they
+// disclose shortfalls in the audit trail but do not, by themselves, set the status.
+const { status, coverage } = degradationSummary({
+  plannedAreas: dispatchedAreas,
+  droppedAreas: droppedAreaNames,
+  synthOk,
+  verifyFailed,
+  verifyLost,
+  ungrounded: grounding.ungrounded.length,
+  noObservations: allObs.length === 0,
+})
+const reliabilityFlags = [
+  ...runReliabilityFlags({ planCriticFailed, completenessCriticFailed, verdictsReceived: verdicts.length, verdictsExpected }),
+  ...((verification && verification.reliabilityFlags) || []),
+]
+log('Run status=' + status + (reliabilityFlags.length ? '; ' + reliabilityFlags.length + ' reliability flag(s).' : '.'))
+
 return {
   scope,
   focus,
@@ -832,6 +894,7 @@ return {
   areas: areaNames,
   status,
   coverage,
+  reliabilityFlags,
   observationCount: allObs.length,
   findingsCount,
   outPath: finalPath,
