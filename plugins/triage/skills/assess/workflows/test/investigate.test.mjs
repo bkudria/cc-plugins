@@ -10,7 +10,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { helpers } from './_load.mjs'
 
-const { degradationSummary, renderAssessment, applyVerdicts, pickOverallQuestion, selectVerifyTargets, selectProbedKeys, summarizeAudit, runReliabilityFlags } = helpers
+const { degradationSummary, renderAssessment, applyVerdicts, pickOverallQuestion, selectVerifyTargets, selectProbedKeys, summarizeAudit, runReliabilityFlags, clampEffort, collectObs } = helpers
 
 test('renderAssessment emits the deterministic assess<->iterate format contract', () => {
   const md = renderAssessment({
@@ -122,7 +122,7 @@ test('degradationSummary: a clean zero-observation run is still ok', () => {
   )
 })
 
-const obs = (over = {}) => ({ area: 'A', title: 't1', body: 'b1', evidence: 'e1', significance: 'high', ...over })
+const obs = (over = {}) => ({ area: 'A', title: 't1', body: 'b1', evidence: ['e1'], significance: 'high', ...over })
 
 test('applyVerdicts: a high/medium-confidence drop removes the observation', () => {
   const { kept, actions } = applyVerdicts(
@@ -207,7 +207,7 @@ test('applyVerdicts: correctedSignificance is downgrade-only — an equal or hig
 })
 
 // area-aware verify-target selection
-const vobs = (area, significance, title) => ({ area, title, body: 'b', evidence: 'e', significance })
+const vobs = (area, significance, title) => ({ area, title, body: 'b', evidence: ['e'], significance })
 const countByArea = (targets) => targets.reduce((m, t) => ((m[t.o.area] = (m[t.o.area] || 0) + 1), m), {})
 
 test('selectVerifyTargets: per-area floor quota spreads slots, including a lone medium area', () => {
@@ -390,4 +390,59 @@ test('runReliabilityFlags: no partial flag on total loss or on complete verifica
 
 test('runReliabilityFlags: a clean run yields no flags', () => {
   assert.deepEqual(runReliabilityFlags({}), [])
+})
+
+// clampEffort: cap a planner-proposed effort at the optional user ceiling
+// (low < medium < high). EFFORT_LEVELS = ['low', 'medium', 'high'].
+test('clampEffort: with no ceiling the proposed level passes through', () => {
+  assert.equal(clampEffort('high', null), 'high')
+  assert.equal(clampEffort('low', null), 'low')
+})
+
+test('clampEffort: a ceiling clamps a higher proposed level down to it', () => {
+  assert.equal(clampEffort('high', 'medium'), 'medium')
+})
+
+test('clampEffort: a proposed level at or below the ceiling is left alone', () => {
+  assert.equal(clampEffort('low', 'high'), 'low')
+  assert.equal(clampEffort('medium', 'medium'), 'medium')
+})
+
+test('clampEffort: an unrecognized proposed level defaults to medium', () => {
+  assert.equal(clampEffort('bogus', null), 'medium')
+})
+
+test('clampEffort: an unrecognized proposed level is still clamped by the ceiling', () => {
+  assert.equal(clampEffort('bogus', 'low'), 'low') // medium default, then clamped down to low
+})
+
+// collectObs: flatten investigator results into one observation list, stamping
+// each observation with its area.
+test('collectObs: flattens areas and stamps each observation with its area', () => {
+  const out = collectObs([
+    { area: 'alpha', observations: [
+      { title: 't1', body: 'b1', evidence: ['x.js:1'], significance: 'high' },
+      { title: 't2', body: 'b2', evidence: ['x.js:2'], significance: 'low' },
+    ] },
+    { area: 'beta', observations: [
+      { title: 't3', body: 'b3', evidence: ['y.js:1'], significance: 'medium' },
+    ] },
+  ])
+  assert.equal(out.length, 3)
+  assert.deepEqual(out[0], { area: 'alpha', title: 't1', body: 'b1', evidence: ['x.js:1'], significance: 'high' })
+  assert.deepEqual(out[2], { area: 'beta', title: 't3', body: 'b3', evidence: ['y.js:1'], significance: 'medium' })
+})
+
+test('collectObs: an investigation missing its observations contributes nothing', () => {
+  const out = collectObs([
+    { area: 'alpha' }, // no observations key — the `|| []` guard
+    { area: 'beta', observations: [] },
+    { area: 'gamma', observations: [{ title: 't', body: 'b', evidence: ['z.js:1'], significance: 'high' }] },
+  ])
+  assert.equal(out.length, 1)
+  assert.equal(out[0].area, 'gamma')
+})
+
+test('collectObs: empty input yields an empty list', () => {
+  assert.deepEqual(collectObs([]), [])
 })
