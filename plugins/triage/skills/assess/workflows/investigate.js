@@ -80,11 +80,42 @@ const EFFORT_LENSES = {
 }
 // Shared read-only framing for the tool-using sub-agents (investigator + the two
 // verifiers): one identical statement of the toolset and the primary-source
-// discipline, so these roles cannot drift on how they phrase it. Each role keeps its
-// own output discipline (observation-only / no fixes / no new findings) inline.
+// discipline, so these roles cannot drift on how they phrase it. The observation-only
+// output discipline is shared the same way, just below (observationOnlyRule).
 const READ_ONLY_TOOLS =
   'You have read-only tools (Read, Grep, Glob, Bash). Use them to consult primary sources directly: ' +
   'read the actual files and run the actual searches rather than relying on memory or inference.'
+/* test-seam:pure-fn:start */
+// Shared observation-only discipline: describe what IS, never prescribe a fix. One base shared by
+// every role, composed with per-role clauses, with the consequence-description vs. prescription
+// distinction defined once — so the wording cannot drift the way it did when each role restated it
+// inline and only the synthesizer carried the modal ban.
+const OBS_ONLY_BASE =
+  'Record only what IS and why it is noteworthy — never a fix, solution, or what should be done. ' +
+  'Strip any prescription; keep only the description.'
+// A modal is forbidden only when it directs the reader toward a change; a modal describing a
+// consequence is allowed. This is the distinction the synthesizer's flat word-ban could not make.
+const OBS_ONLY_MODALS =
+  ' Forbidden: language that directs future action — "consider", "recommend", "fix by", "migrate to", ' +
+  '"replace with", "switch to", or a modal that prescribes a change ("should be lowered", "could ' +
+  'switch to"). Descriptive modals about how the code or system behaves are allowed: "the ' +
+  'unparameterized query could expose the database" is a consequence and is fine; "could switch to ' +
+  'parameterized queries" is a prescription and is forbidden. Mid-sentence modals count: "endpoints ' +
+  'that should not be accessible" becomes "endpoints are exposed in config.py".'
+const observationOnlyRule = (role) => {
+  switch (role) {
+    case 'investigator':
+    case 'synthesizer':
+      return OBS_ONLY_BASE + OBS_ONLY_MODALS
+    case 'verifier':
+      return OBS_ONLY_BASE + ' Do NOT add new findings; report only verification results and corrections.'
+    case 'grounding':
+      return OBS_ONLY_BASE + ' This is a FLAG-ONLY pass: do NOT rewrite the finding or invent new findings.'
+    default:
+      return OBS_ONLY_BASE
+  }
+}
+/* test-seam:pure-fn:end */
 // Cap a planner-proposed effort at the optional user ceiling (low < medium < high).
 const clampEffort = (proposed, ceiling) => {
   const p = EFFORT_LEVELS.indexOf(proposed)
@@ -379,7 +410,7 @@ const OBS_SCHEMA = {
         required: ['title', 'body', 'evidence', 'significance'],
         properties: {
           title: { type: 'string', description: 'Short descriptive title' },
-          body: { type: 'string', description: 'Single paragraph: what IS and why noteworthy. No fixes.' },
+          body: { type: 'string', description: 'Single paragraph: what IS and why noteworthy. ' + OBS_ONLY_BASE },
           evidence: {
             type: 'array',
             items: { type: 'string' },
@@ -416,10 +447,9 @@ const investigateArea = (a, phaseName) =>
     'Look for: ' + focus + '\n' +
     'Effort for this area: ' + a.effort + ' — ' + EFFORT_GUIDANCE[a.effort] + '\n\n' +
     READ_ONLY_TOOLS + '\n\n' +
-    'OBSERVATION-ONLY. Do NOT suggest fixes, solutions, or what "should" be done. Record only what IS and why ' +
-    'it is noteworthy. Every observation MUST include concrete evidence: file paths, line numbers, configuration ' +
-    'values, or specific patterns — observations without evidence are opinions, not findings. ' +
-    'Set "area" to exactly: ' + a.name,
+    'OBSERVATION-ONLY. ' + observationOnlyRule('investigator') + ' Every observation MUST include concrete ' +
+    'evidence: file paths, line numbers, configuration values, or specific patterns — observations without ' +
+    'evidence are opinions, not findings. Set "area" to exactly: ' + a.name,
     { label: (phaseName === 'Completeness' ? 'gap:' : 'area:') + a.name, phase: phaseName, schema: OBS_SCHEMA, model: 'sonnet' }
   )
 
@@ -566,7 +596,7 @@ const verifyConsolidated = (obs, probedKeys) => agent(
       'obviously unsupported.\n'
     : '') +
   VERIFY_INTENSITY[overallEffort] + '\n' +
-  'Do NOT add new findings and do NOT suggest fixes. Report only verification results and corrections.',
+  observationOnlyRule('verifier'),
   { label: 'verify', schema: VERIFY_SCHEMA }
 )
 
@@ -714,7 +744,7 @@ if (!lenses.length || !allObs.length) {
       'Lens — ' + VERIFY_LENSES[lens] + '\n\n' +
       'Observation (JSON):\n' + JSON.stringify(o, null, 2) + '\n\n' +
       'Apply ONLY this lens. Be skeptical and check independently rather than trusting the observation. ' +
-      'You may correct an inaccurate CLAIM, but do NOT suggest code fixes and do NOT invent new findings.',
+      'You may correct an inaccurate CLAIM. ' + observationOnlyRule('verifier'),
       { label: 'verify:' + lens + '#' + i, phase: 'Verify', schema: VERDICT_SCHEMA, model: 'sonnet' }
     ).then((v) => v && Object.assign({ area: o.area, title: o.title, lens: lens }, v))
   )))
@@ -765,7 +795,7 @@ const SYNTH_SCHEMA = {
           number: { type: 'integer', description: 'Finding number from significance order (1 = most impactful); rendered as the "### N." heading' },
           title: { type: 'string', description: 'Short descriptive finding title; rendered after the number on the heading line' },
           significance: { type: 'string', enum: ['high', 'medium', 'low'], description: 'The finding\'s significance, taken from the highest significance of the observation(s) it synthesizes; rendered as the "**Significance**:" line under the heading.' },
-          body: { type: 'string', description: 'A single observation-only paragraph: what was found, where (paths/lines/values), current state, why noteworthy. No sub-bullets, no fixes.' },
+          body: { type: 'string', description: 'A single observation-only paragraph: what was found, where (paths/lines/values), current state, why noteworthy. No sub-bullets. ' + OBS_ONLY_BASE },
           citations: {
             type: 'array',
             items: { type: 'string' },
@@ -819,11 +849,7 @@ const synth = allObs.length ? await withRetry('synthesize', () => agent(
   'finding that names every affected location — not one finding per occurrence.\n' +
   '- Split compound issues into separate findings.\n\n' +
   'OBSERVATION-ONLY OUTPUT (critical):\n' +
-  '- Each finding describes WHAT was found and WHY it is noteworthy — never HOW to fix it.\n' +
-  '- Forbidden anywhere in a finding body: "consider", "should", "could", "would", "must", "ought to", ' +
-  '"recommend", "fix by", "migrate to", "replace with", "switch to", or any imperative directed at future ' +
-  'action. Mid-sentence modals count: "endpoints that should not be accessible" becomes "endpoints are exposed ' +
-  'in config.py". Strip the prescription; keep only the description.\n\n' +
+  observationOnlyRule('synthesizer') + '\n\n' +
   'OUTPUT — return STRUCTURED DATA only (the schema); do NOT produce markdown and do NOT write any file. ' +
   'The workflow renders the assessment document from your structured output. Provide:\n' +
   '- assessmentTitle, scopeSummary, areasCovered for the document header.\n' +
@@ -908,8 +934,7 @@ if (overallEffort !== 'low' && synthFindings.length) {
       'Scope: ' + scope + '\n\n' +
       'Finding (JSON, with the structured citations it rests on):\n' + JSON.stringify(fnd, null, 2) + '\n\n' +
       'Independently open each cited location and confirm it exists and says what the finding claims. ' +
-      'This is a FLAG-ONLY pass: do NOT rewrite the finding, do NOT propose fixes, and do NOT invent new ' +
-      'findings. Report ONLY citations that fail to ground:\n' +
+      observationOnlyRule('grounding') + ' Report ONLY citations that fail to ground:\n' +
       '- "missing": the cited file, or that line region, does not exist.\n' +
       '- "mismatch": the source exists but says something materially different from what the finding claims.\n' +
       '- "unverifiable": the citation is too vague to locate, or its basis could not be checked.\n' +
