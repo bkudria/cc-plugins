@@ -82,11 +82,42 @@ const EFFORT_LENSES = {
 }
 // Shared read-only framing for the tool-using sub-agents (investigator + the two
 // verifiers): one identical statement of the toolset and the primary-source
-// discipline, so these roles cannot drift on how they phrase it. Each role keeps its
-// own output discipline (observation-only / no fixes / no new findings) inline.
+// discipline, so these roles cannot drift on how they phrase it. The observation-only
+// output discipline is shared the same way, just below (observationOnlyRule).
 const READ_ONLY_TOOLS =
   'You have read-only tools (Read, Grep, Glob, Bash). Use them to consult primary sources directly: ' +
   'read the actual files and run the actual searches rather than relying on memory or inference.'
+/* test-seam:pure-fn:start */
+// Shared observation-only discipline: describe what IS, never prescribe a fix. One base shared by
+// every role, composed with per-role clauses, with the consequence-description vs. prescription
+// distinction defined once — so the wording cannot drift the way it did when each role restated it
+// inline and only the synthesizer carried the modal ban.
+const OBS_ONLY_BASE =
+  'Record only what IS and why it is noteworthy — never a fix, solution, or what should be done. ' +
+  'Strip any prescription; keep only the description.'
+// A modal is forbidden only when it directs the reader toward a change; a modal describing a
+// consequence is allowed. This is the distinction the synthesizer's flat word-ban could not make.
+const OBS_ONLY_MODALS =
+  ' Forbidden: language that directs future action — "consider", "recommend", "fix by", "migrate to", ' +
+  '"replace with", "switch to", or a modal that prescribes a change ("should be lowered", "could ' +
+  'switch to"). Descriptive modals about how the code or system behaves are allowed: "the ' +
+  'unparameterized query could expose the database" is a consequence and is fine; "could switch to ' +
+  'parameterized queries" is a prescription and is forbidden. Mid-sentence modals count: "endpoints ' +
+  'that should not be accessible" becomes "endpoints are exposed in config.py".'
+const observationOnlyRule = (role) => {
+  switch (role) {
+    case 'investigator':
+    case 'synthesizer':
+      return OBS_ONLY_BASE + OBS_ONLY_MODALS
+    case 'verifier':
+      return OBS_ONLY_BASE + ' Do NOT add new findings; report only verification results and corrections.'
+    case 'grounding':
+      return OBS_ONLY_BASE + ' This is a FLAG-ONLY pass: do NOT rewrite the finding or invent new findings.'
+    default:
+      return OBS_ONLY_BASE
+  }
+}
+/* test-seam:pure-fn:end */
 // Cap a planner-proposed effort at the optional user ceiling (low < medium < high).
 /* test-seam:pure-fn:start */
 const clampEffort = (proposed, ceiling) => {
@@ -383,7 +414,7 @@ const OBS_SCHEMA = {
         required: ['title', 'body', 'evidence', 'significance'],
         properties: {
           title: { type: 'string', description: 'Short descriptive title' },
-          body: { type: 'string', description: 'Single paragraph: what IS and why noteworthy. No fixes.' },
+          body: { type: 'string', description: 'Single paragraph: what IS and why noteworthy. ' + OBS_ONLY_BASE },
           evidence: {
             type: 'array',
             items: { type: 'string' },
@@ -395,6 +426,19 @@ const OBS_SCHEMA = {
     },
   },
 }
+// ---- model-tier strategy ----------------------------------------------------
+// Two tiers. The mechanical / IO-bound roles pin `model: 'sonnet'` (the cheap tier):
+// the area & gap investigators (here), the per-lens verifiers ('verify:<lens>#i'), the
+// grounding agents ('ground#n'), and the verbatim write-agent ('write-assessment') — they
+// read, cross-check, or transcribe; none reason about the assessment as a whole. The
+// judgment roles omit `model` and inherit the caller's top tier (Opus in production):
+// the planner, plan-critic/revise, completeness-critic, consolidation verifier ('verify'),
+// and synthesizer.
+// Known limitation: under evals the harness pins ONE base model (evals.yaml:
+// `model: claude-sonnet-4-5`), which overrides per-agent inheritance — so the judgment
+// roles also run on the base and the two-tier split is never exercised by evals. It is a
+// production cost optimization; its structure is locked instead by the deterministic
+// harness (workflows/test/orchestration.test.mjs, "model tiers" test).
 // Investigate one area, observation-only. Shared by the initial fan-out and the
 // completeness-critic gap rounds so both dispatch an identical prompt/schema/model.
 const investigateArea = (a, phaseName) =>
@@ -407,10 +451,9 @@ const investigateArea = (a, phaseName) =>
     'Look for: ' + focus + '\n' +
     'Effort for this area: ' + a.effort + ' — ' + EFFORT_GUIDANCE[a.effort] + '\n\n' +
     READ_ONLY_TOOLS + '\n\n' +
-    'OBSERVATION-ONLY. Do NOT suggest fixes, solutions, or what "should" be done. Record only what IS and why ' +
-    'it is noteworthy. Every observation MUST include concrete evidence: file paths, line numbers, configuration ' +
-    'values, or specific patterns — observations without evidence are opinions, not findings. ' +
-    'Set "area" to exactly: ' + a.name,
+    'OBSERVATION-ONLY. ' + observationOnlyRule('investigator') + ' Every observation MUST include concrete ' +
+    'evidence: file paths, line numbers, configuration values, or specific patterns — observations without ' +
+    'evidence are opinions, not findings. Set "area" to exactly: ' + a.name,
     { label: (phaseName === 'Completeness' ? 'gap:' : 'area:') + a.name, phase: phaseName, schema: OBS_SCHEMA, model: 'sonnet' }
   )
 
@@ -471,6 +514,10 @@ if (criticRounds > 0 && allObs.length) {
   while (roundsLeft-- > 0) {
     const headroom = MAX_TOTAL_AREAS - areaNames.length
     if (headroom <= 0) break
+    // The critic judges coverage and names uncovered facets — it does not re-verify claims, so it
+    // does not need each observation's full prose body. Projecting to title/evidence/significance
+    // preserves the coverage + thread signal while bounding the payload re-sent in full every round.
+    const critiqueObs = allObs.map((o) => ({ area: o.area, title: o.title, significance: o.significance, evidence: o.evidence }))
     const critique = await withRetry('completeness-critic', () => agent(
       'You are a completeness critic for an investigation (an assessment). Judge whether the areas already ' +
       'investigated TOGETHER cover the overall question, or whether a material facet was missed.\n\n' +
@@ -478,7 +525,7 @@ if (criticRounds > 0 && allObs.length) {
       'Overall question: ' + overallQuestion + '\n' +
       'Focus: ' + focus + '\n' +
       'Areas already investigated (do NOT propose any of these again): ' + areaNames.join('; ') + '\n\n' +
-      'Observations gathered so far (JSON):\n' + JSON.stringify(allObs, null, 2) + '\n\n' +
+      'Observations gathered so far (JSON):\n' + JSON.stringify(critiqueObs, null, 2) + '\n\n' +
       'Name only GENUINE gaps: a facet, thread, or area materially relevant to the overall question that the ' +
       'existing areas do not cover — an unplanned thread surfaced by an observation counts. Do NOT restate ' +
       'covered ground, do NOT propose fixes, and do NOT invent gaps to seem thorough. If coverage is already ' +
@@ -498,13 +545,18 @@ if (criticRounds > 0 && allObs.length) {
       break
     }
     const gapAreas = fresh.map((g) => ({ name: g.name, rationale: g.rationale, effort: clampEffort(overallEffort, effortCeiling) }))
-    gapAreas.forEach((a) => areaNames.push(a.name))
     log('Completeness critic: investigating ' + gapAreas.length + ' gap area(s): ' + gapAreas.map((a) => a.name).join(', ') + '.')
     const gapResults = await parallel(
       gapAreas.map((a) => () => investigateArea(a, 'Completeness'))
     )
     dispatchedAreas += gapAreas.length
-    gapAreas.forEach((a, i) => { if (!gapResults[i]) droppedAreaNames.push(a.name) })
+    // A gap joins areaNames only once it has produced coverage: a covered area counts against the
+    // ceiling and is not re-proposed, while a failed one is recorded as dropped only — leaving its
+    // budget slot free and its facet open for the critic to re-propose in a later round.
+    gapAreas.forEach((a, i) => {
+      if (gapResults[i]) areaNames.push(a.name)
+      else droppedAreaNames.push(a.name)
+    })
     const gapInvestigations = gapResults.filter(Boolean)
     const gapObs = collectObs(gapInvestigations)
     allObs.push(...gapObs)
@@ -559,7 +611,7 @@ const verifyConsolidated = (obs, probedKeys) => agent(
       'obviously unsupported.\n'
     : '') +
   VERIFY_INTENSITY[overallEffort] + '\n' +
-  'Do NOT add new findings and do NOT suggest fixes. Report only verification results and corrections.',
+  observationOnlyRule('verifier'),
   { label: 'verify', schema: VERIFY_SCHEMA }
 )
 
@@ -669,6 +721,21 @@ const selectVerifyTargets = (obs, maxK) => {
 }
 /* test-seam:pure-fn:end */
 
+// The consolidation verifier is told which observations were "already probed and
+// reconciled" so it scrutinises the others. Key that off the verdicts that
+// actually returned, not the dispatched targets: on a lost verdict (wholly or
+// partly) applyVerdicts leaves the observation unreconciled, so claiming it was
+// probed would steer scrutiny away from a never-checked observation. An
+// observation counts as probed when at least one of its lens verdicts returned.
+/* test-seam:pure-fn:start */
+const selectProbedKeys = (targets, verdicts) => {
+  const probed = new Set(verdicts.map((v) => v.area + ' / ' + v.title))
+  return targets
+    .map(({ o }) => o.area + ' / ' + o.title)
+    .filter((k) => probed.has(k))
+}
+/* test-seam:pure-fn:end */
+
 const lenses = EFFORT_LENSES[overallEffort] || []
 let verification
 let verdicts = []
@@ -707,7 +774,7 @@ if (!lenses.length || !allObs.length) {
       'Lens — ' + VERIFY_LENSES[lens] + '\n\n' +
       'Observation (JSON):\n' + JSON.stringify(o, null, 2) + '\n\n' +
       'Apply ONLY this lens. Be skeptical and check independently rather than trusting the observation. ' +
-      'You may correct an inaccurate CLAIM, but do NOT suggest code fixes and do NOT invent new findings.',
+      'You may correct an inaccurate CLAIM. ' + observationOnlyRule('verifier'),
       { label: 'verify:' + lens + '#' + i, phase: 'Verify', schema: VERDICT_SCHEMA, model: 'sonnet' }
     ).then((v) => v && Object.assign({ area: o.area, title: o.title, lens: lens }, v))
   )))
@@ -721,7 +788,7 @@ if (!lenses.length || !allObs.length) {
     auditActions.filter((a) => a.action === 'dropped').length + ' dropped, ' +
     auditActions.filter((a) => a.action === 'corrected').length + ' corrected, ' +
     auditActions.filter((a) => a.action === 'flagged').length + ' flagged.')
-  const probedKeys = targets.map(({ o }) => o.area + ' / ' + o.title)
+  const probedKeys = selectProbedKeys(targets, verdicts)
   verification = await safeVerify(verifiedObs, probedKeys)
 }
 
@@ -758,7 +825,7 @@ const SYNTH_SCHEMA = {
           number: { type: 'integer', description: 'Finding number from significance order (1 = most impactful); rendered as the "### N." heading' },
           title: { type: 'string', description: 'Short descriptive finding title; rendered after the number on the heading line' },
           significance: { type: 'string', enum: ['high', 'medium', 'low'], description: 'The finding\'s significance, taken from the highest significance of the observation(s) it synthesizes; rendered as the "**Significance**:" line under the heading.' },
-          body: { type: 'string', description: 'A single observation-only paragraph: what was found, where (paths/lines/values), current state, why noteworthy. No sub-bullets, no fixes.' },
+          body: { type: 'string', description: 'A single observation-only paragraph: what was found, where (paths/lines/values), current state, why noteworthy. No sub-bullets. ' + OBS_ONLY_BASE },
           citations: {
             type: 'array',
             items: { type: 'string' },
@@ -812,11 +879,7 @@ const synth = allObs.length ? await withRetry('synthesize', () => agent(
   'finding that names every affected location — not one finding per occurrence.\n' +
   '- Split compound issues into separate findings.\n\n' +
   'OBSERVATION-ONLY OUTPUT (critical):\n' +
-  '- Each finding describes WHAT was found and WHY it is noteworthy — never HOW to fix it.\n' +
-  '- Forbidden anywhere in a finding body: "consider", "should", "could", "would", "must", "ought to", ' +
-  '"recommend", "fix by", "migrate to", "replace with", "switch to", or any imperative directed at future ' +
-  'action. Mid-sentence modals count: "endpoints that should not be accessible" becomes "endpoints are exposed ' +
-  'in config.py". Strip the prescription; keep only the description.\n\n' +
+  observationOnlyRule('synthesizer') + '\n\n' +
   'OUTPUT — return STRUCTURED DATA only (the schema); do NOT produce markdown and do NOT write any file. ' +
   'The workflow renders the assessment document from your structured output. Provide:\n' +
   '- assessmentTitle, scopeSummary, areasCovered for the document header.\n' +
@@ -846,7 +909,8 @@ const wrote = synthStructured
       'Do NOT edit, reformat, summarize, re-order, or add anything — write it byte-for-byte as given. Then return ' +
       'whether the write succeeded and the path written.\n\n' +
       '----- BEGIN DOCUMENT -----\n' + markdown + '\n----- END DOCUMENT -----',
-      { label: 'write-assessment', phase: 'Synthesize', schema: WRITE_SCHEMA }
+      // Cheap tier: a verbatim Write with no reasoning (see model-tier strategy above).
+      { label: 'write-assessment', phase: 'Synthesize', schema: WRITE_SCHEMA, model: 'sonnet' }
     ))
   : null
 const synthOk = !!(synthStructured && wrote && wrote.written)
@@ -900,8 +964,7 @@ if (overallEffort !== 'low' && synthFindings.length) {
       'Scope: ' + scope + '\n\n' +
       'Finding (JSON, with the structured citations it rests on):\n' + JSON.stringify(fnd, null, 2) + '\n\n' +
       'Independently open each cited location and confirm it exists and says what the finding claims. ' +
-      'This is a FLAG-ONLY pass: do NOT rewrite the finding, do NOT propose fixes, and do NOT invent new ' +
-      'findings. Report ONLY citations that fail to ground:\n' +
+      observationOnlyRule('grounding') + ' Report ONLY citations that fail to ground:\n' +
       '- "missing": the cited file, or that line region, does not exist.\n' +
       '- "mismatch": the source exists but says something materially different from what the finding claims.\n' +
       '- "unverifiable": the citation is too vague to locate, or its basis could not be checked.\n' +

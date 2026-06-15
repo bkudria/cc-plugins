@@ -101,16 +101,21 @@ export const withOverrides = (overrides = {}) => {
   }
 }
 
-// Run the whole workflow against a scenario agent. Returns the script's real return value
-// plus the ordered list of agent labels that were dispatched (so a scenario can assert the
-// targeted stage actually fired, or that a gated stage was/ wasn't reached). The recording
-// wrapper logs the label BEFORE calling, so a throwing label is still recorded as fired.
+// Run the whole workflow against a scenario agent. Returns the script's real return value,
+// the ordered list of agent labels that were dispatched (so a scenario can assert the
+// targeted stage actually fired, or that a gated stage was/ wasn't reached), and `dispatches`
+// — the same calls with their `opts.model` (undefined when the role inherits the caller's
+// model) so a scenario can assert each role's model tier. The recording wrapper logs the
+// label/model BEFORE calling, so a throwing label is still recorded as fired.
 export const runWorkflow = async ({ args, agent }) => {
   const calls = []
+  const dispatches = []
   const recordingAgent = async (prompt, opts) => {
-    calls.push((opts && opts.label) || '')
+    const label = (opts && opts.label) || ''
+    calls.push(label)
+    dispatches.push({ label, model: opts && opts.model })
     return agent(prompt, opts)
   }
   const result = await factory(recordingAgent, realisticParallel, () => {}, () => {}, args)
-  return { result, calls }
+  return { result, calls, dispatches }
 }
