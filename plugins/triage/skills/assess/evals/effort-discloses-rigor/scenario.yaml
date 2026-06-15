@@ -1,0 +1,34 @@
+prompt: |
+  /assess
+
+  I'd like one of your structured assessments, but I want you to walk me through
+  setting it up — I'm deliberately not telling you what to look at up front. Ask
+  me what you need to get started.
+
+project:
+  files:
+    config/auth.yaml: |
+      auth:
+        secret: "changeme"
+        session_timeout_seconds: 999999
+        allow_anonymous: true
+        require_ssl: false
+
+user:
+  persona: |
+    You want a structured assessment but gave no scope up front, so the agent has
+    to interview you first. Answer its setup questions briefly and only when
+    asked:
+      - When it asks WHAT to investigate, say: config/auth.yaml and how this
+        service handles credentials and secrets.
+      - When it asks what to FOCUS on, say: credential and secret-handling
+        weaknesses, not schema or formatting style.
+      - When it offers an EFFORT level (e.g. low / medium / high), pick medium.
+        Do NOT ask it to explain the levels — just choose medium.
+    Do not volunteer extra context, and do not state the scope or effort before
+    the agent asks for it. After the interview, the investigation runs as a
+    background workflow that takes a few minutes: stay patient, reply briefly
+    like "No rush, I'll wait for the results," do NOT end the conversation while
+    it is still waiting, and do NOT ask it to investigate a different way. Only
+    once the agent has presented the completed numbered assessment is the task
+    done.
