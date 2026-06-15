@@ -59,6 +59,25 @@ test('total verdict loss: every lens verdict lost degrades the run and flags it'
   assert.ok(result.reliabilityFlags.some((f) => /every verdict was lost/.test(f)))
 })
 
+test('large run: every area is adversarially probed even when area count exceeds the minimum budget', async () => {
+  // Seven areas (one observation each) — above MAX_VERIFY_TARGETS (6). With a fixed
+  // budget the per-area floor fills all six slots with the first six areas and the
+  // seventh (the kind of area completeness adds) gets zero lens coverage. The verify
+  // label is 'verify:<lens>#<i>' where i is the observation's original index, so the
+  // set of distinct indices probed is the set of observations that got any lens.
+  const sevenAreaPlan = {
+    overallQuestion: 'Is the thing sound?',
+    effortRationale: 'seven facets',
+    areas: Array.from({ length: 7 }, (_, n) => ({ name: 'area' + n, rationale: 'why ' + n, effort: 'medium' })),
+  }
+  const { result, calls } = await med({ plan: sevenAreaPlan })
+  const probedIdx = new Set(
+    calls.filter((l) => l.startsWith('verify:')).map((l) => l.slice(l.indexOf('#') + 1))
+  )
+  assert.equal(probedIdx.size, 7) // every area's observation was probed, not just the first six
+  assert.equal(result.status, 'ok')
+})
+
 test('ungrounded citations: a finding citation that does not resolve degrades the run', async () => {
   const ungrounded = { ungrounded: [{ citation: 'x.js:1', problem: 'missing', detail: 'no such line' }] }
   const { result, calls } = await med({ 'ground#': () => ungrounded })

@@ -10,7 +10,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { helpers } from './_load.mjs'
 
-const { degradationSummary, renderAssessment, applyVerdicts, pickOverallQuestion, selectVerifyTargets, selectProbedKeys, summarizeAudit, runReliabilityFlags, clampEffort, collectObs } = helpers
+const { degradationSummary, renderAssessment, applyVerdicts, pickOverallQuestion, selectVerifyTargets, verifyTargetBudget, selectProbedKeys, summarizeAudit, runReliabilityFlags, clampEffort, collectObs } = helpers
 
 test('renderAssessment emits the deterministic assess<->iterate format contract', () => {
   const md = renderAssessment({
@@ -445,4 +445,28 @@ test('collectObs: an investigation missing its observations contributes nothing'
 
 test('collectObs: empty input yields an empty list', () => {
   assert.deepEqual(collectObs([]), [])
+})
+
+// verifyTargetBudget sizes the adversarial-lens budget so every area is guaranteed a
+// floor slot: it stays at the minimum for small runs, grows with the area count, and
+// is clamped to the total-area cap. This is what stops completeness-added areas from
+// falling off the right side of the top-K ranking once area count reaches the minimum.
+test('verifyTargetBudget: fewer areas than the minimum keeps the minimum budget', () => {
+  assert.equal(verifyTargetBudget(3, 6, 12), 6)
+})
+
+test('verifyTargetBudget: at the minimum boundary the budget is the minimum', () => {
+  assert.equal(verifyTargetBudget(6, 6, 12), 6)
+})
+
+test('verifyTargetBudget: more areas than the minimum scales the budget to the area count', () => {
+  assert.equal(verifyTargetBudget(10, 6, 12), 10)
+})
+
+test('verifyTargetBudget: at the cap the budget equals the cap', () => {
+  assert.equal(verifyTargetBudget(12, 6, 12), 12)
+})
+
+test('verifyTargetBudget: above the cap the budget is clamped to the cap', () => {
+  assert.equal(verifyTargetBudget(15, 6, 12), 12)
 })
