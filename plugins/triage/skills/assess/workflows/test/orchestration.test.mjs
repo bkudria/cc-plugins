@@ -112,3 +112,30 @@ test('high effort: the completeness loop runs at most EFFORT_ROUNDS.high (2) gap
   // 3 initial areas + 2 dispatched gap rounds.
   assert.equal(result.coverage.planned, 5)
 })
+
+test('cheap write-agent: the verbatim write-assessment runs on the cheap tier, not the inherited top tier', async () => {
+  const { dispatches } = await med()
+  const write = dispatches.find((d) => d.label === 'write-assessment')
+  assert.ok(write, 'write-assessment was dispatched')
+  // Its whole job is one verbatim Write with no reasoning, so it must be pinned to the cheap
+  // tier rather than inheriting the caller's top tier (which omitting `model` would do).
+  assert.equal(write.model, 'sonnet')
+})
+
+test('model tiers: mechanical roles are pinned to the cheap tier; judgment roles inherit the caller', async () => {
+  const { dispatches } = await med()
+  // Pinned to the cheap tier: the area/gap investigators, the per-lens verifiers
+  // (verify:<lens>#i), the grounding agents, and the verbatim write-agent — none reason.
+  const CHEAP_PREFIX = /^(area:|gap:|verify:|ground#)/
+  const CHEAP_EXACT = new Set(['write-assessment'])
+  // Inherit the caller's model: the judgment roles. NB: bare 'verify' is the consolidation
+  // verifier (judgment) — distinct from the 'verify:<lens>#i' per-lens verifiers above.
+  const INHERIT = new Set(['plan', 'plan-critic', 'plan-revise', 'completeness-critic', 'verify', 'synthesize'])
+  for (const d of dispatches) {
+    if (CHEAP_PREFIX.test(d.label) || CHEAP_EXACT.has(d.label)) {
+      assert.equal(d.model, 'sonnet', `${d.label} should be pinned to the cheap tier`)
+    } else if (INHERIT.has(d.label)) {
+      assert.equal(d.model, undefined, `${d.label} should inherit the caller's model`)
+    }
+  }
+})
