@@ -706,6 +706,21 @@ const selectVerifyTargets = (obs, maxK) => {
 }
 /* test-seam:pure-fn:end */
 
+// The consolidation verifier is told which observations were "already probed and
+// reconciled" so it scrutinises the others. Key that off the verdicts that
+// actually returned, not the dispatched targets: on a lost verdict (wholly or
+// partly) applyVerdicts leaves the observation unreconciled, so claiming it was
+// probed would steer scrutiny away from a never-checked observation. An
+// observation counts as probed when at least one of its lens verdicts returned.
+/* test-seam:pure-fn:start */
+const selectProbedKeys = (targets, verdicts) => {
+  const probed = new Set(verdicts.map((v) => v.area + ' / ' + v.title))
+  return targets
+    .map(({ o }) => o.area + ' / ' + o.title)
+    .filter((k) => probed.has(k))
+}
+/* test-seam:pure-fn:end */
+
 const lenses = EFFORT_LENSES[overallEffort] || []
 let verification
 let verdicts = []
@@ -758,7 +773,7 @@ if (!lenses.length || !allObs.length) {
     auditActions.filter((a) => a.action === 'dropped').length + ' dropped, ' +
     auditActions.filter((a) => a.action === 'corrected').length + ' corrected, ' +
     auditActions.filter((a) => a.action === 'flagged').length + ' flagged.')
-  const probedKeys = targets.map(({ o }) => o.area + ' / ' + o.title)
+  const probedKeys = selectProbedKeys(targets, verdicts)
   verification = await safeVerify(verifiedObs, probedKeys)
 }
 

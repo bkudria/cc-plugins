@@ -10,7 +10,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { helpers } from './_load.mjs'
 
-const { degradationSummary, renderAssessment, applyVerdicts, pickOverallQuestion, selectVerifyTargets, summarizeAudit, runReliabilityFlags } = helpers
+const { degradationSummary, renderAssessment, applyVerdicts, pickOverallQuestion, selectVerifyTargets, selectProbedKeys, summarizeAudit, runReliabilityFlags } = helpers
 
 test('renderAssessment emits the deterministic assess<->iterate format contract', () => {
   const md = renderAssessment({
@@ -252,6 +252,36 @@ test('selectVerifyTargets: preserves each observation original index', () => {
   const targets = selectVerifyTargets(list, 3)
   for (const t of targets) assert.equal(list[t.i], t.o)
   assert.deepEqual(targets.map((t) => t.i).sort((a, b) => a - b), [0, 1, 2])
+})
+
+// probedKeys tells the consolidation verifier which observations were "already
+// individually probed and reconciled" so it scrutinises the others. It must be
+// keyed off the verdicts that actually returned, not the dispatched targets —
+// otherwise a lost verdict still claims its observation was checked.
+const ptarget = (area, title) => ({ o: { area, title } })
+const pverdict = (area, title, lens = 'L') => ({ area, title, lens })
+
+test('selectProbedKeys: total verdict loss claims nothing was probed', () => {
+  const targets = [ptarget('A', 'tA'), ptarget('B', 'tB')]
+  assert.deepEqual(selectProbedKeys(targets, []), [])
+})
+
+test('selectProbedKeys: partial loss keeps only the observations whose verdict returned', () => {
+  const targets = [ptarget('A', 'tA'), ptarget('B', 'tB'), ptarget('C', 'tC')]
+  const verdicts = [pverdict('A', 'tA'), pverdict('C', 'tC')]
+  assert.deepEqual(selectProbedKeys(targets, verdicts), ['A / tA', 'C / tC'])
+})
+
+test('selectProbedKeys: full coverage returns every target key (no regression)', () => {
+  const targets = [ptarget('A', 'tA'), ptarget('B', 'tB')]
+  const verdicts = [pverdict('A', 'tA'), pverdict('B', 'tB')]
+  assert.deepEqual(selectProbedKeys(targets, verdicts), ['A / tA', 'B / tB'])
+})
+
+test('selectProbedKeys: multiple lens verdicts for one observation collapse to a single key', () => {
+  const targets = [ptarget('A', 'tA'), ptarget('B', 'tB')]
+  const verdicts = [pverdict('A', 'tA', 'L1'), pverdict('A', 'tA', 'L2'), pverdict('B', 'tB', 'L1')]
+  assert.deepEqual(selectProbedKeys(targets, verdicts), ['A / tA', 'B / tB'])
 })
 
 test('pickOverallQuestion: original plan question by default', () => {
