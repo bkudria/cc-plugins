@@ -139,3 +139,15 @@ test('model tiers: mechanical roles are pinned to the cheap tier; judgment roles
     }
   }
 })
+
+test('completeness gap that keeps failing is re-proposable and never consumes a budget slot', async () => {
+  const flaky = () => ({ complete: false, gaps: [{ name: 'flaky', rationale: 'r' }] })
+  const { result, calls } = await high({ 'completeness-critic': flaky, 'gap:flaky': THROW })
+  // Re-proposed and re-dispatched both rounds — the round-1 failure did not block it.
+  assert.equal(calls.filter((l) => l === 'gap:flaky').length, 2)
+  // 3 initial areas + 2 dispatched gap attempts; only the 3 initial areas produced coverage.
+  assert.equal(result.coverage.planned, 5)
+  assert.equal(result.coverage.completed, 3)
+  assert.ok(result.coverage.dropped.includes('flaky'))
+  assert.equal(result.status, 'degraded') // lost coverage, but observations remain
+})

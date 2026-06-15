@@ -535,13 +535,18 @@ if (criticRounds > 0 && allObs.length) {
       break
     }
     const gapAreas = fresh.map((g) => ({ name: g.name, rationale: g.rationale, effort: clampEffort(overallEffort, effortCeiling) }))
-    gapAreas.forEach((a) => areaNames.push(a.name))
     log('Completeness critic: investigating ' + gapAreas.length + ' gap area(s): ' + gapAreas.map((a) => a.name).join(', ') + '.')
     const gapResults = await parallel(
       gapAreas.map((a) => () => investigateArea(a, 'Completeness'))
     )
     dispatchedAreas += gapAreas.length
-    gapAreas.forEach((a, i) => { if (!gapResults[i]) droppedAreaNames.push(a.name) })
+    // A gap joins areaNames only once it has produced coverage: a covered area counts against the
+    // ceiling and is not re-proposed, while a failed one is recorded as dropped only — leaving its
+    // budget slot free and its facet open for the critic to re-propose in a later round.
+    gapAreas.forEach((a, i) => {
+      if (gapResults[i]) areaNames.push(a.name)
+      else droppedAreaNames.push(a.name)
+    })
     const gapInvestigations = gapResults.filter(Boolean)
     const gapObs = collectObs(gapInvestigations)
     allObs.push(...gapObs)
