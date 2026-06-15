@@ -1,0 +1,10 @@
+checks:
+  - delegates-to-workflow:
+      check: "The transcript contains a Workflow tool call whose script path ends in `investigate.js`."
+      note: "Anchor — Phase 2 delegates the entire investigation to the background workflow at workflows/investigate.js. The focus-forwarding check below inspects this same Workflow call's args, so this check confirms the call exists. A vanilla agent has no such script."
+  - forwards-unmarked-focus-to-param:
+      check: "The Workflow tool call includes a `focus` argument whose value expresses the malformed-/truncated-input handling steer from the request — for example mentioning malformed input, truncated input, error recovery, or how the parser handles invalid input."
+      note: "The request names a scope (the request parser / src/parser.py) and narrows it with an UNMARKED directional clause ('Particularly its error recovery: how it copes with malformed and truncated input') that uses none of the explicit markers the skill lists ('focus on', 'I care about', 'looking for', 'rather than', 'not'). Phase 0 must still recognize this as a focus directive and route it to the first-class `focus` argument of the Workflow call, rather than fold it into `scope` and omit `focus` (which makes the workflow fall back to its generic default focus: 'problems, gaps, risks, inconsistencies, surprising patterns, ...'). Inspect the Workflow tool-call input's args.focus value — not the scope text and not the presented findings. A focus value that is only the generic default string, or absent, fails this check."
+  - reads-workflow-artifact:
+      check: "The transcript contains a file-reading tool call (e.g., Read, or a Bash command such as cat or head) whose target is a file located directly under /tmp/ with a filename beginning with `assessment-` and ending with `.md`."
+      note: "Anchor — Phase 3 retrieves the complete assessment from the canonical /tmp/assessment-${CLAUDE_SESSION_ID}.md the workflow wrote. The agent can only read this file if the workflow actually ran and wrote it, so this read distinguishes a genuine end-to-end run from a fabricated completion."

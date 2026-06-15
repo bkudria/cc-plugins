@@ -1,0 +1,64 @@
+# This scenario drives the real background investigation at high agent effort,
+# which costs ~$3.5–4 per run — right at the base suite's $4 ceiling. Give it
+# explicit headroom so it completes reliably instead of erroring on budget.
+max_budget_usd: 6.0
+
+prompt: |
+  /assess Take a thorough look at the request parser in src/parser.py — how it tokenizes the raw input, assembles the parsed result, and surfaces problems. Particularly its error recovery: how it copes with malformed and truncated input.
+
+project:
+  files:
+    src/parser.py: |
+      """A small line-oriented request parser.
+
+      Parses lines of the form `KEY=VALUE` into a dict, tolerating malformed and
+      truncated input by skipping bad lines and recording recovery notes.
+      """
+
+      MAX_LINE_LEN = 1024
+
+
+      def tokenize(raw):
+          # Split on newlines only; trailing whitespace stripped per line.
+          return [line.rstrip() for line in raw.split("\n")]
+
+
+      def parse(raw):
+          result = {}
+          errors = []
+          for i, line in enumerate(tokenize(raw)):
+              if not line:
+                  continue
+              if len(line) > MAX_LINE_LEN:
+                  line = line[:MAX_LINE_LEN]  # silently truncate over-long lines
+              if "=" not in line:
+                  # Malformed: no key/value separator. Skip and recover.
+                  errors.append((i, "missing '='"))
+                  continue
+              key, value = line.split("=", 1)
+              key = key.strip()
+              if not key:
+                  errors.append((i, "empty key"))
+                  continue
+              result[key] = value.strip()
+          return result, errors
+
+
+      def parse_strict(raw):
+          result, errors = parse(raw)
+          if errors:
+              first = errors[0]
+              raise ValueError("parse error on line %d: %s" % first)
+          return result
+
+user:
+  persona: |
+    You requested an assessment of the request parser in src/parser.py, with
+    particular interest in its error recovery — how it handles malformed and
+    truncated input. The investigation runs as a background workflow that takes
+    a few minutes. Each time the agent reports it has started the investigation
+    and is still waiting for it to finish, stay patient: reply briefly, e.g.
+    "No rush, I'll wait for the results." Do NOT end the conversation while it is
+    still waiting, and do NOT ask it to do the analysis a different way. Only once
+    the agent has actually presented the completed numbered assessment is the task
+    done. Do not volunteer extra context; answer any direct question briefly.
