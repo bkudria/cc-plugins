@@ -508,6 +508,10 @@ if (criticRounds > 0 && allObs.length) {
   while (roundsLeft-- > 0) {
     const headroom = MAX_TOTAL_AREAS - areaNames.length
     if (headroom <= 0) break
+    // The critic judges coverage and names uncovered facets — it does not re-verify claims, so it
+    // does not need each observation's full prose body. Projecting to title/evidence/significance
+    // preserves the coverage + thread signal while bounding the payload re-sent in full every round.
+    const critiqueObs = allObs.map((o) => ({ area: o.area, title: o.title, significance: o.significance, evidence: o.evidence }))
     const critique = await withRetry('completeness-critic', () => agent(
       'You are a completeness critic for an investigation (an assessment). Judge whether the areas already ' +
       'investigated TOGETHER cover the overall question, or whether a material facet was missed.\n\n' +
@@ -515,7 +519,7 @@ if (criticRounds > 0 && allObs.length) {
       'Overall question: ' + overallQuestion + '\n' +
       'Focus: ' + focus + '\n' +
       'Areas already investigated (do NOT propose any of these again): ' + areaNames.join('; ') + '\n\n' +
-      'Observations gathered so far (JSON):\n' + JSON.stringify(allObs, null, 2) + '\n\n' +
+      'Observations gathered so far (JSON):\n' + JSON.stringify(critiqueObs, null, 2) + '\n\n' +
       'Name only GENUINE gaps: a facet, thread, or area materially relevant to the overall question that the ' +
       'existing areas do not cover — an unplanned thread surfaced by an observation counts. Do NOT restate ' +
       'covered ground, do NOT propose fixes, and do NOT invent gaps to seem thorough. If coverage is already ' +

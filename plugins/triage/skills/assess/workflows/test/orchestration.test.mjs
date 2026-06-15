@@ -151,3 +151,18 @@ test('completeness gap that keeps failing is re-proposable and never consumes a 
   assert.ok(result.coverage.dropped.includes('flaky'))
   assert.equal(result.status, 'degraded') // lost coverage, but observations remain
 })
+
+test('the completeness-critic payload is projected — observation bodies are not re-sent', async () => {
+  let captured = ''
+  const capture = (prompt) => { captured = prompt; return { complete: true, gaps: [] } }
+  // alpha investigator returns an observation with a sentinel title + body.
+  const sentinel = (_p, opts) => ({
+    area: opts.label.slice(opts.label.indexOf(':') + 1),
+    observations: [{ title: 'SENTINEL_TITLE', body: 'SENTINEL_BODY_PROSE', evidence: ['x.js:1'], significance: 'high' }],
+  })
+  const { calls } = await high({ 'area:alpha': sentinel, 'completeness-critic': capture })
+  assert.ok(calls.includes('completeness-critic'))      // the critic actually ran
+  assert.ok(captured.includes('SENTINEL_TITLE'))        // title (coverage signal) is present
+  assert.ok(!captured.includes('SENTINEL_BODY_PROSE'))  // body prose is NOT re-sent
+  assert.ok(!captured.includes('"body"'))               // the projection drops the body field entirely
+})
