@@ -29,7 +29,9 @@ if (!scope) {
 }
 const focus = P.focus ||
   'problems, gaps, risks, inconsistencies, surprising patterns, missing pieces, and opportunities for improvement'
+/* test-seam:pure-fn:start */
 const EFFORT_LEVELS = ['low', 'medium', 'high']
+/* test-seam:pure-fn:end */
 // `effort` is an OPTIONAL ceiling/bias. When absent, the planner allocates
 // effort adaptively per area; when set, it caps each area's effort.
 const effortCeiling = EFFORT_LEVELS.includes(P.effort) ? P.effort : null
@@ -86,12 +88,14 @@ const READ_ONLY_TOOLS =
   'You have read-only tools (Read, Grep, Glob, Bash). Use them to consult primary sources directly: ' +
   'read the actual files and run the actual searches rather than relying on memory or inference.'
 // Cap a planner-proposed effort at the optional user ceiling (low < medium < high).
+/* test-seam:pure-fn:start */
 const clampEffort = (proposed, ceiling) => {
   const p = EFFORT_LEVELS.indexOf(proposed)
   const safe = p === -1 ? EFFORT_LEVELS.indexOf('medium') : p
   if (!ceiling) return EFFORT_LEVELS[safe]
   return EFFORT_LEVELS[Math.min(safe, EFFORT_LEVELS.indexOf(ceiling))]
 }
+/* test-seam:pure-fn:end */
 
 // Retry a bare critical-path agent() call once on throw. parallel() swallows a
 // throw to null, but a bare `await agent()` on the critical path (planner, synth)
@@ -422,9 +426,11 @@ if (droppedAreaNames.length) {
 }
 // Flatten investigator results into one observation list (shared by the initial
 // fan-out and the completeness gap rounds).
+/* test-seam:pure-fn:start */
 const collectObs = (invs) => invs.flatMap((i) =>
   (i.observations || []).map((o) => ({ area: i.area, title: o.title, body: o.body, evidence: o.evidence, significance: o.significance }))
 )
+/* test-seam:pure-fn:end */
 const allObs = collectObs(investigations)
 log('Collected ' + allObs.length + ' observation(s) across ' + investigations.length + ' area(s).')
 if (!allObs.length) {
