@@ -8,6 +8,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { runWorkflow, withOverrides, THROW } from './_harness.mjs'
 
+const low = (overrides) => runWorkflow({ args: { scope: 's', effort: 'low' }, agent: withOverrides(overrides) })
 const med = (overrides) => runWorkflow({ args: { scope: 's', effort: 'medium' }, agent: withOverrides(overrides) })
 const high = (overrides) => runWorkflow({ args: { scope: 's', effort: 'high' }, agent: withOverrides(overrides) })
 
@@ -165,4 +166,14 @@ test('the completeness-critic payload is projected — observation bodies are no
   assert.ok(captured.includes('SENTINEL_TITLE'))        // title (coverage signal) is present
   assert.ok(!captured.includes('SENTINEL_BODY_PROSE'))  // body prose is NOT re-sent
   assert.ok(!captured.includes('"body"'))               // the projection drops the body field entirely
+})
+
+test('low effort: plan-critic, completeness, lenses, and grounding are skipped and the run stays ok', async () => {
+  const { result, calls } = await low()
+  assert.equal(result.status, 'ok') // reduced rigor is not degradation
+  assert.ok(!calls.includes('plan-critic')) // plan critic gated off at low
+  assert.ok(!calls.includes('completeness-critic')) // EFFORT_ROUNDS.low = 0
+  assert.ok(!calls.some((l) => l.startsWith('verify:'))) // EFFORT_LENSES.low = [] → no per-lens jobs
+  assert.ok(!calls.some((l) => l.startsWith('ground#'))) // grounding gated off at low
+  // The single-shot consolidation verify (exact label 'verify') still runs at low — not asserted absent.
 })
