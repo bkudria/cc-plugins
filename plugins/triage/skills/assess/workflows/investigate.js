@@ -638,6 +638,10 @@ const VERDICT_SCHEMA = {
 // never a destructive body rewrite, and may lower an inflated significance via
 // correctedSignificance (downgrade-only — never raised). Across lenses on one observation
 // a qualifying drop wins over correct wins over holds.
+// Two outputs, two shapes: `kept` feeds the verifier/synthesizer prompts and carries a PROJECTED
+// correction (lens/now/why) — no `was` (it duplicates the body already at the observation root) and
+// no significanceDowngrade record (the corrected significance is already on the root field). The
+// `actions` audit record keeps the FULL before/after provenance (`was` and significanceDowngrade).
 /* test-seam:pure-fn:start */
 const applyVerdicts = (obs, verdicts) => {
   const keyOf = (x) => x.area + ' ' + x.title
@@ -672,10 +676,14 @@ const applyVerdicts = (obs, verdicts) => {
     const significanceDowngrade = downgrade
       ? { lens: downgrade.lens, was: o.significance, now: significance, why: downgrade.rationale }
       : null
+    // The kept observation feeds the verifier/synthesizer prompts, so its verificationNotes carry a
+    // PROJECTED correction (lens/now/why) without `was` — `was` duplicates the body already present
+    // at the observation root — and without the significanceDowngrade record, since the corrected
+    // significance is already on the root field. The full before/after provenance lives in `actions`.
+    const keptCorrections = corrections.map((c) => ({ lens: c.lens, now: c.now, why: c.why }))
     const keptObs = { area: o.area, title: o.title, body: o.body, evidence: o.evidence, significance }
-    if (corrections.length || flags.length || significanceDowngrade) {
-      keptObs.verificationNotes = { corrections, flags }
-      if (significanceDowngrade) keptObs.verificationNotes.significanceDowngrade = significanceDowngrade
+    if (keptCorrections.length || flags.length) {
+      keptObs.verificationNotes = { corrections: keptCorrections, flags }
     }
     kept.push(keptObs)
     if (corrections.length || flags.length || significanceDowngrade) {

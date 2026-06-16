@@ -160,7 +160,13 @@ test('applyVerdicts: a correct folds an annotation but preserves the original bo
     [{ area: 'A', title: 't1', verdict: 'correct', correction: 'b1-fixed', lens: 'L', rationale: 'off by one' }]
   )
   assert.equal(kept[0].body, 'b1') // original body preserved, never rewritten
+  // The kept (prompt-bound) correction drops `was` — it duplicated `body` byte-for-byte, which the
+  // synthesizer/verifier already see at the observation root. Only `now`/`why` reach the prompt.
   assert.deepEqual(kept[0].verificationNotes.corrections, [
+    { lens: 'L', now: 'b1-fixed', why: 'off by one' },
+  ])
+  // The audit `actions` record keeps the full before/after, including `was`.
+  assert.deepEqual(actions[0].corrections, [
     { lens: 'L', was: 'b1', now: 'b1-fixed', why: 'off by one' },
   ])
   assert.equal(actions[0].action, 'corrected')
@@ -193,7 +199,12 @@ test('applyVerdicts: a correct with a lower correctedSignificance downgrades the
     [{ area: 'A', title: 't1', verdict: 'correct', correctedSignificance: 'medium', lens: 'L', rationale: 'inflated' }]
   )
   assert.equal(kept[0].significance, 'medium') // lowered from high
-  assert.deepEqual(kept[0].verificationNotes.significanceDowngrade, { lens: 'L', was: 'high', now: 'medium', why: 'inflated' })
+  // The kept (prompt-bound) observation carries no significanceDowngrade record: the synthesizer
+  // reads the corrected root `significance` directly, never the downgrade provenance. With no
+  // correction text and no flags, this observation gets no verificationNotes at all.
+  assert.equal(kept[0].verificationNotes, undefined)
+  // The audit `actions` record keeps the full downgrade provenance.
+  assert.deepEqual(actions[0].significanceDowngrade, { lens: 'L', was: 'high', now: 'medium', why: 'inflated' })
   assert.equal(actions[0].action, 'corrected')
 })
 

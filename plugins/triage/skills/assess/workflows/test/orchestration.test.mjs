@@ -168,6 +168,25 @@ test('the completeness-critic payload is projected — observation bodies are no
   assert.ok(!captured.includes('"body"'))               // the projection drops the body field entirely
 })
 
+test('synthesizer payload: corrections reach the synthesizer without re-sending the body or audit-only downgrade provenance', async () => {
+  // Every probed observation gets a 'correct' verdict that both rewrites the claim and downgrades
+  // significance, so applyVerdicts folds corrections + a significanceDowngrade into the kept set.
+  // The synthesizer must see the actionable parts (now/why) but NOT the body-duplicating `was`
+  // (the body is already at the observation root) nor the audit-only significanceDowngrade record.
+  const correcting = () => ({ verdict: 'correct', confidence: 'high', correction: 'CORRECTED_CLAIM', correctedSignificance: 'medium', rationale: 'WHY_CORRECTED' })
+  let captured = ''
+  const capture = (prompt) => {
+    captured = prompt
+    return { assessmentTitle: 'T', scopeSummary: 's', areasCovered: 'a', findings: [], summary: 'sum' }
+  }
+  const { calls } = await high({ 'verify:': correcting, synthesize: capture })
+  assert.ok(calls.includes('synthesize'))                // the synthesizer actually ran
+  assert.match(captured, /CORRECTED_CLAIM/)              // the corrected claim (now) reaches it...
+  assert.match(captured, /WHY_CORRECTED/)                // ...with its rationale (why)
+  assert.ok(!captured.includes('"was"'))                 // the body-duplicating `was` field is gone
+  assert.ok(!captured.includes('significanceDowngrade')) // audit-only downgrade provenance is gone
+})
+
 test('low effort: plan-critic, completeness, lenses, and grounding are skipped and the run stays ok', async () => {
   const { result, calls } = await low()
   assert.equal(result.status, 'ok') // reduced rigor is not degradation
