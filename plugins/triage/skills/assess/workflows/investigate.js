@@ -80,13 +80,19 @@ const EFFORT_LENSES = {
   medium: ['grounding', 'reliability'],
   high: ['grounding', 'overclaim', 'reliability'],
 }
-// Shared read-only framing for the tool-using sub-agents (investigator + the two
-// verifiers): one identical statement of the toolset and the primary-source
-// discipline, so these roles cannot drift on how they phrase it. The observation-only
-// output discipline is shared the same way, just below (observationOnlyRule).
+// Shared read-only framing for the tool-using sub-agents (investigator, the two
+// verifiers, and grounding): one identical statement of the toolset, the primary-source
+// discipline, and the search-breadth guardrail, so these roles cannot drift on how they
+// phrase it. The observation-only output discipline is shared the same way, just below
+// (observationOnlyRule).
 const READ_ONLY_TOOLS =
   'You have read-only tools (Read, Grep, Glob, Bash). Use them to consult primary sources directly: ' +
-  'read the actual files and run the actual searches rather than relying on memory or inference.'
+  'read the actual files and run the actual searches rather than relying on memory or inference. ' +
+  'Confine every filesystem search to the scope under investigation — the specific directories, ' +
+  'repository, or paths it names. Never launch an unbounded traversal of the home directory or the ' +
+  'filesystem root (e.g. `find /`, `find ~`, or a recursive search rooted at `/` or `$HOME`): such ' +
+  'scans are pathologically slow and, on macOS, block on per-application data-access permission ' +
+  'prompts. If you cannot locate a path, narrow from a known root rather than scanning everything.'
 /* test-seam:pure-fn:start */
 // Shared observation-only discipline: describe what IS, never prescribe a fix. One base shared by
 // every role, composed with per-role clauses, with the consequence-description vs. prescription
@@ -960,7 +966,7 @@ if (overallEffort !== 'low' && synthFindings.length) {
   const groundJobs = groundTargets.map((fnd) => () =>
     agent(
       'You are grounding ONE finding from a finished assessment against source, at the synthesis boundary. ' +
-      'You have read-only tools (Read, Grep, Glob, Bash).\n\n' +
+      READ_ONLY_TOOLS + '\n\n' +
       'Scope: ' + scope + '\n\n' +
       'Finding (JSON, with the structured citations it rests on):\n' + JSON.stringify(fnd, null, 2) + '\n\n' +
       'Independently open each cited location and confirm it exists and says what the finding claims. ' +
