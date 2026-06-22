@@ -168,6 +168,32 @@ test('the completeness-critic payload is projected — observation bodies are no
   assert.ok(!captured.includes('"body"'))               // the projection drops the body field entirely
 })
 
+test('read-only sub-agents are told to confine searches to scope, not scan $HOME or the filesystem root', async () => {
+  // The investigator and the grounding agent both run live filesystem searches. Without a
+  // breadth guardrail, an agent that cannot locate a path falls back to `find /` / `find ~`,
+  // which is pathologically slow and, on macOS, blocks on per-app data-access prompts. The
+  // guardrail lives once in READ_ONLY_TOOLS; grounding must reuse it (no inline drift), so
+  // both prompts must carry it.
+  let investPrompt = ''
+  let groundPrompt = ''
+  const captureInvest = (prompt, opts) => {
+    investPrompt = prompt
+    return { area: opts.label.slice(opts.label.indexOf(':') + 1), observations: [
+      { title: 't', body: 'b', evidence: ['x.js:1'], significance: 'high' },
+    ] }
+  }
+  const captureGround = (prompt) => { groundPrompt = prompt; return { ungrounded: [] } }
+  await med({ 'area:alpha': captureInvest, 'ground#': captureGround })
+
+  for (const [role, prompt] of [['investigator', investPrompt], ['grounding', groundPrompt]]) {
+    assert.ok(prompt, `${role} prompt was captured`)
+    // Positive: searches must be confined to the scope.
+    assert.match(prompt, /confine/i, `${role} must be told to confine searches to the scope`)
+    // Negative: the whole-machine traversals must be named as forbidden.
+    assert.match(prompt, /home directory|filesystem root/i, `${role} must forbid scanning $HOME / the filesystem root`)
+  }
+})
+
 test('low effort: plan-critic, completeness, lenses, and grounding are skipped and the run stays ok', async () => {
   const { result, calls } = await low()
   assert.equal(result.status, 'ok') // reduced rigor is not degradation
