@@ -742,6 +742,17 @@ const selectVerifyTargets = (obs, maxK) => {
 }
 /* test-seam:pure-fn:end */
 
+// Size the adversarial-lens budget so every area is guaranteed a floor slot. The
+// budget is the area count, never below the minimum and never above the total-area
+// cap. Without this the budget was fixed at the minimum, so once the area count
+// reached it the per-area floor (selectVerifyTargets) filled every slot with the
+// first areas and completeness-added areas got zero lens coverage. Caps are passed
+// in (not referenced as module constants) so the pure-fn test seam can load it.
+/* test-seam:pure-fn:start */
+const verifyTargetBudget = (distinctAreaCount, minBudget, maxCap) =>
+  Math.min(maxCap, Math.max(minBudget, distinctAreaCount))
+/* test-seam:pure-fn:end */
+
 // The consolidation verifier is told which observations were "already probed and
 // reconciled" so it scrutinises the others. Key that off the verdicts that
 // actually returned, not the dispatched targets: on a lost verdict (wholly or
@@ -781,9 +792,13 @@ if (!lenses.length || !allObs.length) {
 } else {
   // Area-aware target selection: a per-area floor (every area's best observation)
   // then significance-fill, so the top-K lens budget spreads across areas instead
-  // of concentrating on whichever one sorts first. Deterministic — no
-  // Date/Math.random (both forbidden in the harness).
-  const targets = selectVerifyTargets(allObs, MAX_VERIFY_TARGETS)
+  // of concentrating on whichever one sorts first. The budget scales with the area
+  // count (bounded by MAX_TOTAL_AREAS) so every area keeps a floor slot even when
+  // completeness pushes the count past MAX_VERIFY_TARGETS — otherwise the floor
+  // would fill on the first areas and later ones would get zero lens coverage.
+  // Deterministic — no Date/Math.random (both forbidden in the harness).
+  const distinctAreas = new Set(allObs.map((o) => o.area)).size
+  const targets = selectVerifyTargets(allObs, verifyTargetBudget(distinctAreas, MAX_VERIFY_TARGETS, MAX_TOTAL_AREAS))
   log('Adversarial verify: ' + lenses.length + ' lens(es) over the top ' + targets.length +
     ' of ' + allObs.length + ' observation(s).')
   const verdictJobs = []
