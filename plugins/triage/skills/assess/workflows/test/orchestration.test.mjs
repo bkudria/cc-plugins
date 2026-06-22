@@ -205,6 +205,24 @@ test('completeness gap that keeps failing is re-proposable and never consumes a 
   assert.equal(result.status, 'degraded') // lost coverage, but observations remain
 })
 
+test('gap effort: a self-assessed low gap runs at its own low effort even when the run is high', async () => {
+  // overallEffort is 'high' (the ceiling), but the completeness critic sizes this gap 'low' (a
+  // binary/lookup facet). The gap must run at its OWN effort, not inherit the run's high. The
+  // investigator prompt embeds 'Effort for this area: <effort>', so the gap's effort is observable.
+  let captured = ''
+  const capture = (prompt) => {
+    captured = prompt
+    return { area: 'narrowgap', observations: [{ title: 't', body: 'b', evidence: ['x.js:1'], significance: 'high' }] }
+  }
+  const { result } = await high({
+    'completeness-critic': () => ({ complete: false, gaps: [{ name: 'narrowgap', rationale: 'r', effort: 'low' }] }),
+    'gap:narrowgap': capture,
+  })
+  assert.match(captured, /Effort for this area: low/)        // ran at its own low effort...
+  assert.ok(!/Effort for this area: high/.test(captured))    // ...not forced up to the run's high
+  assert.equal(result.status, 'ok')
+})
+
 test('the completeness-critic payload is projected — observation bodies are not re-sent', async () => {
   let captured = ''
   const capture = (prompt) => { captured = prompt; return { complete: true, gaps: [] } }

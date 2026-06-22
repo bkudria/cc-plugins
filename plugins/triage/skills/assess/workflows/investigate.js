@@ -522,10 +522,11 @@ if (criticRounds > 0 && allObs.length) {
         items: {
           type: 'object',
           additionalProperties: false,
-          required: ['name', 'rationale'],
+          required: ['name', 'rationale', 'effort'],
           properties: {
             name: { type: 'string', description: 'Short name for the uncovered facet (becomes a new area)' },
             rationale: { type: 'string', description: 'One line: what thread/facet is uncovered and why it matters to the overall question' },
+            effort: { type: 'string', enum: ['low', 'medium', 'high'], description: 'How much investigation this gap genuinely needs, sized the way a planner sizes an area: a binary or single-value lookup is low; a facet needing broad reading across many threads is high. This sets the gap area’s own effort — it is not forced to the run’s overall effort.' },
           },
         },
       },
@@ -549,8 +550,10 @@ if (criticRounds > 0 && allObs.length) {
       'Observations gathered so far (JSON):\n' + JSON.stringify(critiqueObs, null, 2) + '\n\n' +
       'Name only GENUINE gaps: a facet, thread, or area materially relevant to the overall question that the ' +
       'existing areas do not cover — an unplanned thread surfaced by an observation counts. Do NOT restate ' +
-      'covered ground, do NOT propose fixes, and do NOT invent gaps to seem thorough. If coverage is already ' +
-      'sufficient, set complete=true and return an empty gaps list. At most ' + MAX_GAPS_PER_ROUND + ' gaps.',
+      'covered ground, do NOT propose fixes, and do NOT invent gaps to seem thorough. For each gap, set ' +
+      'effort to how much investigation it genuinely needs, sized the way a planner sizes an area: a binary ' +
+      'or single-value lookup is low; a facet needing broad reading across many threads is high. If coverage ' +
+      'is already sufficient, set complete=true and return an empty gaps list. At most ' + MAX_GAPS_PER_ROUND + ' gaps.',
       { label: 'completeness-critic', phase: 'Completeness', schema: GAP_SCHEMA }
     ))
     if (!critique) {
@@ -565,7 +568,11 @@ if (criticRounds > 0 && allObs.length) {
       log('Completeness critic: coverage sufficient — no further investigation.')
       break
     }
-    const gapAreas = fresh.map((g) => ({ name: g.name, rationale: g.rationale, effort: clampEffort(overallEffort, effortCeiling) }))
+    // A gap runs at the effort the critic sized it to — capped by the user ceiling, exactly like an
+    // initial planner area (finalizeAreas). It is NOT forced to the run's overall effort, so a binary
+    // gap stays cheap even when another area pushed overallEffort to high. clampEffort defaults a
+    // missing/unrecognized effort to medium.
+    const gapAreas = fresh.map((g) => ({ name: g.name, rationale: g.rationale, effort: clampEffort(g.effort, effortCeiling) }))
     log('Completeness critic: investigating ' + gapAreas.length + ' gap area(s): ' + gapAreas.map((a) => a.name).join(', ') + '.')
     const gapResults = await parallel(
       gapAreas.map((a) => () => investigateArea(a, 'Completeness'))
