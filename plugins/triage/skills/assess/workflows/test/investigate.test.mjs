@@ -10,7 +10,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { helpers } from './_load.mjs'
 
-const { degradationSummary, renderAssessment, applyVerdicts, pickOverallQuestion, selectVerifyTargets, verifyTargetBudget, selectProbedKeys, summarizeAudit, runReliabilityFlags, clampEffort, collectObs } = helpers
+const { degradationSummary, renderAssessment, applyVerdicts, applyFindingCorrections, pickOverallQuestion, selectVerifyTargets, verifyTargetBudget, selectProbedKeys, summarizeAudit, runReliabilityFlags, clampEffort, collectObs } = helpers
 
 test('renderAssessment emits the deterministic assess<->iterate format contract', () => {
   const md = renderAssessment({
@@ -50,6 +50,36 @@ test('renderAssessment with no findings still renders the structural h2s', () =>
   assert.match(md, /^## Findings$/m)
   assert.match(md, /^## Summary$/m)
   assert.ok(!md.includes('### '))
+})
+
+// applyFindingCorrections: splice post-synthesis grounding corrections into the
+// synthesized findings — replace the body of each finding whose number has a correction,
+// preserve every other field and every other finding, never mutate the input.
+const finding = (number, over = {}) => ({ number, title: 'T' + number, significance: 'high', body: 'body ' + number, citations: ['c' + number], ...over })
+
+test('applyFindingCorrections: replaces only the targeted finding body, preserving other fields', () => {
+  const out = applyFindingCorrections([finding(1), finding(2)], [{ findingNumber: 2, correctedBody: 'fixed two' }])
+  assert.equal(out[0].body, 'body 1') // untouched
+  assert.equal(out[1].body, 'fixed two') // corrected
+  // every other field on the corrected finding is preserved
+  assert.deepEqual({ number: out[1].number, title: out[1].title, significance: out[1].significance, citations: out[1].citations },
+    { number: 2, title: 'T2', significance: 'high', citations: ['c2'] })
+})
+
+test('applyFindingCorrections: empty corrections returns the findings unchanged', () => {
+  const findings = [finding(1), finding(2)]
+  assert.deepEqual(applyFindingCorrections(findings, []), findings)
+})
+
+test('applyFindingCorrections: a correction for an absent finding number is ignored', () => {
+  const out = applyFindingCorrections([finding(1)], [{ findingNumber: 99, correctedBody: 'orphan' }])
+  assert.deepEqual(out, [finding(1)])
+})
+
+test('applyFindingCorrections: does not mutate the input findings', () => {
+  const input = [finding(1)]
+  applyFindingCorrections(input, [{ findingNumber: 1, correctedBody: 'mutated?' }])
+  assert.equal(input[0].body, 'body 1') // original object untouched
 })
 
 test('degradationSummary: ok when nothing is lost', () => {
@@ -319,7 +349,7 @@ test('summarizeAudit counts corrections, drops, flags, ungrounded, and reliabili
       { action: 'dropped' },
       { action: 'flagged' }, { action: 'flagged' }, { action: 'flagged' },
     ],
-    grounding: { ran: true, checked: 4, ungrounded: [{ findingNumber: 1 }, { findingNumber: 2 }] },
+    grounding: { ran: true, checked: 4, ungrounded: [{ findingNumber: 1 }, { findingNumber: 2 }], corrected: [3] },
     reliabilityFlags: ['consolidation verification failed and was skipped'],
   })
   assert.deepEqual(summary, {
@@ -331,6 +361,7 @@ test('summarizeAudit counts corrections, drops, flags, ungrounded, and reliabili
     dropped: 1,
     flagged: 3,
     ungrounded: 2,
+    groundCorrected: 1,
     reliabilityFlags: 1,
   })
 })
@@ -354,8 +385,23 @@ test('summarizeAudit on a clean run reports zeros and passes the funnel counts t
     dropped: 0,
     flagged: 0,
     ungrounded: 0,
+    groundCorrected: 0,
     reliabilityFlags: 0,
   })
+})
+
+test('summarizeAudit reports groundCorrected from the grounding.corrected list', () => {
+  const summary = summarizeAudit({
+    status: 'ok',
+    observationCount: 5,
+    synthInputCount: 5,
+    findingsCount: 3,
+    auditActions: [],
+    grounding: { ran: true, checked: 3, ungrounded: [], corrected: [1, 2] },
+    reliabilityFlags: [],
+  })
+  assert.equal(summary.groundCorrected, 2)
+  assert.equal(summary.ungrounded, 0)
 })
 
 // run-level reliability flags — disclose safeguards that silently no-op'd

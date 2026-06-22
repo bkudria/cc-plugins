@@ -86,6 +86,39 @@ test('ungrounded citations: a finding citation that does not resolve degrades th
   assert.ok(result.grounding.ungrounded.length > 0)
 })
 
+test('corrective grounding: a finding the ground agent rewrites is re-written and no longer degrades', async () => {
+  const corrected = { ungrounded: [{ citation: 'alpha.js:1', problem: 'mismatch', detail: 'says X not Y' }], correctedBody: 'CORRECTED BODY TEXT' }
+  const { result, calls } = await med({ 'ground#': () => corrected })
+  assert.ok(calls.includes('rewrite-assessment'))            // the corrective re-write fired
+  assert.ok(result.markdown.includes('CORRECTED BODY TEXT')) // the delivered document carries the fix
+  assert.deepEqual(result.grounding.ungrounded, [])          // residual is empty — everything corrected
+  assert.ok(result.grounding.corrected.length > 0)           // corrections are recorded
+  assert.equal(result.status, 'ok')                          // fully corrected → not degraded
+})
+
+test('partial correction: a corrected finding is re-written but an uncorrected mismatch still degrades', async () => {
+  const fix = { ungrounded: [{ citation: 'alpha.js:1', problem: 'mismatch', detail: 'd' }], correctedBody: 'FIXED-1' }
+  const noFix = { ungrounded: [{ citation: 'beta.js:1', problem: 'missing', detail: 'gone' }] }
+  const { result } = await med({ 'ground#1': () => fix, 'ground#2': () => noFix })
+  assert.ok(result.markdown.includes('FIXED-1'))             // finding 1 corrected in the document
+  assert.deepEqual(result.grounding.corrected, [1])          // only finding 1 corrected
+  assert.ok(result.grounding.ungrounded.some((u) => u.findingNumber === 2)) // finding 2 residual remains
+  assert.equal(result.status, 'degraded')                    // uncorrected residual keeps it degraded
+})
+
+test('no corrective re-write when grounding finds nothing to correct', async () => {
+  const { calls } = await med() // happy fixture: ground returns empty ungrounded, no correctedBody
+  assert.ok(!calls.includes('rewrite-assessment'))
+})
+
+test('corrective re-write runs on the cheap tier', async () => {
+  const corrected = { ungrounded: [{ citation: 'alpha.js:1', problem: 'mismatch', detail: 'd' }], correctedBody: 'C' }
+  const { dispatches } = await med({ 'ground#': () => corrected })
+  const rw = dispatches.find((d) => d.label === 'rewrite-assessment')
+  assert.ok(rw, 'rewrite-assessment was dispatched')
+  assert.equal(rw.model, 'sonnet')
+})
+
 test('synthesis failure: a synthesizer that fails after retry produces a failed run', async () => {
   const { result } = await med({ synthesize: THROW })
   assert.equal(result.status, 'failed')
@@ -147,7 +180,7 @@ test('model tiers: mechanical roles are pinned to the cheap tier; judgment roles
   // Pinned to the cheap tier: the area/gap investigators, the per-lens verifiers
   // (verify:<lens>#i), the grounding agents, and the verbatim write-agent — none reason.
   const CHEAP_PREFIX = /^(area:|gap:|verify:|ground#)/
-  const CHEAP_EXACT = new Set(['write-assessment'])
+  const CHEAP_EXACT = new Set(['write-assessment', 'rewrite-assessment'])
   // Inherit the caller's model: the judgment roles. NB: bare 'verify' is the consolidation
   // verifier (judgment) — distinct from the 'verify:<lens>#i' per-lens verifiers above.
   const INHERIT = new Set(['plan', 'plan-critic', 'plan-revise', 'completeness-critic', 'verify', 'synthesize'])
@@ -185,6 +218,32 @@ test('the completeness-critic payload is projected — observation bodies are no
   assert.ok(captured.includes('SENTINEL_TITLE'))        // title (coverage signal) is present
   assert.ok(!captured.includes('SENTINEL_BODY_PROSE'))  // body prose is NOT re-sent
   assert.ok(!captured.includes('"body"'))               // the projection drops the body field entirely
+})
+
+test('read-only sub-agents are told to confine searches to scope, not scan $HOME or the filesystem root', async () => {
+  // The investigator and the grounding agent both run live filesystem searches. Without a
+  // breadth guardrail, an agent that cannot locate a path falls back to `find /` / `find ~`,
+  // which is pathologically slow and, on macOS, blocks on per-app data-access prompts. The
+  // guardrail lives once in READ_ONLY_TOOLS; grounding must reuse it (no inline drift), so
+  // both prompts must carry it.
+  let investPrompt = ''
+  let groundPrompt = ''
+  const captureInvest = (prompt, opts) => {
+    investPrompt = prompt
+    return { area: opts.label.slice(opts.label.indexOf(':') + 1), observations: [
+      { title: 't', body: 'b', evidence: ['x.js:1'], significance: 'high' },
+    ] }
+  }
+  const captureGround = (prompt) => { groundPrompt = prompt; return { ungrounded: [] } }
+  await med({ 'area:alpha': captureInvest, 'ground#': captureGround })
+
+  for (const [role, prompt] of [['investigator', investPrompt], ['grounding', groundPrompt]]) {
+    assert.ok(prompt, `${role} prompt was captured`)
+    // Positive: searches must be confined to the scope.
+    assert.match(prompt, /confine/i, `${role} must be told to confine searches to the scope`)
+    // Negative: the whole-machine traversals must be named as forbidden.
+    assert.match(prompt, /home directory|filesystem root/i, `${role} must forbid scanning $HOME / the filesystem root`)
+  }
 })
 
 test('low effort: plan-critic, completeness, lenses, and grounding are skipped and the run stays ok', async () => {
