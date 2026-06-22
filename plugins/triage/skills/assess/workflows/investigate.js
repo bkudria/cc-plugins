@@ -8,7 +8,7 @@ export const meta = {
     { title: 'Completeness', detail: 'critic names coverage gaps; effort-scaled targeted re-investigation' },
     { title: 'Verify', detail: 'per-observation adversarial lenses on the most significant observations; verdicts applied in code (drop/correct), then a cross-area consolidation barrier, with a verification audit trail in the result' },
     { title: 'Synthesize', detail: 'merge/filter/order into structured numbered findings, render the markdown deterministically, and write the file; a degraded or failed run is reflected in the result status and coverage' },
-    { title: 'Ground', detail: 'post-synthesis grounding: re-read each finding citation against source and flag any that do not resolve' },
+    { title: 'Ground', detail: 'post-synthesis grounding: re-read each finding citation against source, flag any that do not resolve, and re-write the file to correct any finding whose body contradicts source' },
   ],
 }
 
@@ -118,7 +118,8 @@ const observationOnlyRule = (role) => {
     case 'verifier':
       return OBS_ONLY_BASE + ' Do NOT add new findings; report only verification results and corrections.'
     case 'grounding':
-      return OBS_ONLY_BASE + ' This is a FLAG-ONLY pass: do NOT rewrite the finding or invent new findings.'
+      return OBS_ONLY_BASE + ' Do NOT invent new findings. When the source contradicts the finding, you MAY ' +
+        'return a corrected, observation-only body for THAT finding; otherwise leave it untouched.'
     default:
       return OBS_ONLY_BASE
   }
@@ -189,6 +190,7 @@ const summarizeAudit = ({ status, observationCount, synthInputCount, findingsCou
     dropped: count('dropped'),
     flagged: count('flagged'),
     ungrounded: grounding && Array.isArray(grounding.ungrounded) ? grounding.ungrounded.length : 0,
+    groundCorrected: grounding && Array.isArray(grounding.corrected) ? grounding.corrected.length : 0,
     reliabilityFlags: Array.isArray(reliabilityFlags) ? reliabilityFlags.length : 0,
   }
 }
@@ -234,6 +236,19 @@ const renderAssessment = ({ assessmentTitle, scopeSummary, areasCovered, finding
   }
   parts.push('## Summary', '', summary, '')
   return parts.join('\n')
+}
+/* test-seam:pure-fn:end */
+
+// Splice post-synthesis grounding corrections into the synthesized findings: replace the
+// body of each finding whose number has a correction, preserving every other field and every
+// other finding, never mutating the input. The corrective re-render after Ground rests on
+// this, so it is unit-tested in isolation. A correction whose findingNumber matches no finding
+// is ignored; empty corrections return the findings unchanged. Pure (findings + corrections
+// in, new findings array out — no injected globals).
+/* test-seam:pure-fn:start */
+const applyFindingCorrections = (findings, corrections) => {
+  const byNumber = new Map(corrections.map((c) => [c.findingNumber, c.correctedBody]))
+  return findings.map((f) => (byNumber.has(f.number) ? { ...f, body: byNumber.get(f.number) } : f))
 }
 /* test-seam:pure-fn:end */
 
@@ -903,7 +918,9 @@ const synth = allObs.length ? await withRetry('synthesize', () => agent(
 // On the empty-observation path synth is null and the document is rendered deterministically;
 // otherwise it is rendered from the synthesizer's structured output.
 const synthStructured = allObs.length === 0 || !!(synth && Array.isArray(synth.findings))
-const markdown = allObs.length === 0
+// `markdown` is the document the run returns; the corrective Ground stage below may re-render
+// it (and re-write the file) when grounding finds a fixable mismatch, so it is reassignable.
+let markdown = allObs.length === 0
   ? renderAssessment({ assessmentTitle: scope, scopeSummary: scope, areasCovered: completedAreaNames.join(', ') || 'none', findings: [], summary: 'The investigation completed but produced no observations.' })
   : (synthStructured ? renderAssessment(synth) : '')
 // The workflow script has no filesystem access, so persisting the rendered document goes
@@ -926,16 +943,19 @@ log('Synthesis ' + (synthOk
   ? 'written to ' + finalPath + ' (' + findingsCount + ' findings)'
   : 'FAILED — no trustworthy file') + '.')
 
-// ---- Ground (post-synthesis citation grounding; gated; flag-only) -----------
+// ---- Ground (post-synthesis citation grounding; gated; corrective) ----------
 // The synthesizer reshapes observations into findings (merge / split / renumber) with no
 // read-only tools, so nothing has re-grounded the FINAL findings against source — the
 // pre-synthesis Verify stage only ever saw the observations, not the post-merge findings.
-// One read-only agent per finding re-reads that finding's structured citations and flags any
-// that do not resolve. Purely additive: it never edits the written .md (the synthesizer's
-// file stands) and records results only in the returned audit trail. Bounded to the top-K
-// significance-ordered findings and fanned out in parallel (like the verify stage) so cost
-// and wall-clock stay flat; gated like the other added stages so a low-effort or zero-
-// finding run skips it.
+// One read-only agent per finding re-reads that finding's structured citations, flags any
+// that do not resolve, and — when a mismatch means the body itself contradicts source —
+// returns a corrected body. Corrected findings are spliced back in, the document is
+// re-rendered, and the file is re-written once (the sole exception to "the synthesizer's
+// file stands"); everything else is additive audit trail. Only a PERSISTED correction clears
+// a finding from the degrading set — a failed re-write leaves the original wrong body, so
+// those findings stay ungrounded. Bounded to the top-K significance-ordered findings and
+// fanned out in parallel (like the verify stage) so cost and wall-clock stay flat; gated like
+// the other added stages so a low-effort or zero-finding run skips it.
 phase('Ground')
 const GROUND_SCHEMA = {
   type: 'object',
@@ -955,10 +975,12 @@ const GROUND_SCHEMA = {
         },
       },
     },
+    correctedBody: { type: 'string', description: 'If a "mismatch" means the finding\'s body states something the source contradicts: the finding\'s body rewritten so every claim matches what the source actually shows — the same single observation-only paragraph, changing only what was wrong. Omit when nothing in the body needs fixing.' },
   },
 }
 const synthFindings = (synth && synth.findings) || []
-let grounding = { ran: false, checked: 0, ungrounded: [] }
+let grounding = { ran: false, checked: 0, ungrounded: [], corrected: [] }
+let rewriteFailed = false
 if (overallEffort !== 'low' && synthFindings.length) {
   // Findings are significance-ordered (most impactful first), so the top-K are the ones
   // worth grounding; each runs in its own read-only agent, in parallel.
@@ -970,20 +992,51 @@ if (overallEffort !== 'low' && synthFindings.length) {
       'Scope: ' + scope + '\n\n' +
       'Finding (JSON, with the structured citations it rests on):\n' + JSON.stringify(fnd, null, 2) + '\n\n' +
       'Independently open each cited location and confirm it exists and says what the finding claims. ' +
-      observationOnlyRule('grounding') + ' Report ONLY citations that fail to ground:\n' +
+      observationOnlyRule('grounding') + ' Report every citation that fails to ground in "ungrounded":\n' +
       '- "missing": the cited file, or that line region, does not exist.\n' +
       '- "mismatch": the source exists but says something materially different from what the finding claims.\n' +
       '- "unverifiable": the citation is too vague to locate, or its basis could not be checked.\n' +
-      'If every citation resolves, return an empty "ungrounded" list.',
+      'When a "mismatch" means the finding\'s body states something the source contradicts, ALSO return a ' +
+      '"correctedBody" — the body rewritten so every claim matches what the source actually shows, in the same ' +
+      'single observation-only paragraph, changing only what was wrong and keeping the rest verbatim. ' +
+      'If every citation resolves, return an empty "ungrounded" list and no "correctedBody".',
       { label: 'ground#' + fnd.number, phase: 'Ground', schema: GROUND_SCHEMA, model: 'sonnet' }
-    ).then((r) => r && { findingNumber: fnd.number, ungrounded: r.ungrounded || [] })
+    ).then((r) => r && { findingNumber: fnd.number, ungrounded: r.ungrounded || [], correctedBody: r.correctedBody })
   )
   const groundResults = (await parallel(groundJobs)).filter(Boolean)
-  const ungrounded = groundResults.flatMap((r) =>
+  const detected = groundResults.flatMap((r) =>
     r.ungrounded.map((u) => Object.assign({ findingNumber: r.findingNumber }, u)))
-  grounding = { ran: true, checked: groundResults.length, ungrounded }
+  // Splice any corrected bodies back into the findings, re-render, and re-write the file — but
+  // only count a correction once it is actually persisted, so a failed re-write keeps those
+  // findings in the degrading set rather than silently claiming a fix that never landed.
+  const correctable = groundResults
+    .filter((r) => r.correctedBody)
+    .map((r) => ({ findingNumber: r.findingNumber, correctedBody: r.correctedBody }))
+  let correctedNumbers = []
+  if (correctable.length && synthOk) {
+    const correctedMarkdown = renderAssessment({ ...synth, findings: applyFindingCorrections(synthFindings, correctable) })
+    const rewrote = await withRetry('rewrite-assessment', () => agent(
+      'Write the following CORRECTED assessment document verbatim to exactly this path using the Write tool, ' +
+      'overwriting the existing file: ' + outPath + '\n' +
+      'Do NOT edit, reformat, summarize, re-order, or add anything — write it byte-for-byte as given. Then return ' +
+      'whether the write succeeded and the path written.\n\n' +
+      '----- BEGIN DOCUMENT -----\n' + correctedMarkdown + '\n----- END DOCUMENT -----',
+      // Cheap tier: a verbatim Write with no reasoning (see model-tier strategy above).
+      { label: 'rewrite-assessment', phase: 'Ground', schema: WRITE_SCHEMA, model: 'sonnet' }
+    ))
+    if (rewrote && rewrote.written) {
+      markdown = correctedMarkdown
+      correctedNumbers = correctable.map((c) => c.findingNumber)
+      log('Corrective grounding: re-wrote ' + correctedNumbers.length + ' finding(s) against source.')
+    } else {
+      rewriteFailed = true
+      log('Corrective grounding: ' + correctable.length + ' correction(s) found but the re-write failed; the original document stands.')
+    }
+  }
+  const ungrounded = detected.filter((u) => !correctedNumbers.includes(u.findingNumber))
+  grounding = { ran: true, checked: groundResults.length, ungrounded, corrected: correctedNumbers }
   log('Grounding: ' + grounding.checked + ' of ' + synthFindings.length + ' finding(s) checked (top ' +
-    groundTargets.length + '), ' + ungrounded.length + ' citation(s) unresolved.')
+    groundTargets.length + '), ' + correctedNumbers.length + ' corrected, ' + ungrounded.length + ' citation(s) unresolved.')
 }
 
 // Status is derived only now — after grounding — so ungrounded citations can degrade the run
@@ -1002,6 +1055,7 @@ const { status, coverage } = degradationSummary({
 })
 const reliabilityFlags = [
   ...runReliabilityFlags({ planCriticFailed, completenessCriticFailed, verdictsReceived: verdicts.length, verdictsExpected }),
+  ...(rewriteFailed ? ['post-synthesis corrections were found but the corrective re-write failed; the original document stands'] : []),
   ...((verification && verification.reliabilityFlags) || []),
 ]
 log('Run status=' + status + (reliabilityFlags.length ? '; ' + reliabilityFlags.length + ' reliability flag(s).' : '.'))
