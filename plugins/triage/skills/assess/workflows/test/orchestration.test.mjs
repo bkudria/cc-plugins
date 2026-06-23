@@ -238,6 +238,28 @@ test('the completeness-critic payload is projected — observation bodies are no
   assert.ok(!captured.includes('"body"'))               // the projection drops the body field entirely
 })
 
+test('plan-critic baseline: the critic is given the scope-size scaling rule to judge area count against', async () => {
+  // The planner has explicit scaling rules (single file 1-3 areas, module 4-6, ...), but the critic
+  // was asked to judge "count vs scope" with no baseline. It must now receive the same rule, or it
+  // cannot catch over-decomposition (e.g. a single file split into six areas).
+  let captured = ''
+  const capture = (prompt) => { captured = prompt; return { sound: true, issues: [] } }
+  const { calls } = await med({ 'plan-critic': capture })
+  assert.ok(calls.includes('plan-critic'))   // the critic actually ran
+  assert.match(captured, /1-3 areas/)        // the single-file bucket...
+  assert.match(captured, /4-6 areas/)        // ...and the module bucket are present as the count baseline
+})
+
+test('plan-critic payload: each area carries its effort so over-granularity is visible', async () => {
+  // The projection stripped effort (name + rationale only), hiding "many low-effort areas on one
+  // file" from the critic. The per-area effort must now reach the critic. Fixture areas are medium.
+  let captured = ''
+  const capture = (prompt) => { captured = prompt; return { sound: true, issues: [] } }
+  const { calls } = await med({ 'plan-critic': capture })
+  assert.ok(calls.includes('plan-critic'))
+  assert.match(captured, /"effort": "medium"/)   // effort is no longer stripped from the projection
+})
+
 test('read-only sub-agents are told to confine searches to scope, not scan $HOME or the filesystem root', async () => {
   // The investigator and the grounding agent both run live filesystem searches. Without a
   // breadth guardrail, an agent that cannot locate a path falls back to `find /` / `find ~`,

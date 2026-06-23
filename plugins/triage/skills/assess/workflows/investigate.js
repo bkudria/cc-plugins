@@ -306,6 +306,13 @@ const PLAN_REVIEW_SCHEMA = {
 const ceilingNote = effortCeiling
   ? 'The user capped effort at "' + effortCeiling + '" — do NOT assign any area a higher effort than that, and lean toward fewer areas.\n'
   : 'No effort cap was given — allocate adaptively to fit the scope you find.\n'
+// Scaling rules (area count vs. scope size), shared verbatim by the planner prompt and the plan-
+// critic so the critic judges the count against the same baseline the planner allocated against.
+const SCALING_RULES =
+  'Scaling rules (area count vs. scope size):\n' +
+  '- Narrow / simple scope (a single file, a small config): 1-3 areas.\n' +
+  '- Moderate scope (a feature, a module): 4-6 areas.\n' +
+  '- Broad / complex scope (a whole subsystem, cross-cutting concerns): up to ' + MAX_AREAS + ' areas.\n'
 // One source of truth for how to decompose the scope, used for the initial plan and
 // for the plan-critic's single revision. `revisionNote` is empty on the first pass and
 // carries the critique on a re-plan, so both plans obey identical decomposition rules.
@@ -314,10 +321,7 @@ const buildPlanPrompt = (revisionNote) =>
   'Scope: ' + scope + '\n' +
   'Focus: ' + focus + '\n\n' +
   'First judge how complex this scope actually is, then allocate investigation resources to match — ' +
-  'do not over-invest in a simple scope. Scaling rules:\n' +
-  '- Narrow / simple scope (a single file, a small config): 1-3 areas.\n' +
-  '- Moderate scope (a feature, a module): 4-6 areas.\n' +
-  '- Broad / complex scope (a whole subsystem, cross-cutting concerns): up to ' + MAX_AREAS + ' areas.\n' +
+  'do not over-invest in a simple scope. ' + SCALING_RULES +
   ceilingNote + '\n' +
   'Break the scope into semi-independent areas that TOGETHER cohesively investigate the overall question — ' +
   'facets of one investigation, not a disconnected inventory. Each area should be explorable on its own. ' +
@@ -367,8 +371,9 @@ const pickOverallQuestion = ({ plan, revised, scope }) => {
 let overallQuestion = pickOverallQuestion({ plan, scope })
 
 // ---- Plan critic (gated; one bounded revision) ------------------------------
-// Before paying for fan-out, a no-tool critic judges the decomposition for coverage,
-// disjointness, and count. Gated on effort + size so simple scopes skip it. On a genuine
+// Before paying for fan-out, a critic judges the decomposition for coverage, disjointness, and
+// count from the plan ALONE — it has tools but is instructed not to investigate. Gated on
+// effort + size so simple scopes skip it. On a genuine
 // problem one revised plan is requested through the same prompt and bounds; a revision
 // that yields nothing usable falls back to the original plan.
 if (overallEffort !== 'low' && areas.length >= PLAN_CRITIC_MIN_AREAS) {
@@ -379,13 +384,18 @@ if (overallEffort !== 'low' && areas.length >= PLAN_CRITIC_MIN_AREAS) {
     'Overall question: ' + overallQuestion + '\n' +
     'Focus: ' + focus + '\n\n' +
     'Proposed areas (JSON):\n' +
-    JSON.stringify(areas.map((a) => ({ name: a.name, rationale: a.rationale })), null, 2) + '\n\n' +
+    JSON.stringify(areas.map((a) => ({ name: a.name, rationale: a.rationale, effort: a.effort })), null, 2) + '\n\n' +
+    'The planner was given these same scaling rules; hold the area count against them:\n' + SCALING_RULES + '\n' +
     'Judge the decomposition on three axes:\n' +
     '- coverage: do the areas TOGETHER cover the overall question, or is a material facet left out?\n' +
     '- overlap: do any two areas investigate the same ground (which would duplicate cost)?\n' +
-    '- count: is the number of areas sized to the scope, or clearly too many / too few?\n\n' +
-    'Name only GENUINE structural problems. Do NOT investigate the scope, do NOT propose fixes, and do NOT ' +
-    'invent issues to seem thorough. If the decomposition is sound, set sound=true and return an empty issues list.',
+    '- count: is the number of areas sized to the scope per the scaling rules above, or clearly too ' +
+    'many (a single-file scope split into many areas is over-decomposed) / too few? Many low-effort ' +
+    'areas on a narrow scope is a sign of over-decomposition.\n\n' +
+    'Judge ONLY from the plan above — you have tools but must NOT read files, run commands, or ' +
+    'investigate the scope; reach your verdict from the areas, rationales, efforts, and scaling rules ' +
+    'alone. Name only GENUINE structural problems, do NOT propose fixes, and do NOT invent issues to ' +
+    'seem thorough. If the decomposition is sound, set sound=true and return an empty issues list.',
     { label: 'plan-critic', phase: 'Plan', schema: PLAN_REVIEW_SCHEMA }
   ))
   const issues = (review && review.issues) || []
