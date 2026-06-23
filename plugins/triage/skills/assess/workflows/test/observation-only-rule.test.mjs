@@ -56,5 +56,8 @@ test('the rule does not categorically ban descriptive modals (regression guard)'
 
 test('verifier and grounding carry their role-specific clauses', () => {
   assert.match(observationOnlyRule('verifier'), /new findings/i)
-  assert.match(observationOnlyRule('grounding'), /flag-only/i)
+  // Grounding is no longer flag-only: it may return a corrected body, but must not invent
+  // new findings.
+  assert.match(observationOnlyRule('grounding'), /new findings/i)
+  assert.match(observationOnlyRule('grounding'), /correct/i)
 })

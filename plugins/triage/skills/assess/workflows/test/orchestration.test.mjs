@@ -59,12 +59,64 @@ test('total verdict loss: every lens verdict lost degrades the run and flags it'
   assert.ok(result.reliabilityFlags.some((f) => /every verdict was lost/.test(f)))
 })
 
+test('large run: every area is adversarially probed even when area count exceeds the minimum budget', async () => {
+  // Seven areas (one observation each) — above MAX_VERIFY_TARGETS (6). With a fixed
+  // budget the per-area floor fills all six slots with the first six areas and the
+  // seventh (the kind of area completeness adds) gets zero lens coverage. The verify
+  // label is 'verify:<lens>#<i>' where i is the observation's original index, so the
+  // set of distinct indices probed is the set of observations that got any lens.
+  const sevenAreaPlan = {
+    overallQuestion: 'Is the thing sound?',
+    effortRationale: 'seven facets',
+    areas: Array.from({ length: 7 }, (_, n) => ({ name: 'area' + n, rationale: 'why ' + n, effort: 'medium' })),
+  }
+  const { result, calls } = await med({ plan: sevenAreaPlan })
+  const probedIdx = new Set(
+    calls.filter((l) => l.startsWith('verify:')).map((l) => l.slice(l.indexOf('#') + 1))
+  )
+  assert.equal(probedIdx.size, 7) // every area's observation was probed, not just the first six
+  assert.equal(result.status, 'ok')
+})
+
 test('ungrounded citations: a finding citation that does not resolve degrades the run', async () => {
   const ungrounded = { ungrounded: [{ citation: 'x.js:1', problem: 'missing', detail: 'no such line' }] }
   const { result, calls } = await med({ 'ground#': () => ungrounded })
   assert.ok(calls.some((l) => l.startsWith('ground#')))
   assert.equal(result.status, 'degraded')
   assert.ok(result.grounding.ungrounded.length > 0)
+})
+
+test('corrective grounding: a finding the ground agent rewrites is re-written and no longer degrades', async () => {
+  const corrected = { ungrounded: [{ citation: 'alpha.js:1', problem: 'mismatch', detail: 'says X not Y' }], correctedBody: 'CORRECTED BODY TEXT' }
+  const { result, calls } = await med({ 'ground#': () => corrected })
+  assert.ok(calls.includes('rewrite-assessment'))            // the corrective re-write fired
+  assert.ok(result.markdown.includes('CORRECTED BODY TEXT')) // the delivered document carries the fix
+  assert.deepEqual(result.grounding.ungrounded, [])          // residual is empty — everything corrected
+  assert.ok(result.grounding.corrected.length > 0)           // corrections are recorded
+  assert.equal(result.status, 'ok')                          // fully corrected → not degraded
+})
+
+test('partial correction: a corrected finding is re-written but an uncorrected mismatch still degrades', async () => {
+  const fix = { ungrounded: [{ citation: 'alpha.js:1', problem: 'mismatch', detail: 'd' }], correctedBody: 'FIXED-1' }
+  const noFix = { ungrounded: [{ citation: 'beta.js:1', problem: 'missing', detail: 'gone' }] }
+  const { result } = await med({ 'ground#1': () => fix, 'ground#2': () => noFix })
+  assert.ok(result.markdown.includes('FIXED-1'))             // finding 1 corrected in the document
+  assert.deepEqual(result.grounding.corrected, [1])          // only finding 1 corrected
+  assert.ok(result.grounding.ungrounded.some((u) => u.findingNumber === 2)) // finding 2 residual remains
+  assert.equal(result.status, 'degraded')                    // uncorrected residual keeps it degraded
+})
+
+test('no corrective re-write when grounding finds nothing to correct', async () => {
+  const { calls } = await med() // happy fixture: ground returns empty ungrounded, no correctedBody
+  assert.ok(!calls.includes('rewrite-assessment'))
+})
+
+test('corrective re-write runs on the cheap tier', async () => {
+  const corrected = { ungrounded: [{ citation: 'alpha.js:1', problem: 'mismatch', detail: 'd' }], correctedBody: 'C' }
+  const { dispatches } = await med({ 'ground#': () => corrected })
+  const rw = dispatches.find((d) => d.label === 'rewrite-assessment')
+  assert.ok(rw, 'rewrite-assessment was dispatched')
+  assert.equal(rw.model, 'sonnet')
 })
 
 test('synthesis failure: a synthesizer that fails after retry produces a failed run', async () => {
@@ -128,7 +180,7 @@ test('model tiers: mechanical roles are pinned to the cheap tier; judgment roles
   // Pinned to the cheap tier: the area/gap investigators, the per-lens verifiers
   // (verify:<lens>#i), the grounding agents, and the verbatim write-agent — none reason.
   const CHEAP_PREFIX = /^(area:|gap:|verify:|ground#)/
-  const CHEAP_EXACT = new Set(['write-assessment'])
+  const CHEAP_EXACT = new Set(['write-assessment', 'rewrite-assessment'])
   // Inherit the caller's model: the judgment roles. NB: bare 'verify' is the consolidation
   // verifier (judgment) — distinct from the 'verify:<lens>#i' per-lens verifiers above.
   const INHERIT = new Set(['plan', 'plan-critic', 'plan-revise', 'completeness-critic', 'verify', 'synthesize'])
@@ -151,6 +203,24 @@ test('completeness gap that keeps failing is re-proposable and never consumes a 
   assert.equal(result.coverage.completed, 3)
   assert.ok(result.coverage.dropped.includes('flaky'))
   assert.equal(result.status, 'degraded') // lost coverage, but observations remain
+})
+
+test('gap effort: a self-assessed low gap runs at its own low effort even when the run is high', async () => {
+  // overallEffort is 'high' (the ceiling), but the completeness critic sizes this gap 'low' (a
+  // binary/lookup facet). The gap must run at its OWN effort, not inherit the run's high. The
+  // investigator prompt embeds 'Effort for this area: <effort>', so the gap's effort is observable.
+  let captured = ''
+  const capture = (prompt) => {
+    captured = prompt
+    return { area: 'narrowgap', observations: [{ title: 't', body: 'b', evidence: ['x.js:1'], significance: 'high' }] }
+  }
+  const { result } = await high({
+    'completeness-critic': () => ({ complete: false, gaps: [{ name: 'narrowgap', rationale: 'r', effort: 'low' }] }),
+    'gap:narrowgap': capture,
+  })
+  assert.match(captured, /Effort for this area: low/)        // ran at its own low effort...
+  assert.ok(!/Effort for this area: high/.test(captured))    // ...not forced up to the run's high
+  assert.equal(result.status, 'ok')
 })
 
 test('the completeness-critic payload is projected — observation bodies are not re-sent', async () => {
@@ -185,6 +255,54 @@ test('synthesizer payload: corrections reach the synthesizer without re-sending 
   assert.match(captured, /WHY_CORRECTED/)                // ...with its rationale (why)
   assert.ok(!captured.includes('"was"'))                 // the body-duplicating `was` field is gone
   assert.ok(!captured.includes('significanceDowngrade')) // audit-only downgrade provenance is gone
+})
+
+test('plan-critic baseline: the critic is given the scope-size scaling rule to judge area count against', async () => {
+  // The planner has explicit scaling rules (single file 1-3 areas, module 4-6, ...), but the critic
+  // was asked to judge "count vs scope" with no baseline. It must now receive the same rule, or it
+  // cannot catch over-decomposition (e.g. a single file split into six areas).
+  let captured = ''
+  const capture = (prompt) => { captured = prompt; return { sound: true, issues: [] } }
+  const { calls } = await med({ 'plan-critic': capture })
+  assert.ok(calls.includes('plan-critic'))   // the critic actually ran
+  assert.match(captured, /1-3 areas/)        // the single-file bucket...
+  assert.match(captured, /4-6 areas/)        // ...and the module bucket are present as the count baseline
+})
+
+test('plan-critic payload: each area carries its effort so over-granularity is visible', async () => {
+  // The projection stripped effort (name + rationale only), hiding "many low-effort areas on one
+  // file" from the critic. The per-area effort must now reach the critic. Fixture areas are medium.
+  let captured = ''
+  const capture = (prompt) => { captured = prompt; return { sound: true, issues: [] } }
+  const { calls } = await med({ 'plan-critic': capture })
+  assert.ok(calls.includes('plan-critic'))
+  assert.match(captured, /"effort": "medium"/)   // effort is no longer stripped from the projection
+})
+
+test('read-only sub-agents are told to confine searches to scope, not scan $HOME or the filesystem root', async () => {
+  // The investigator and the grounding agent both run live filesystem searches. Without a
+  // breadth guardrail, an agent that cannot locate a path falls back to `find /` / `find ~`,
+  // which is pathologically slow and, on macOS, blocks on per-app data-access prompts. The
+  // guardrail lives once in READ_ONLY_TOOLS; grounding must reuse it (no inline drift), so
+  // both prompts must carry it.
+  let investPrompt = ''
+  let groundPrompt = ''
+  const captureInvest = (prompt, opts) => {
+    investPrompt = prompt
+    return { area: opts.label.slice(opts.label.indexOf(':') + 1), observations: [
+      { title: 't', body: 'b', evidence: ['x.js:1'], significance: 'high' },
+    ] }
+  }
+  const captureGround = (prompt) => { groundPrompt = prompt; return { ungrounded: [] } }
+  await med({ 'area:alpha': captureInvest, 'ground#': captureGround })
+
+  for (const [role, prompt] of [['investigator', investPrompt], ['grounding', groundPrompt]]) {
+    assert.ok(prompt, `${role} prompt was captured`)
+    // Positive: searches must be confined to the scope.
+    assert.match(prompt, /confine/i, `${role} must be told to confine searches to the scope`)
+    // Negative: the whole-machine traversals must be named as forbidden.
+    assert.match(prompt, /home directory|filesystem root/i, `${role} must forbid scanning $HOME / the filesystem root`)
+  }
 })
 
 test('low effort: plan-critic, completeness, lenses, and grounding are skipped and the run stays ok', async () => {
