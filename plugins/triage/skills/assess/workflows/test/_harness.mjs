@@ -62,6 +62,7 @@ const HAPPY = {
     summary: 'sum',
   },
   'write-assessment': { written: true, path: '/tmp/assessment-test.md' },
+  'rewrite-assessment': { written: true, path: '/tmp/assessment-test.md' },
 }
 
 const areaOf = (label) => label.slice(label.indexOf(':') + 1)

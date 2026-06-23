@@ -8,7 +8,7 @@ argument-hint: "[scope to investigate, e.g. 'this codebase' or 'the auth module'
 
 Investigate a scope and produce a structured, numbered findings assessment. Each finding describes an observation, problem, or opportunity — never a solution or fix. Output is designed for consumption by the `iterate` skill.
 
-The investigation itself — planning areas, investigating each in parallel, checking coverage for gaps with targeted re-investigation, cross-verifying claims, synthesizing the numbered findings and writing the file, then grounding each finding's citations against source — runs as a background Workflow defined in `workflows/investigate.js`. **That script is the single source of truth for investigation behavior, output format, and the observation-only discipline.** This skill resolves the scope, then delegates to it.
+The investigation itself — planning areas, investigating each in parallel, checking coverage for gaps with targeted re-investigation, cross-verifying claims, synthesizing the numbered findings and writing the file, then grounding each finding's citations against source and re-writing the file to correct any finding whose body contradicts source — runs as a background Workflow defined in `workflows/investigate.js`. **That script is the single source of truth for investigation behavior, output format, and the observation-only discipline.** This skill resolves the scope, then delegates to it.
 
 ## When to Use
 
@@ -91,6 +91,12 @@ Workflow({
 Enter Phase 3 only when the genuine `<task-notification>` for the workflow's task id arrives with `status: completed`. Its payload carries the investigation result described in Phase 2. A long `markdown` is truncated in the notification, so the written file is the complete copy.
 
 1. `Read` the canonical file the workflow wrote — `/tmp/assessment-${CLAUDE_SESSION_ID}.md` — and output its full contents **verbatim** in the conversation: reproduce the document exactly as written, preserving every `### N.` finding heading, `**Significance**:` line, and body paragraph. Do NOT reorganize, regroup (e.g. by severity), renumber, summarize, or collapse findings into a list — the document's structure is deterministic and is consumed downstream, so reshaping it breaks `iterate`'s recovery and the format contract. Reading retrieves the complete assessment the notification may have truncated; do not re-write the file (the workflow already did).
-2. State: "Assessment saved to `/tmp/assessment-${CLAUDE_SESSION_ID}.md` — run `/triage:iterate` to process findings."
+2. **If `status` is not `ok`, surface the reliability state** after the verbatim output (the document you just read already reflects any corrections the workflow persisted — the corrective grounding pass re-writes the file in place). Report, as a short caveat block:
+   - **Auto-corrections** — when `grounding.corrected` is non-empty, state that N finding(s) were automatically corrected against source after synthesis (they are already fixed in the file above).
+   - **Unresolved citations** — list each remaining entry in `grounding.ungrounded` (its `findingNumber`, `citation`, `problem`, and `detail`) as a caveat the reader should weigh before acting on that finding.
+   - **Reliability flags** — surface any `reliabilityFlags` (e.g. a skipped critic, partial verification, or a failed corrective re-write).
+
+   This is surfacing only: do NOT edit the file or rephrase findings to "fix" the residual — the corrections that could be made were already applied by the workflow; what remains is what it could not auto-correct.
+3. State: "Assessment saved to `/tmp/assessment-${CLAUDE_SESSION_ID}.md` — run `/triage:iterate` to process findings."
 
 **Never fabricate.** If no genuine completion notification has arrived, or the result carries an `error` (no scope, no areas planned), or `findingsCount` is 0, say so plainly — never reconstruct findings by investigating the scope yourself, and never act on a completion you have not actually received. The findings format and observation-only rules are enforced inside the workflow; do not re-run or post-edit the assessment to "fix" its phrasing — if it drifts, the fix belongs in `workflows/investigate.js`.
