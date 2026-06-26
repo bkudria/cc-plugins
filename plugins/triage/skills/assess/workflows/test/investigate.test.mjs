@@ -10,7 +10,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { helpers } from './_load.mjs'
 
-const { degradationSummary, renderAssessment, applyVerdicts, applyFindingCorrections, pickOverallQuestion, selectVerifyTargets, verifyTargetBudget, selectProbedKeys, summarizeAudit, runReliabilityFlags, clampEffort, collectObs } = helpers
+const { degradationSummary, renderAssessment, applyVerdicts, applyFindingCorrections, pickOverallQuestion, selectVerifyTargets, verifyTargetBudget, selectProbedKeys, summarizeAudit, runReliabilityFlags, clampEffort, deriveOverallEffort, collectObs } = helpers
 
 test('renderAssessment emits the deterministic assess<->iterate format contract', () => {
   const md = renderAssessment({
@@ -526,4 +526,38 @@ test('verifyTargetBudget: at the cap the budget equals the cap', () => {
 
 test('verifyTargetBudget: above the cap the budget is clamped to the cap', () => {
   assert.equal(verifyTargetBudget(15, 6, 12), 12)
+})
+
+// deriveOverallEffort: derive the run's single cross-cutting effort from the per-area
+// efforts. A user ceiling wins outright; otherwise it is the MEDIAN of the areas' efforts
+// (not the max), so a lone high area no longer escalates the whole run. EFFORT_LEVELS =
+// ['low', 'medium', 'high'].
+test('deriveOverallEffort: a user ceiling overrides the areas and is returned as-is', () => {
+  assert.equal(deriveOverallEffort([{ effort: 'low' }, { effort: 'high' }], 'high'), 'high')
+  assert.equal(deriveOverallEffort([{ effort: 'high' }, { effort: 'high' }], 'medium'), 'medium')
+})
+
+test('deriveOverallEffort: no ceiling returns the median, not the max — a lone high no longer escalates', () => {
+  // The session case: 2 of 5 areas high, the rest lower → median is medium, not high.
+  assert.equal(deriveOverallEffort([{ effort: 'high' }, { effort: 'high' }, { effort: 'medium' }, { effort: 'low' }, { effort: 'low' }], null), 'medium')
+  // A single high among lows → low.
+  assert.equal(deriveOverallEffort([{ effort: 'high' }, { effort: 'low' }, { effort: 'low' }, { effort: 'low' }, { effort: 'low' }], null), 'low')
+})
+
+test('deriveOverallEffort: a single area is its own median (no damping with nothing to aggregate)', () => {
+  assert.equal(deriveOverallEffort([{ effort: 'high' }], null), 'high')
+})
+
+test('deriveOverallEffort: uniform efforts return that level', () => {
+  assert.equal(deriveOverallEffort([{ effort: 'medium' }, { effort: 'medium' }, { effort: 'medium' }], null), 'medium')
+})
+
+test('deriveOverallEffort: even area counts average the two central efforts, ties rounding toward thorough', () => {
+  assert.equal(deriveOverallEffort([{ effort: 'low' }, { effort: 'high' }], null), 'medium') // (0+2)/2 = 1
+  assert.equal(deriveOverallEffort([{ effort: 'medium' }, { effort: 'high' }], null), 'high') // (1+2)/2 = 1.5 -> 2
+  assert.equal(deriveOverallEffort([{ effort: 'low' }, { effort: 'medium' }], null), 'medium') // (0+1)/2 = 0.5 -> 1
+})
+
+test('deriveOverallEffort: an unrecognized effort falls back to medium', () => {
+  assert.equal(deriveOverallEffort([{ effort: 'bogus' }, { effort: 'bogus' }, { effort: 'bogus' }], null), 'medium')
 })
