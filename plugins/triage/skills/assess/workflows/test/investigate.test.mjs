@@ -10,7 +10,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { helpers } from './_load.mjs'
 
-const { degradationSummary, renderAssessment, applyVerdicts, applyFindingCorrections, pickOverallQuestion, selectVerifyTargets, verifyTargetBudget, selectProbedKeys, summarizeAudit, runReliabilityFlags, clampEffort, collectObs } = helpers
+const { degradationSummary, renderAssessment, applyVerdicts, applyFindingCorrections, pickOverallQuestion, selectVerifyTargets, verifyTargetBudget, selectProbedKeys, summarizeAudit, runReliabilityFlags, clampEffort, collectObs, renderOrientation } = helpers
 
 test('renderAssessment emits the deterministic assess<->iterate format contract', () => {
   const md = renderAssessment({
@@ -526,4 +526,43 @@ test('verifyTargetBudget: at the cap the budget equals the cap', () => {
 
 test('verifyTargetBudget: above the cap the budget is clamped to the cap', () => {
   assert.equal(verifyTargetBudget(15, 6, 12), 12)
+})
+
+// renderOrientation builds the shared source-orientation block injected into every area
+// investigator's prompt from the one-time digest. It is pure (digest in, prompt-block string
+// out) and degrades to '' for a missing/empty digest, so a failed or skipped digest leaves the
+// investigators reading source unaided — today's behaviour.
+test('renderOrientation: a missing digest renders no block', () => {
+  assert.equal(renderOrientation(null), '')
+  assert.equal(renderOrientation(undefined), '')
+  assert.equal(renderOrientation({}), '')
+})
+
+test('renderOrientation: a digest with no landmarks renders no block, even with an overview', () => {
+  assert.equal(renderOrientation({ overview: 'O', landmarks: [] }), '')
+})
+
+test('renderOrientation: a populated digest renders the overview and one line per landmark', () => {
+  const block = renderOrientation({
+    overview: 'OVERVIEW_TEXT',
+    landmarks: [
+      { location: 'f.js:1-2', what: 'WHAT_ONE', relevance: 'REL_ONE' },
+      { location: 'g.js:9', what: 'WHAT_TWO', relevance: 'REL_TWO' },
+    ],
+  })
+  // The overview and every landmark's parts are present.
+  for (const part of ['OVERVIEW_TEXT', 'f.js:1-2', 'WHAT_ONE', 'REL_ONE', 'g.js:9', 'WHAT_TWO', 'REL_TWO']) {
+    assert.ok(block.includes(part), 'block should include ' + part)
+  }
+  // Framed as an orientation map, and as a guide rather than a substitute for reading source.
+  assert.match(block, /orientation map/i)
+  assert.match(block, /still .*source|guide, not a substitute/i)
+  // Exactly one rendered landmark line per landmark.
+  assert.equal(block.split('\n').filter((l) => l.startsWith('- ')).length, 2)
+})
+
+test('renderOrientation: an absent overview is omitted but landmarks still render', () => {
+  const block = renderOrientation({ landmarks: [{ location: 'h.js:3', what: 'W', relevance: 'R' }] })
+  assert.ok(block.includes('h.js:3'))
+  assert.equal(block.split('\n').filter((l) => l.startsWith('- ')).length, 1)
 })

@@ -58,7 +58,7 @@ If the scope is broad (entire codebase, "everything"), ask for priority areas or
 
 ## Phase 2: Investigate (delegated)
 
-Once the scope is resolved, run the investigation workflow. It plans the areas, investigates each in parallel (observation-only), checks coverage for gaps with targeted re-investigation, cross-verifies overlapping claims, synthesizes the numbered assessment and writes it to disk, then grounds each finding's citations against source.
+Once the scope is resolved, run the investigation workflow. It plans the areas, reads the source once to share an orientation map with the area investigators, investigates each area in parallel (observation-only), checks coverage for gaps with targeted re-investigation, cross-verifies overlapping claims, synthesizes the numbered assessment and writes it to disk, then grounds each finding's citations against source.
 
 Invoke:
 
