@@ -504,26 +504,27 @@ test('collectObs: empty input yields an empty list', () => {
   assert.deepEqual(collectObs([]), [])
 })
 
-// verifyTargetBudget sizes the adversarial-lens budget so every area is guaranteed a
-// floor slot: it stays at the minimum for small runs, grows with the area count, and
-// is clamped to the total-area cap. This is what stops completeness-added areas from
-// falling off the right side of the top-K ranking once area count reaches the minimum.
-test('verifyTargetBudget: fewer areas than the minimum keeps the minimum budget', () => {
-  assert.equal(verifyTargetBudget(3, 6, 12), 6)
+// verifyTargetBudget sizes the adversarial-lens budget so every area gets a floor slot
+// AND the global-significance fill keeps headroom above it: it stays at the minimum for
+// tiny runs, then grows as area-count + headroom, clamped to the total-area cap. Without
+// the headroom the budget equalled the area count once area-count reached the minimum, so
+// the per-area floor consumed every slot and the global fill was starved to zero.
+test('verifyTargetBudget: very few areas keep the minimum budget (headroom under the floor)', () => {
+  assert.equal(verifyTargetBudget(2, 6, 12, 4), 6)
 })
 
-test('verifyTargetBudget: at the minimum boundary the budget is the minimum', () => {
-  assert.equal(verifyTargetBudget(6, 6, 12), 6)
+test('verifyTargetBudget: area count at the minimum gets headroom above the floor for global fill', () => {
+  assert.equal(verifyTargetBudget(6, 6, 12, 4), 10)
 })
 
-test('verifyTargetBudget: more areas than the minimum scales the budget to the area count', () => {
-  assert.equal(verifyTargetBudget(10, 6, 12), 10)
+test('verifyTargetBudget: more areas scale the budget to area count + headroom, clamped', () => {
+  assert.equal(verifyTargetBudget(10, 6, 12, 4), 12)
 })
 
 test('verifyTargetBudget: at the cap the budget equals the cap', () => {
-  assert.equal(verifyTargetBudget(12, 6, 12), 12)
+  assert.equal(verifyTargetBudget(12, 6, 12, 4), 12)
 })
 
 test('verifyTargetBudget: above the cap the budget is clamped to the cap', () => {
-  assert.equal(verifyTargetBudget(15, 6, 12), 12)
+  assert.equal(verifyTargetBudget(15, 6, 12, 4), 12)
 })

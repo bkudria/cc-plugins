@@ -78,6 +78,34 @@ test('large run: every area is adversarially probed even when area count exceeds
   assert.equal(result.status, 'ok')
 })
 
+test('global-fill headroom: a hot area\'s second observation is probed, not just one per area', async () => {
+  // Six areas — the starvation boundary, where the old budget equalled the area count (6) so the
+  // per-area floor consumed every slot and the global-significance fill never ran. area0 carries a
+  // SECOND high observation, so allObs is [area0#0, area0#1, area1, area2, area3, area4, area5] and
+  // index 1 is area0's extra. The floor fills six slots (one per area); only the headroom that lifts
+  // the budget above six lets the global fill reach index 1 — the globally-top observation the floor
+  // skipped. Without the headroom, index 1 is never probed.
+  const sixAreaPlan = {
+    overallQuestion: 'Is the thing sound?',
+    effortRationale: 'six facets',
+    areas: Array.from({ length: 6 }, (_, n) => ({ name: 'area' + n, rationale: 'why ' + n, effort: 'medium' })),
+  }
+  const area0TwoObs = {
+    area: 'area0',
+    observations: [
+      { title: 'area0 observation', body: 'b', evidence: ['area0.js:1'], significance: 'high' },
+      { title: 'area0 second', body: 'b2', evidence: ['area0.js:2'], significance: 'high' },
+    ],
+  }
+  const { result, calls } = await med({ plan: sixAreaPlan, 'area:area0': area0TwoObs })
+  const probedIdx = new Set(
+    calls.filter((l) => l.startsWith('verify:')).map((l) => l.slice(l.indexOf('#') + 1))
+  )
+  assert.ok(probedIdx.has('1'))   // area0's second (globally-top) observation got a lens
+  assert.equal(probedIdx.size, 7) // all seven observations probed under the headroom budget
+  assert.equal(result.status, 'ok')
+})
+
 test('ungrounded citations: a finding citation that does not resolve degrades the run', async () => {
   const ungrounded = { ungrounded: [{ citation: 'x.js:1', problem: 'missing', detail: 'no such line' }] }
   const { result, calls } = await med({ 'ground#': () => ungrounded })

@@ -66,6 +66,11 @@ const VERIFY_INTENSITY = {
 // observation count, and a consolidation agent preserves the cross-reference and
 // numeric spot-check the single-pass verifier did.
 const MAX_VERIFY_TARGETS = 6
+// Extra budget reserved above the per-area floor for the global-significance fill, so a
+// high-area run isn't limited to one observation per area: the budget is area-count + this,
+// leaving these slots for the globally-top observations the floor skipped. Tunable; at 4 the
+// budget reaches MAX_TOTAL_AREAS (12) by ~8 areas.
+const VERIFY_GLOBAL_FILL_HEADROOM = 4
 // Post-synthesis grounding re-reads each finding's cited source. Bounded like the verify
 // stage: only the top-K significance-ordered findings are grounded, so cost and wall-clock
 // stay flat regardless of how many findings synthesis emits.
@@ -767,15 +772,16 @@ const selectVerifyTargets = (obs, maxK) => {
 }
 /* test-seam:pure-fn:end */
 
-// Size the adversarial-lens budget so every area is guaranteed a floor slot. The
-// budget is the area count, never below the minimum and never above the total-area
-// cap. Without this the budget was fixed at the minimum, so once the area count
-// reached it the per-area floor (selectVerifyTargets) filled every slot with the
-// first areas and completeness-added areas got zero lens coverage. Caps are passed
-// in (not referenced as module constants) so the pure-fn test seam can load it.
+// Size the adversarial-lens budget so every area gets a floor slot AND the global-
+// significance fill keeps headroom above it. The budget is area-count + headroom, never
+// below the minimum and never above the total-area cap. Without the headroom the budget
+// equalled the area count once area-count reached the minimum, so the per-area floor
+// (selectVerifyTargets) consumed every slot and the global fill was starved to zero — only
+// one observation per area was ever probed. Caps and headroom are passed in (not referenced
+// as module constants) so the pure-fn test seam can load it.
 /* test-seam:pure-fn:start */
-const verifyTargetBudget = (distinctAreaCount, minBudget, maxCap) =>
-  Math.min(maxCap, Math.max(minBudget, distinctAreaCount))
+const verifyTargetBudget = (distinctAreaCount, minBudget, maxCap, headroom) =>
+  Math.min(maxCap, Math.max(minBudget, distinctAreaCount + headroom))
 /* test-seam:pure-fn:end */
 
 // The consolidation verifier is told which observations were "already probed and
@@ -817,13 +823,14 @@ if (!lenses.length || !allObs.length) {
 } else {
   // Area-aware target selection: a per-area floor (every area's best observation)
   // then significance-fill, so the top-K lens budget spreads across areas instead
-  // of concentrating on whichever one sorts first. The budget scales with the area
-  // count (bounded by MAX_TOTAL_AREAS) so every area keeps a floor slot even when
-  // completeness pushes the count past MAX_VERIFY_TARGETS — otherwise the floor
-  // would fill on the first areas and later ones would get zero lens coverage.
+  // of concentrating on whichever one sorts first. The budget is the area count plus
+  // VERIFY_GLOBAL_FILL_HEADROOM (bounded by MAX_TOTAL_AREAS): every area keeps a floor
+  // slot even when completeness pushes the count past MAX_VERIFY_TARGETS, and the
+  // headroom leaves slots for the global fill so a hot area's second observation is
+  // still probed instead of the floor consuming the whole budget.
   // Deterministic — no Date/Math.random (both forbidden in the harness).
   const distinctAreas = new Set(allObs.map((o) => o.area)).size
-  const targets = selectVerifyTargets(allObs, verifyTargetBudget(distinctAreas, MAX_VERIFY_TARGETS, MAX_TOTAL_AREAS))
+  const targets = selectVerifyTargets(allObs, verifyTargetBudget(distinctAreas, MAX_VERIFY_TARGETS, MAX_TOTAL_AREAS, VERIFY_GLOBAL_FILL_HEADROOM))
   log('Adversarial verify: ' + lenses.length + ' lens(es) over the top ' + targets.length +
     ' of ' + allObs.length + ' observation(s).')
   const verdictJobs = []
