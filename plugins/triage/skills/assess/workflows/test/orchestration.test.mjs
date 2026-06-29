@@ -11,6 +11,8 @@ import { runWorkflow, withOverrides, THROW } from './_harness.mjs'
 const low = (overrides) => runWorkflow({ args: { scope: 's', effort: 'low' }, agent: withOverrides(overrides) })
 const med = (overrides) => runWorkflow({ args: { scope: 's', effort: 'medium' }, agent: withOverrides(overrides) })
 const high = (overrides) => runWorkflow({ args: { scope: 's', effort: 'high' }, agent: withOverrides(overrides) })
+// No effort ceiling: the planner's per-area efforts decide the run's overall effort (the median).
+const adaptive = (overrides) => runWorkflow({ args: { scope: 's' }, agent: withOverrides(overrides) })
 
 test('ok baseline: a fully happy run reports ok with findings and no reliability flags', async () => {
   const { result, calls } = await med()
@@ -152,6 +154,49 @@ test('high effort: the overclaim lens is dispatched at high but not at medium', 
   assert.ok(hi.calls.some((l) => l.startsWith('verify:overclaim#')))
   const lo = await med()
   assert.ok(!lo.calls.some((l) => l.startsWith('verify:overclaim#')))
+})
+
+test('adaptive (no ceiling): a lone-high minority yields the median effort, not the max — the overclaim lens stays off', async () => {
+  // 2 of 5 areas rated high, the rest lower. The old max rule made this a 'high' run; the
+  // median lands it at 'medium', so the high-only overclaim lens never fires, while the
+  // medium-gated stages (plan-critic, completeness, grounding) still do.
+  const fiveAreas = {
+    overallQuestion: 'Is the thing sound?',
+    effortRationale: 'mixed facets',
+    areas: [
+      { name: 'a1', rationale: 'r', effort: 'high' },
+      { name: 'a2', rationale: 'r', effort: 'high' },
+      { name: 'a3', rationale: 'r', effort: 'medium' },
+      { name: 'a4', rationale: 'r', effort: 'low' },
+      { name: 'a5', rationale: 'r', effort: 'low' },
+    ],
+  }
+  const { result, calls } = await adaptive({ plan: fiveAreas })
+  assert.equal(result.effort, 'medium') // median of [high, high, medium, low, low]
+  assert.ok(!calls.some((l) => l.startsWith('verify:overclaim#'))) // high-only lens does not fire
+  // Sanity: genuinely medium (not damped all the way to low) — the medium-gated stages fired.
+  assert.ok(calls.includes('plan-critic'))
+  assert.ok(calls.includes('completeness-critic'))
+  assert.ok(calls.some((l) => l.startsWith('ground#')))
+})
+
+test('plan revision honors the user effort ceiling (the post-revision recompute cannot drop below it)', async () => {
+  // The critic rejects the plan; the revised plan's areas are all 'low'. Under a 'high'
+  // ceiling the run's effort must stay 'high' (the ceiling wins), not collapse to the
+  // revised areas' median — i.e. the post-revision effort recompute must still pass the ceiling.
+  const rejected = { sound: false, issues: [{ kind: 'overlap', detail: 'areas overlap' }] }
+  const revisedLow = {
+    overallQuestion: 'Is the thing sound?',
+    effortRationale: 'revised',
+    areas: [
+      { name: 'b1', rationale: 'r', effort: 'low' },
+      { name: 'b2', rationale: 'r', effort: 'low' },
+      { name: 'b3', rationale: 'r', effort: 'low' },
+    ],
+  }
+  const { result, calls } = await high({ 'plan-critic': rejected, 'plan-revise': revisedLow })
+  assert.ok(calls.includes('plan-revise')) // the revision path actually fired
+  assert.equal(result.effort, 'high') // ceiling preserved through the recompute, not dropped to the revised median
 })
 
 test('high effort: the completeness loop runs at most EFFORT_ROUNDS.high (2) gap rounds', async () => {
