@@ -336,7 +336,9 @@ const buildPlanPrompt = (revisionNote) =>
   'do not over-invest in a simple scope. ' + SCALING_RULES +
   ceilingNote + '\n' +
   'Break the scope into semi-independent areas that TOGETHER cohesively investigate the overall question — ' +
-  'facets of one investigation, not a disconnected inventory. Each area should be explorable on its own. ' +
+  'facets of one investigation, not a disconnected inventory. Each area should be explorable on its own, and ' +
+  'the areas must be mutually distinct: each investigates ground no other area covers, so no two areas ' +
+  'duplicate the same work. ' +
   'For each area give a short name, a one-line rationale, and an effort level (low / medium / high) sized to ' +
   'how much that facet warrants. Also give a one-line effortRationale for the overall allocation. ' +
   (revisionNote || '') +
@@ -359,6 +361,9 @@ const finalizeAreas = (raw) => {
   }
   return a.map((x) => ({ ...x, effort: clampEffort(x.effort, effortCeiling) }))
 }
+// Case/whitespace-insensitive area-name key, so a completeness gap that merely re-cases or re-spaces
+// an existing area name is treated as the same area (the exact-name filter let such duplicates through).
+const normName = (s) => String(s).trim().toLowerCase().replace(/\s+/g, ' ')
 /* test-seam:pure-fn:start */
 // Overall effort = the user ceiling when set, else the MEDIAN of the areas' efforts
 // (previously the max). The median ignores a lone high outlier, so one area rated
@@ -676,7 +681,8 @@ if (criticRounds > 0 && allObs.length) {
       'Areas already investigated (do NOT propose any of these again): ' + areaNames.join('; ') + '\n\n' +
       'Observations gathered so far (JSON):\n' + JSON.stringify(critiqueObs, null, 2) + '\n\n' +
       'Name only GENUINE gaps: a facet, thread, or area materially relevant to the overall question that the ' +
-      'existing areas do not cover — an unplanned thread surfaced by an observation counts. Do NOT restate ' +
+      'existing areas do not cover — an unplanned thread surfaced by an observation counts. A gap must be a ' +
+      'facet none of the existing areas covers, not the same theme under a different name. Do NOT restate ' +
       'covered ground, do NOT propose fixes, and do NOT invent gaps to seem thorough. For each gap, set ' +
       'effort to how much investigation it genuinely needs, sized the way a planner sizes an area: a binary ' +
       'or single-value lookup is low; a facet needing broad reading across many threads is high. If coverage ' +
@@ -689,7 +695,7 @@ if (criticRounds > 0 && allObs.length) {
       break
     }
     const fresh = ((critique && critique.gaps) || [])
-      .filter((g) => g && g.name && !areaNames.includes(g.name))
+      .filter((g) => g && g.name && !areaNames.some((n) => normName(n) === normName(g.name)))
       .slice(0, headroom)
     if ((critique && critique.complete) || !fresh.length) {
       log('Completeness critic: coverage sufficient — no further investigation.')
