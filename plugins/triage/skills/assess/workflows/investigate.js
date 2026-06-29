@@ -1052,9 +1052,9 @@ const synth = allObs.length ? await withRetry('synthesize', () => agent(
   'Areas covered: ' + completedAreaNames.join(', ') + '\n\n' +
   coverageNote +
   'Observations (JSON) — already reconciled against per-observation verification; honor any ' +
-  '"verificationNotes" field (applied corrections / reliability flags):\n' + JSON.stringify(verifiedObs, null, 2) + '\n\n' +
-  'Cross-area verification results (apply these corrections; drop or fix any claim flagged unreliable):\n' +
-  JSON.stringify(verification, null, 2) + '\n\n' +
+  '"verificationNotes" field (applied corrections / reliability flags):\n' + JSON.stringify(verifiedObs) + '\n\n' +
+  'Cross-area verification corrections (apply these):\n' +
+  JSON.stringify((verification && verification.corrections) || []) + '\n\n' +
   'SYNTHESIS RULES:\n' +
   '- Sub-agent numbering is discarded. Each finding number comes from significance order (most impactful first), ' +
   'and each finding carries an explicit significance of high/medium/low — the highest significance among the ' +

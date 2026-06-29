@@ -344,6 +344,27 @@ test('synthesizer payload: corrections reach the synthesizer without re-sending 
   assert.ok(!captured.includes('significanceDowngrade')) // audit-only downgrade provenance is gone
 })
 
+test('synthesizer payload: consolidation corrections reach the synthesizer; audit-only verifier fields do not', async () => {
+  // The whole consolidation `verification` object used to be JSON.stringify'd into the synth prompt.
+  // Only `corrections` is actionable there; `reliabilityFlags` is already surfaced in the result and
+  // `checksPerformed` is audit-only — both must be projected out of this (Opus-tier, largest) prompt.
+  const verification = {
+    checksPerformed: ['CHECK_SENTINEL'],
+    corrections: [{ claim: 'CLAIM_SENTINEL', issue: 'ISSUE_SENTINEL', correctedClaim: 'FIXED_SENTINEL' }],
+    reliabilityFlags: ['FLAG_SENTINEL'],
+  }
+  let captured = ''
+  const capture = (prompt) => {
+    captured = prompt
+    return { assessmentTitle: 'T', scopeSummary: 's', areasCovered: 'a', findings: [], summary: 'sum' }
+  }
+  const { calls } = await med({ verify: verification, synthesize: capture })
+  assert.ok(calls.includes('synthesize'))          // the synthesizer actually ran
+  assert.match(captured, /FIXED_SENTINEL/)         // the actionable correction reaches it...
+  assert.ok(!captured.includes('FLAG_SENTINEL'))   // ...but reliabilityFlags are not duplicated (surfaced in the result instead)
+  assert.ok(!captured.includes('CHECK_SENTINEL'))  // ...and audit-only checksPerformed is not sent
+})
+
 test('plan-critic baseline: the critic is given the scope-size scaling rule to judge area count against', async () => {
   // The planner has explicit scaling rules (single file 1-3 areas, module 4-6, ...), but the critic
   // was asked to judge "count vs scope" with no baseline. It must now receive the same rule, or it
