@@ -347,16 +347,34 @@ const finalizeAreas = (raw) => {
   }
   return a.map((x) => ({ ...x, effort: clampEffort(x.effort, effortCeiling) }))
 }
-// Overall effort = the user ceiling if set, else the most ambitious area's effort.
-const deriveOverallEffort = (a) => effortCeiling ||
-  EFFORT_LEVELS[Math.max.apply(null, a.map((x) => EFFORT_LEVELS.indexOf(x.effort)))]
+/* test-seam:pure-fn:start */
+// Overall effort = the user ceiling when set, else the MEDIAN of the areas' efforts
+// (previously the max). The median ignores a lone high outlier, so one area rated
+// 'high' no longer escalates the run's cross-cutting QA (extra completeness rounds,
+// the overclaim lens, grounding, plan-critic); per-area investigation depth is
+// unaffected, since each investigator keys off its own area.effort. Even area counts
+// average the two central efforts (ties round toward the more thorough level). Ceiling
+// is passed in (not the module closure var) so the pure-fn test seam can load it.
+const deriveOverallEffort = (areas, ceiling) => {
+  if (ceiling) return ceiling
+  const med = EFFORT_LEVELS.indexOf('medium')
+  const idx = (areas || []).map((x) => {
+    const i = EFFORT_LEVELS.indexOf(x.effort)
+    return i === -1 ? med : i
+  }).sort((a, b) => a - b)
+  if (!idx.length) return EFFORT_LEVELS[med]
+  const n = idx.length
+  const mid = n % 2 ? idx[(n - 1) / 2] : Math.round((idx[n / 2 - 1] + idx[n / 2]) / 2)
+  return EFFORT_LEVELS[mid]
+}
+/* test-seam:pure-fn:end */
 
 let areas = finalizeAreas((plan && plan.areas) || [])
 if (!areas.length) {
   log('Planner produced no areas; nothing to investigate.')
   return { status: 'failed', error: 'no areas planned', scope, findingsCount: 0 }
 }
-let overallEffort = deriveOverallEffort(areas)
+let overallEffort = deriveOverallEffort(areas, effortCeiling)
 /* test-seam:pure-fn:start */
 // Select the overall question that frames every post-plan agent. A revised plan's
 // question (when a revision is adopted and carries one) supersedes the original
@@ -415,7 +433,7 @@ if (overallEffort !== 'low' && areas.length >= PLAN_CRITIC_MIN_AREAS) {
     const revisedAreas = finalizeAreas((revised && revised.areas) || [])
     if (revisedAreas.length) {
       areas = revisedAreas
-      overallEffort = deriveOverallEffort(areas)
+      overallEffort = deriveOverallEffort(areas, effortCeiling)
       overallQuestion = pickOverallQuestion({ plan, revised, scope })
       log('Revised plan: ' + areas.length + ' area(s).')
     } else {
