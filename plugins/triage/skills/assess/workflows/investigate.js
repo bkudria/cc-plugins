@@ -4,6 +4,7 @@ export const meta = {
   whenToUse: 'Invoked by the assess skill (by path) once scope/focus/effort are resolved. Runs Phases 2-4 headless; the skill keeps Phase 0-1 (scope resolution + interview).',
   phases: [
     { title: 'Plan', detail: 'break the scope into semi-independent areas' },
+    { title: 'Digest', detail: 'read the source once; share an orientation map with the area investigators' },
     { title: 'Investigate', detail: 'one agent per area, observation-only, in parallel' },
     { title: 'Completeness', detail: 'critic names coverage gaps; effort-scaled targeted re-investigation' },
     { title: 'Verify', detail: 'per-observation adversarial lenses on the most significant observations; verdicts applied in code (drop/correct), then a cross-area consolidation barrier, with a verification audit trail in the result' },
@@ -43,6 +44,12 @@ const MAX_AREAS = 8
 // enough areas for coverage/overlap problems to be real; below this a 1-2 area split
 // can't meaningfully be mis-divided, so the critic is skipped.
 const PLAN_CRITIC_MIN_AREAS = 3
+// The source digest reads the source ONCE and shares an orientation map with the area
+// investigators so they target their reads instead of each re-ingesting the whole source. It
+// only pays off when there is fan-out to amortize across, so it is gated to runs with at least
+// this many areas (a single area would just mean two full reads — digest + lone investigator —
+// instead of one).
+const DIGEST_MIN_AREAS = 2
 // Completeness-critic loop: max critic rounds scale with overall effort, so
 // simple scopes never pay for it. Each round may surface a few gap areas, hard-
 // capped so initial + gap areas can never run away.
@@ -447,6 +454,89 @@ if (overallEffort !== 'low' && areas.length >= PLAN_CRITIC_MIN_AREAS) {
 const areaNames = areas.map((a) => a.name)
 log('Investigating ' + areas.length + ' area(s) at ' + overallEffort + ' effort: ' + areaNames.join(', '))
 
+/* test-seam:pure-fn:start */
+// Render the one-time source digest into the orientation block injected into every area
+// investigator's prompt. The digest is shared ORIENTATION, not a source replacement:
+// investigators still read source for depth, so the block points them at landmarks rather
+// than standing in for it. Returns '' for a missing/empty digest, so a failed or skipped
+// digest degrades to today's behaviour (investigators read source unaided).
+const renderOrientation = (digest) => {
+  const marks = (digest && digest.landmarks) || []
+  if (!marks.length) return ''
+  const lines = marks.map((m) => '- ' + m.location + ' — ' + m.what + ' (' + m.relevance + ')')
+  return 'Shared source orientation map (the source was read once for the whole investigation; ' +
+    'use these landmarks to target your reads — they are a guide, not a substitute, so still ' +
+    'confirm against source):\n' +
+    (digest.overview ? digest.overview + '\n' : '') +
+    lines.join('\n')
+}
+/* test-seam:pure-fn:end */
+
+// ---- Source digest (one-time orientation map; shared by the area investigators) ----------
+// One cheap-tier agent absorbs the single expensive full-source read (and any chunking a large
+// source needs) ONCE, then hands every area investigator a shared orientation map so they target
+// their reads instead of each re-ingesting the whole source. Gated to runs with real fan-out
+// (>= DIGEST_MIN_AREAS areas) and off at low effort, where a quick scan should not pay a front
+// barrier. The map is advisory: verify and grounding keep full raw-source access (they re-derive
+// citations against actual source), and investigators still read source for depth — so a failed or
+// skipped digest degrades cleanly to unaided investigation (renderOrientation returns '').
+const DIGEST_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['overview', 'landmarks'],
+  properties: {
+    overview: { type: 'string', description: '1-3 sentences orienting the reader to the source as a whole' },
+    landmarks: {
+      type: 'array',
+      // Bounded: the map is re-sent to every investigator, so an unbounded map would recreate the
+      // payload duplication it removes. Keep it a compact set of the load-bearing landmarks.
+      maxItems: 20,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['location', 'what', 'relevance'],
+        properties: {
+          location: { type: 'string', description: 'Concrete pointer: file path with an optional line range, e.g. src/foo.js:120-145' },
+          what: { type: 'string', description: 'What is at this location' },
+          relevance: { type: 'string', description: 'Why it matters to the investigation / which thread it bears on' },
+        },
+      },
+    },
+  },
+}
+let orientation = ''
+if (overallEffort !== 'low' && areas.length >= DIGEST_MIN_AREAS) {
+  phase('Digest')
+  // Non-critical: a thrown or null digest must not abort the run, and we deliberately do not
+  // retry — a front-loaded optional step should not add a serial retry barrier to every run.
+  let digest = null
+  try {
+    digest = await agent(
+      'You are the source digest for a parallel investigation (an assessment). A team of ' +
+      'investigators is about to examine this scope; you read the source ONCE so they do not each ' +
+      're-ingest it.\n' +
+      'Scope: ' + scope + '\n' +
+      'Overall question: ' + overallQuestion + '\n' +
+      'Areas the investigators will examine (orient toward these — do NOT investigate or judge them ' +
+      'yourself): ' + areaNames.join('; ') + '\n' +
+      'Surface landmarks relevant to: ' + focus + '\n\n' +
+      READ_ONLY_TOOLS + '\n\n' +
+      'Read the source in full once (chunk large files across multiple reads rather than truncating). ' +
+      'Produce a compact orientation map: for each load-bearing landmark give a concrete location ' +
+      '(file path + line range), what is there, and why it matters. This is ORIENTATION, not findings: ' +
+      'point investigators at where things are so they can target their reads — do NOT draw conclusions, ' +
+      'judge significance, or propose anything. Keep it compact and point to the source; do not reproduce it.',
+      { label: 'source-digest', phase: 'Digest', schema: DIGEST_SCHEMA, model: 'sonnet' }
+    )
+  } catch (e) {
+    digest = null
+  }
+  orientation = renderOrientation(digest)
+  log(orientation
+    ? 'Source orientation map: ' + ((digest && digest.landmarks) || []).length + ' landmark(s) shared with investigators.'
+    : 'Source digest produced no usable map; investigators will read source unaided.')
+}
+
 // ---- Investigate (parallel fan-out, observation-only) -----------------------
 phase('Investigate')
 const OBS_SCHEMA = {
@@ -477,8 +567,9 @@ const OBS_SCHEMA = {
 }
 // ---- model-tier strategy ----------------------------------------------------
 // Two tiers. The mechanical / IO-bound roles pin `model: 'sonnet'` (the cheap tier):
-// the area & gap investigators (here), the per-lens verifiers ('verify:<lens>#i'), the
-// grounding agents ('ground#n'), and the verbatim write-agent ('write-assessment') — they
+// the source digest ('source-digest'), the area & gap investigators (here), the per-lens
+// verifiers ('verify:<lens>#i'), the grounding agents ('ground#n'), and the verbatim
+// write-agent ('write-assessment') — they
 // read, cross-check, or transcribe; none reason about the assessment as a whole. The
 // judgment roles omit `model` and inherit the caller's top tier (Opus in production):
 // the planner, plan-critic/revise, completeness-critic, consolidation verifier ('verify'),
@@ -495,6 +586,7 @@ const investigateArea = (a, phaseName) =>
     'Investigate the area "' + a.name + '" within this scope: ' + scope + '\n' +
     'Why this area matters: ' + a.rationale + '\n' +
     'Overall question: ' + overallQuestion + '\n' +
+    (orientation ? orientation + '\n\n' : '') +
     'Other areas in this investigation (context only — do NOT investigate these): ' +
     areaNames.filter((n) => n !== a.name).join('; ') + '\n' +
     'Look for: ' + focus + '\n' +
