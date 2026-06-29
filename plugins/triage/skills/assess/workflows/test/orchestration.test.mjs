@@ -11,6 +11,8 @@ import { runWorkflow, withOverrides, THROW } from './_harness.mjs'
 const low = (overrides) => runWorkflow({ args: { scope: 's', effort: 'low' }, agent: withOverrides(overrides) })
 const med = (overrides) => runWorkflow({ args: { scope: 's', effort: 'medium' }, agent: withOverrides(overrides) })
 const high = (overrides) => runWorkflow({ args: { scope: 's', effort: 'high' }, agent: withOverrides(overrides) })
+// No effort ceiling: the planner's per-area efforts decide the run's overall effort (the median).
+const adaptive = (overrides) => runWorkflow({ args: { scope: 's' }, agent: withOverrides(overrides) })
 
 test('ok baseline: a fully happy run reports ok with findings and no reliability flags', async () => {
   const { result, calls } = await med()
@@ -182,6 +184,49 @@ test('high effort: the overclaim lens is dispatched at high but not at medium', 
   assert.ok(!lo.calls.some((l) => l.startsWith('verify:overclaim#')))
 })
 
+test('adaptive (no ceiling): a lone-high minority yields the median effort, not the max — the overclaim lens stays off', async () => {
+  // 2 of 5 areas rated high, the rest lower. The old max rule made this a 'high' run; the
+  // median lands it at 'medium', so the high-only overclaim lens never fires, while the
+  // medium-gated stages (plan-critic, completeness, grounding) still do.
+  const fiveAreas = {
+    overallQuestion: 'Is the thing sound?',
+    effortRationale: 'mixed facets',
+    areas: [
+      { name: 'a1', rationale: 'r', effort: 'high' },
+      { name: 'a2', rationale: 'r', effort: 'high' },
+      { name: 'a3', rationale: 'r', effort: 'medium' },
+      { name: 'a4', rationale: 'r', effort: 'low' },
+      { name: 'a5', rationale: 'r', effort: 'low' },
+    ],
+  }
+  const { result, calls } = await adaptive({ plan: fiveAreas })
+  assert.equal(result.effort, 'medium') // median of [high, high, medium, low, low]
+  assert.ok(!calls.some((l) => l.startsWith('verify:overclaim#'))) // high-only lens does not fire
+  // Sanity: genuinely medium (not damped all the way to low) — the medium-gated stages fired.
+  assert.ok(calls.includes('plan-critic'))
+  assert.ok(calls.includes('completeness-critic'))
+  assert.ok(calls.some((l) => l.startsWith('ground#')))
+})
+
+test('plan revision honors the user effort ceiling (the post-revision recompute cannot drop below it)', async () => {
+  // The critic rejects the plan; the revised plan's areas are all 'low'. Under a 'high'
+  // ceiling the run's effort must stay 'high' (the ceiling wins), not collapse to the
+  // revised areas' median — i.e. the post-revision effort recompute must still pass the ceiling.
+  const rejected = { sound: false, issues: [{ kind: 'overlap', detail: 'areas overlap' }] }
+  const revisedLow = {
+    overallQuestion: 'Is the thing sound?',
+    effortRationale: 'revised',
+    areas: [
+      { name: 'b1', rationale: 'r', effort: 'low' },
+      { name: 'b2', rationale: 'r', effort: 'low' },
+      { name: 'b3', rationale: 'r', effort: 'low' },
+    ],
+  }
+  const { result, calls } = await high({ 'plan-critic': rejected, 'plan-revise': revisedLow })
+  assert.ok(calls.includes('plan-revise')) // the revision path actually fired
+  assert.equal(result.effort, 'high') // ceiling preserved through the recompute, not dropped to the revised median
+})
+
 test('high effort: the completeness loop runs at most EFFORT_ROUNDS.high (2) gap rounds', async () => {
   let round = 0
   const alwaysGap = () => { round += 1; return { complete: false, gaps: [{ name: 'gap-' + round, rationale: 'r' }] } }
@@ -192,6 +237,20 @@ test('high effort: the completeness loop runs at most EFFORT_ROUNDS.high (2) gap
   assert.ok(calls.includes('gap:gap-2'))
   // 3 initial areas + 2 dispatched gap rounds.
   assert.equal(result.coverage.planned, 5)
+})
+
+test('high effort: a round that surfaces no new observations stops the loop early (diminishing returns)', async () => {
+  // The critic keeps naming a fresh gap every round, so absent any guard the round cap would run 2.
+  let round = 0
+  const alwaysGap = () => { round += 1; return { complete: false, gaps: [{ name: 'gap-' + round, rationale: 'r' }] } }
+  // ...but each gap area is investigated SUCCESSFULLY and returns zero observations. Coverage does
+  // not grow, so the loop must stop after round 1 rather than pay for round 2's serial barrier.
+  const emptyGap = (_p, opts) => ({ area: opts.label.slice(opts.label.indexOf(':') + 1), observations: [] })
+  const { result, calls } = await high({ 'completeness-critic': alwaysGap, 'gap:': emptyGap })
+  assert.equal(calls.filter((l) => l === 'completeness-critic').length, 1) // round 2's critic never runs
+  assert.ok(calls.includes('gap:gap-1'))   // round 1 did investigate its gap
+  assert.ok(!calls.includes('gap:gap-2'))  // round 2 was never dispatched
+  assert.equal(result.status, 'ok')        // an early exit is normal, not a degradation
 })
 
 test('cheap write-agent: the verbatim write-assessment runs on the cheap tier, not the inherited top tier', async () => {
@@ -208,7 +267,7 @@ test('model tiers: mechanical roles are pinned to the cheap tier; judgment roles
   // Pinned to the cheap tier: the area/gap investigators, the per-lens verifiers
   // (verify:<lens>#i), the grounding agents, and the verbatim write-agent — none reason.
   const CHEAP_PREFIX = /^(area:|gap:|verify:|ground#)/
-  const CHEAP_EXACT = new Set(['write-assessment', 'rewrite-assessment'])
+  const CHEAP_EXACT = new Set(['source-digest', 'write-assessment', 'rewrite-assessment'])
   // Inherit the caller's model: the judgment roles. NB: bare 'verify' is the consolidation
   // verifier (judgment) — distinct from the 'verify:<lens>#i' per-lens verifiers above.
   const INHERIT = new Set(['plan', 'plan-critic', 'plan-revise', 'completeness-critic', 'verify', 'synthesize'])
@@ -341,4 +400,91 @@ test('low effort: plan-critic, completeness, lenses, and grounding are skipped a
   assert.ok(!calls.some((l) => l.startsWith('verify:'))) // EFFORT_LENSES.low = [] → no per-lens jobs
   assert.ok(!calls.some((l) => l.startsWith('ground#'))) // grounding gated off at low
   // The single-shot consolidation verify (exact label 'verify') still runs at low — not asserted absent.
+})
+
+// ---- source digest (one-time orientation map shared by the area investigators) -------------
+// A single agent reads the source once and hands every investigator a shared orientation map,
+// so they target their reads instead of each re-ingesting the whole source. The map is advisory
+// (investigators still read source) and scoped to investigators only — verify and grounding keep
+// raw-source access because they re-derive citations against actual source.
+
+const SENTINEL_DIGEST = (_p, opts) =>
+  (opts && opts.label) === 'source-digest'
+    ? { overview: 'OVERVIEW', landmarks: [{ location: 'SENTINEL.js:42', what: 'SENTINEL_WHAT', relevance: 'SENTINEL_REL' }] }
+    : null
+
+test('source digest fires exactly once before the area fan-out and reaches the investigators', async () => {
+  let investPrompt = ''
+  const { calls } = await med({
+    'source-digest': SENTINEL_DIGEST,
+    'area:alpha': (prompt, opts) => {
+      investPrompt = prompt
+      return { area: opts.label.slice(opts.label.indexOf(':') + 1), observations: [
+        { title: 't', body: 'b', evidence: ['x.js:1'], significance: 'high' },
+      ] }
+    },
+  })
+  const digestIdx = calls.indexOf('source-digest')
+  const firstAreaIdx = calls.findIndex((l) => l.startsWith('area:'))
+  assert.equal(calls.filter((l) => l === 'source-digest').length, 1) // dispatched exactly once
+  assert.ok(digestIdx >= 0 && firstAreaIdx >= 0 && digestIdx < firstAreaIdx) // before the fan-out
+  assert.match(investPrompt, /SENTINEL\.js:42/) // the map's landmark reached the investigator
+  assert.match(investPrompt, /SENTINEL_WHAT/)
+})
+
+test('source digest is for investigators only: verify and grounding never receive the map', async () => {
+  let verifyPrompt = ''
+  let groundPrompt = ''
+  const { calls } = await med({
+    'source-digest': SENTINEL_DIGEST,
+    'verify:': (prompt) => { verifyPrompt = prompt; return { verdict: 'holds', confidence: 'high', rationale: 'ok' } },
+    'ground#': (prompt) => { groundPrompt = prompt; return { ungrounded: [] } },
+  })
+  assert.ok(calls.includes('source-digest')) // the digest actually fired (the override was live)...
+  assert.ok(verifyPrompt && groundPrompt, 'verify and ground prompts were captured')
+  assert.ok(!verifyPrompt.includes('SENTINEL.js:42')) // ...but the map is absent from the verify prompt
+  assert.ok(!groundPrompt.includes('SENTINEL.js:42')) // ...and from the grounding prompt
+  assert.ok(!/orientation map/i.test(verifyPrompt))
+  assert.ok(!/orientation map/i.test(groundPrompt))
+})
+
+test('source digest is skipped at low effort (a quick scan pays no front barrier)', async () => {
+  const { calls } = await low()
+  assert.ok(!calls.includes('source-digest'))
+  assert.ok(calls.some((l) => l.startsWith('area:'))) // investigators still ran
+})
+
+test('source digest is skipped when there is a single area (no fan-out to amortize)', async () => {
+  const onePlan = {
+    overallQuestion: 'Is the thing sound?',
+    effortRationale: 'one facet',
+    areas: [{ name: 'solo', rationale: 'the only facet', effort: 'medium' }],
+  }
+  const { calls } = await med({ plan: onePlan })
+  assert.ok(!calls.includes('source-digest'))
+  assert.ok(calls.includes('area:solo')) // the lone investigator still ran
+})
+
+test('source digest failure is non-critical: investigators run unaided and the run stays ok', async () => {
+  let investPrompt = ''
+  const { result, calls } = await med({
+    'source-digest': THROW,
+    'area:alpha': (prompt, opts) => {
+      investPrompt = prompt
+      return { area: opts.label.slice(opts.label.indexOf(':') + 1), observations: [
+        { title: 't', body: 'b', evidence: ['x.js:1'], significance: 'high' },
+      ] }
+    },
+  })
+  assert.ok(calls.includes('source-digest')) // it was dispatched and threw
+  assert.ok(calls.some((l) => l.startsWith('area:'))) // investigators still ran
+  assert.ok(!/orientation map/i.test(investPrompt)) // with no orientation block (digest produced nothing)
+  assert.equal(result.status, 'ok') // a lost digest does not degrade the run
+})
+
+test('source digest runs on the cheap tier', async () => {
+  const { dispatches } = await med()
+  const digest = dispatches.find((d) => d.label === 'source-digest')
+  assert.ok(digest, 'source-digest was dispatched')
+  assert.equal(digest.model, 'sonnet')
 })

@@ -49,6 +49,7 @@ const HAPPY = {
   plan: planResult,
   'plan-critic': { sound: true, issues: [] },
   'plan-revise': planResult,
+  'source-digest': { overview: 'orientation overview', landmarks: [{ location: 'alpha.js:1-9', what: 'the alpha entrypoint', relevance: 'bears on area alpha' }] },
   'completeness-critic': { complete: true, gaps: [] },
   verify: { checksPerformed: ['cross-ref'], corrections: [], reliabilityFlags: [] },
   synthesize: {

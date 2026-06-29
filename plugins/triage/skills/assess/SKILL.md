@@ -58,7 +58,7 @@ If the scope is broad (entire codebase, "everything"), ask for priority areas or
 
 ## Phase 2: Investigate (delegated)
 
-Once the scope is resolved, run the investigation workflow. It plans the areas, investigates each in parallel (observation-only), checks coverage for gaps with targeted re-investigation, cross-verifies overlapping claims, synthesizes the numbered assessment and writes it to disk, then grounds each finding's citations against source.
+Once the scope is resolved, run the investigation workflow. It plans the areas, reads the source once to share an orientation map with the area investigators, investigates each area in parallel (observation-only), checks coverage for gaps with targeted re-investigation, cross-verifies overlapping claims, synthesizes the numbered assessment and writes it to disk, then grounds each finding's citations against source.
 
 Invoke:
 
@@ -80,7 +80,7 @@ Workflow({
 - `effort` is an OPTIONAL ceiling: when the interview produced one, map quick scan → `low`, standard review → `medium`, comprehensive analysis → `high`. Omit it entirely to let the planner judge complexity and allocate effort (and how many areas) itself. Remember `low` disables the completeness, adversarial-verification, grounding, and plan-critique stages (see Phase 1), so reserve it for genuinely quick scans.
 - Always pass `sessionId: "${CLAUDE_SESSION_ID}"` so the assessment is written to `/tmp/assessment-${CLAUDE_SESSION_ID}.md`.
 
-**The `Workflow` call is non-blocking.** It returns immediately with a task id; the investigation then runs in the background — usually several minutes, though a high-effort run over a broad scope can take considerably longer (tens of minutes). The real result — `{ findingsCount, areas, outPath, markdown, status, coverage, effort }` (`status` is `ok` / `degraded` / `failed`; `coverage` is `{ planned, completed, dropped }`; `effort` is the run's overall effort — the ceiling you passed, or, when you omitted it, the most ambitious effort the planner chose for any area, so an `effort` you did not set reflects a planner decision rather than your input) — arrives later as a `<task-notification>` carrying that task id, *not* as the return value of the `Workflow` call.
+**The `Workflow` call is non-blocking.** It returns immediately with a task id; the investigation then runs in the background — usually several minutes, though a high-effort run over a broad scope can take considerably longer (tens of minutes). The real result — `{ findingsCount, areas, outPath, markdown, status, coverage, effort }` (`status` is `ok` / `degraded` / `failed`; `coverage` is `{ planned, completed, dropped }`; `effort` is the run's overall effort — the ceiling you passed, or, when you omitted it, the median effort across the areas the planner chose, so an `effort` you did not set reflects a planner decision rather than your input) — arrives later as a `<task-notification>` carrying that task id, *not* as the return value of the `Workflow` call.
 
 **After invoking `Workflow`, stop. Your turn is over.** Do not call any tool, do not investigate the scope yourself, do not read the assessment file or the workflow's journals, and do not assume, summarize, or imagine a result — fabricating a `<task-notification>` or a completion you have not received is a failure. There is nothing to do but wait. You are re-prompted automatically when the genuine `<task-notification>` arrives; only then continue to Phase 3.
 
