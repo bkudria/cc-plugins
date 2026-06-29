@@ -211,6 +211,20 @@ test('high effort: the completeness loop runs at most EFFORT_ROUNDS.high (2) gap
   assert.equal(result.coverage.planned, 5)
 })
 
+test('high effort: a round that surfaces no new observations stops the loop early (diminishing returns)', async () => {
+  // The critic keeps naming a fresh gap every round, so absent any guard the round cap would run 2.
+  let round = 0
+  const alwaysGap = () => { round += 1; return { complete: false, gaps: [{ name: 'gap-' + round, rationale: 'r' }] } }
+  // ...but each gap area is investigated SUCCESSFULLY and returns zero observations. Coverage does
+  // not grow, so the loop must stop after round 1 rather than pay for round 2's serial barrier.
+  const emptyGap = (_p, opts) => ({ area: opts.label.slice(opts.label.indexOf(':') + 1), observations: [] })
+  const { result, calls } = await high({ 'completeness-critic': alwaysGap, 'gap:': emptyGap })
+  assert.equal(calls.filter((l) => l === 'completeness-critic').length, 1) // round 2's critic never runs
+  assert.ok(calls.includes('gap:gap-1'))   // round 1 did investigate its gap
+  assert.ok(!calls.includes('gap:gap-2'))  // round 2 was never dispatched
+  assert.equal(result.status, 'ok')        // an early exit is normal, not a degradation
+})
+
 test('cheap write-agent: the verbatim write-assessment runs on the cheap tier, not the inherited top tier', async () => {
   const { dispatches } = await med()
   const write = dispatches.find((d) => d.label === 'write-assessment')

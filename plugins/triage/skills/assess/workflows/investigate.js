@@ -625,8 +625,10 @@ if (!allObs.length) {
 // Single-pass investigation can miss a facet the planner never decomposed, or a
 // thread an area surfaced but did not own. A bounded critic names genuine gaps;
 // each becomes a new area run through the same investigator. Rounds scale with
-// effort (low -> none), so simple scopes stay a pure single pass. Verify runs
-// after this loop, so it covers the full accumulated observation set.
+// effort (low -> none), so simple scopes stay a pure single pass, and a round that
+// surfaces no new observations ends the loop early (diminishing returns) rather than
+// re-pay another serial barrier. Verify runs after this loop, so it covers the full
+// accumulated observation set.
 const criticRounds = EFFORT_ROUNDS[overallEffort] || 0
 if (criticRounds > 0 && allObs.length) {
   phase('Completeness')
@@ -709,6 +711,15 @@ if (criticRounds > 0 && allObs.length) {
     const gapObs = collectObs(gapInvestigations)
     allObs.push(...gapObs)
     log('Completeness round added ' + gapObs.length + ' observation(s); ' + allObs.length + ' total across ' + areaNames.length + ' area(s).')
+    // Diminishing returns: a round that investigated its gaps successfully yet surfaced no new
+    // observations means coverage has stopped growing — a further round would re-pay the serial
+    // critic+investigation barrier for nothing, so stop here. A round whose gaps all FAILED
+    // (gapInvestigations empty) is degradation, not diminishing returns: it falls through so the
+    // next round can retry the facet (see the dropped-gap re-proposal above).
+    if (gapInvestigations.length && !gapObs.length) {
+      log('Completeness round surfaced no new observations — stopping early (diminishing returns).')
+      break
+    }
   }
 }
 
