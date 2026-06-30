@@ -417,6 +417,21 @@ test('synthesizer payload: consolidation corrections reach the synthesizer; audi
   assert.ok(!captured.includes('CHECK_SENTINEL'))  // ...and audit-only checksPerformed is not sent
 })
 
+test('synthesizer fidelity: the prompt forbids claims and specifics not present in the observations', async () => {
+  // The synthesizer is text-in/text-out with no read tools, so paraphrase drift here is only caught
+  // downstream by grounding (capped + skipped at low effort). The prompt must direct it to stay within
+  // the observations and carry cited specifics over verbatim, to lower the drift rate at the boundary.
+  let captured = ''
+  const capture = (prompt) => {
+    captured = prompt
+    return { assessmentTitle: 'T', scopeSummary: 's', areasCovered: 'a', findings: [], summary: 'sum' }
+  }
+  const { calls } = await med({ synthesize: capture })
+  assert.ok(calls.includes('synthesize'))                         // the synthesizer actually ran
+  assert.match(captured, /supported by the observation/i)         // only claim what the observations support
+  assert.match(captured, /do NOT introduce|preserve .* exactly/i) // carry specifics over, don't invent them
+})
+
 test('plan-critic baseline: the critic is given the scope-size scaling rule to judge area count against', async () => {
   // The planner has explicit scaling rules (single file 1-3 areas, module 4-6, ...), but the critic
   // was asked to judge "count vs scope" with no baseline. It must now receive the same rule, or it
