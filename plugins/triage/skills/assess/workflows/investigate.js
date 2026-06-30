@@ -1084,6 +1084,12 @@ const synth = allObs.length ? await withRetry('synthesize', () => agent(
   '- Merge overlapping observations: same root cause, or the same pattern recurring across files, becomes ONE ' +
   'finding that names every affected location — not one finding per occurrence.\n' +
   '- Split compound issues into separate findings.\n\n' +
+  'SOURCE FIDELITY (critical):\n' +
+  '- You cannot open source — you see only the observations above. Every claim in a finding body must be ' +
+  'supported by the observation(s) you merge into it. Do NOT introduce paths, line numbers, values, counts, ' +
+  'or details that are not present in those observations, and do NOT generalize beyond what they state. When ' +
+  'you merge or rephrase, preserve the specific paths/lines/values from the observation evidence exactly — an ' +
+  'invented or drifted specific will not match the source it is later grounded against.\n\n' +
   'OBSERVATION-ONLY OUTPUT (critical):\n' +
   observationOnlyRule('synthesizer') + '\n\n' +
   'OUTPUT — return STRUCTURED DATA only (the schema); do NOT produce markdown and do NOT write any file. ' +
