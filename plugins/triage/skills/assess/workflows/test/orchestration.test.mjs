@@ -337,6 +337,26 @@ test('the completeness-critic payload is projected — observation bodies are no
   assert.ok(!captured.includes('"body"'))               // the projection drops the body field entirely
 })
 
+test('completeness gap dedup: a gap differing from an existing area only by case/whitespace is rejected', async () => {
+  // Existing areas are alpha/beta/gamma. A gap named 'Alpha' re-covers area 'alpha', but the
+  // exact-name filter (`!areaNames.includes(g.name)`) let it through and spent a full investigator
+  // on it. The normalized filter must reject it before the fan-out — no `gap:Alpha` is dispatched.
+  const dupGap = () => ({ complete: false, gaps: [{ name: 'Alpha', rationale: 'r', effort: 'low' }] })
+  const { calls } = await high({ 'completeness-critic': dupGap })
+  assert.ok(calls.includes('completeness-critic'))   // the critic actually ran
+  assert.ok(!calls.includes('gap:Alpha'))            // the case-only duplicate was filtered out
+})
+
+test('completeness-critic prompt: gaps must be semantically distinct, not the same theme re-named', async () => {
+  // The critic was told only "do NOT propose any of these again" / "Do NOT restate covered ground" —
+  // an exact-name steer. It must also be told a gap cannot be an existing theme under a different name.
+  let captured = ''
+  const capture = (prompt) => { captured = prompt; return { complete: true, gaps: [] } }
+  const { calls } = await high({ 'completeness-critic': capture })
+  assert.ok(calls.includes('completeness-critic'))
+  assert.match(captured, /different name/)
+})
+
 test('synthesizer payload: corrections reach the synthesizer without re-sending the body or audit-only downgrade provenance', async () => {
   // Every probed observation gets a 'correct' verdict that both rewrites the claim and downgrades
   // significance, so applyVerdicts folds corrections + a significanceDowngrade into the kept set.
@@ -397,6 +417,19 @@ test('plan-critic payload: each area carries its effort so over-granularity is v
   const { calls } = await med({ 'plan-critic': capture })
   assert.ok(calls.includes('plan-critic'))
   assert.match(captured, /"effort": "medium"/)   // effort is no longer stripped from the projection
+})
+
+test('planner prompt: areas must be mutually distinct, not merely semi-independent', async () => {
+  // "semi-independent / explorable on its own" did not forbid overlap, so the planner could emit
+  // areas that investigate the same ground. The prompt must explicitly demand mutually-distinct areas.
+  let captured = ''
+  const capture = (prompt) => {
+    captured = prompt
+    return { overallQuestion: 'q', effortRationale: 'r', areas: ['alpha', 'beta', 'gamma'].map((name) => ({ name, rationale: 'r', effort: 'medium' })) }
+  }
+  const { calls } = await med({ plan: capture })
+  assert.ok(calls.includes('plan'))            // the planner actually ran
+  assert.match(captured, /mutually distinct/)  // the distinctness instruction is present
 })
 
 test('read-only sub-agents are told to confine searches to scope, not scan $HOME or the filesystem root', async () => {
