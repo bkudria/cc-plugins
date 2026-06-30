@@ -781,6 +781,8 @@ const verifyConsolidated = (obs, probedKeys) => agent(
       'obviously unsupported.\n'
     : '') +
   VERIFY_INTENSITY[overallEffort] + '\n' +
+  'When verifying a specific claim, re-read the cited source rather than relying solely on the body text shown ' +
+  'here (bodies may be excerpted).\n' +
   observationOnlyRule('verifier'),
   { label: 'verify', schema: VERIFY_SCHEMA }
 )
@@ -924,6 +926,15 @@ const selectProbedKeys = (targets, verdicts) => {
     .map(({ o }) => o.area + ' / ' + o.title)
     .filter((k) => probed.has(k))
 }
+// The consolidation verifier reasons over claim content, so it can't take a body-stripped
+// projection like the completeness critic does — but a generous excerpt caps the worst-case
+// (single largest, Opus-tier) payload while preserving each observation's load-bearing opening.
+// The verifier re-reads cited source for anything it needs in full.
+const VERIFY_BODY_EXCERPT_CHARS = 1200
+const excerptForVerify = (obs) => obs.map((o) =>
+  typeof o.body === 'string' && o.body.length > VERIFY_BODY_EXCERPT_CHARS
+    ? { ...o, body: o.body.slice(0, VERIFY_BODY_EXCERPT_CHARS) + ' …[body excerpted; re-read cited source for full detail]' }
+    : o)
 /* test-seam:pure-fn:end */
 
 const lenses = EFFORT_LENSES[overallEffort] || []
@@ -984,7 +995,7 @@ if (!lenses.length || !allObs.length) {
     auditActions.filter((a) => a.action === 'corrected').length + ' corrected, ' +
     auditActions.filter((a) => a.action === 'flagged').length + ' flagged.')
   const probedKeys = selectProbedKeys(targets, verdicts)
-  verification = await safeVerify(verifiedObs, probedKeys)
+  verification = await safeVerify(excerptForVerify(verifiedObs), probedKeys)
 }
 
 // A dispatched-but-empty lens pass is a silent total loss of adversarial

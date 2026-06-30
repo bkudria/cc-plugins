@@ -61,6 +61,26 @@ test('total verdict loss: every lens verdict lost degrades the run and flags it'
   assert.ok(result.reliabilityFlags.some((f) => /every verdict was lost/.test(f)))
 })
 
+test('consolidation verify payload: a long observation body is excerpted, not sent in full', async () => {
+  let captured = ''
+  const longBody = 'X'.repeat(4000)
+  const capture = (prompt) => { captured = prompt; return { checksPerformed: ['x'], corrections: [], reliabilityFlags: [] } }
+  const bigObs = () => ({ area: 'alpha', observations: [{ title: 'big', body: longBody, evidence: ['alpha.js:1'], significance: 'high' }] })
+  const { calls } = await med({ verify: capture, 'area:alpha': bigObs })
+  assert.ok(calls.includes('verify'))
+  assert.ok(!captured.includes(longBody)) // the full body is not transmitted to the consolidation verifier
+  assert.ok(captured.includes('X'.repeat(1200))) // the load-bearing opening is preserved
+  assert.match(captured, /body excerpted/) // and marked as excerpted so the verifier knows it is partial
+})
+
+test('consolidation verify prompt: directs the verifier to re-read cited source for full claim text', async () => {
+  let captured = ''
+  const capture = (prompt) => { captured = prompt; return { checksPerformed: ['x'], corrections: [], reliabilityFlags: [] } }
+  const { calls } = await med({ verify: capture })
+  assert.ok(calls.includes('verify'))
+  assert.match(captured, /re-read the cited source/i)
+})
+
 test('large run: every area is adversarially probed even when area count exceeds the minimum budget', async () => {
   // Seven areas (one observation each) — above MAX_VERIFY_TARGETS (6). With a fixed
   // budget the per-area floor fills all six slots with the first six areas and the
