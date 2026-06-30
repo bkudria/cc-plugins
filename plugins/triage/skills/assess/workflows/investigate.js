@@ -1094,8 +1094,13 @@ let markdown = allObs.length === 0
 // The workflow script has no filesystem access, so persisting the rendered document goes
 // through a minimal write-agent: one verbatim Write, no reasoning. The file is trustworthy
 // only if BOTH the structured synthesis AND this write succeeded.
-const wrote = synthStructured
-  ? await withRetry('write-assessment', () => agent(
+// Dispatch the persist but DO NOT await it here: the write has no dependency on the Ground
+// fan-out below (ground agents receive their finding data inline, not via the file), so it runs
+// concurrently with grounding instead of as a serial barrier ahead of it. withRetry runs the
+// agent synchronously on its first attempt, so the document is captured at dispatch time; only
+// the resolution is deferred — joined below, before anything reads the result.
+const writePromise = synthStructured
+  ? withRetry('write-assessment', () => agent(
       'Write the following assessment document verbatim to exactly this path using the Write tool: ' + outPath + '\n' +
       'Do NOT edit, reformat, summarize, re-order, or add anything — write it byte-for-byte as given. Then return ' +
       'whether the write succeeded and the path written.\n\n' +
@@ -1103,13 +1108,8 @@ const wrote = synthStructured
       // Cheap tier: a verbatim Write with no reasoning (see model-tier strategy above).
       { label: 'write-assessment', phase: 'Synthesize', schema: WRITE_SCHEMA, model: 'sonnet' }
     ))
-  : null
-const synthOk = !!(synthStructured && wrote && wrote.written)
-const finalPath = (wrote && wrote.path) || outPath
+  : Promise.resolve(null)
 const findingsCount = synth && Array.isArray(synth.findings) ? synth.findings.length : 0
-log('Synthesis ' + (synthOk
-  ? 'written to ' + finalPath + ' (' + findingsCount + ' findings)'
-  : 'FAILED — no trustworthy file') + '.')
 
 // ---- Ground (post-synthesis citation grounding; gated; corrective) ----------
 // The synthesizer reshapes observations into findings (merge / split / renumber) with no
@@ -1149,6 +1149,10 @@ const GROUND_SCHEMA = {
 const synthFindings = (synth && synth.findings) || []
 let grounding = { ran: false, checked: 0, ungrounded: [], corrected: [] }
 let rewriteFailed = false
+// The persist (write-assessment) is in flight concurrently with the grounding fan-out below;
+// these capture its joined result so synthOk can be computed once the write has settled.
+let wrote = null
+let writeJoined = false
 if (overallEffort !== 'low' && synthFindings.length) {
   // Findings are significance-ordered (most impactful first), so the top-K are the ones
   // worth grounding; each runs in its own read-only agent, in parallel.
@@ -1181,6 +1185,11 @@ if (overallEffort !== 'low' && synthFindings.length) {
     .filter((r) => r.correctedBody)
     .map((r) => ({ findingNumber: r.findingNumber, correctedBody: r.correctedBody }))
   let correctedNumbers = []
+  // Join the persist that has been in flight alongside the grounding fan-out before the corrective
+  // re-write below, which overwrites the same path and must never race the initial write.
+  wrote = await writePromise
+  writeJoined = true
+  const synthOk = !!(synthStructured && wrote && wrote.written)
   if (correctable.length && synthOk) {
     const correctedMarkdown = renderAssessment({ ...synth, findings: applyFindingCorrections(synthFindings, correctable) })
     const rewrote = await withRetry('rewrite-assessment', () => agent(
@@ -1206,6 +1215,15 @@ if (overallEffort !== 'low' && synthFindings.length) {
   log('Grounding: ' + grounding.checked + ' of ' + synthFindings.length + ' finding(s) checked (top ' +
     groundTargets.length + '), ' + correctedNumbers.length + ' corrected, ' + ungrounded.length + ' citation(s) unresolved.')
 }
+
+// Join the initial persist (a no-op if the grounding path already awaited it) and compute synthOk
+// after the overlapped fan-out — it gates both the corrective re-write above and the status below.
+if (!writeJoined) wrote = await writePromise
+const synthOk = !!(synthStructured && wrote && wrote.written)
+const finalPath = (wrote && wrote.path) || outPath
+log('Synthesis ' + (synthOk
+  ? 'written to ' + finalPath + ' (' + findingsCount + ' findings)'
+  : 'FAILED — no trustworthy file') + '.')
 
 // Status is derived only now — after grounding — so ungrounded citations can degrade the run
 // (grounding runs post-synthesis). An empty-observation run that also lost coverage escalates to

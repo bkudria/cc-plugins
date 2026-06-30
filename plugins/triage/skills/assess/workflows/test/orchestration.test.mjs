@@ -126,6 +126,18 @@ test('corrective grounding: a finding the ground agent rewrites is re-written an
   assert.equal(result.status, 'ok')                          // fully corrected → not degraded
 })
 
+test('write join ordering: the initial persist is dispatched before the corrective re-write that overwrites it', async () => {
+  // write-assessment runs concurrently with the Ground fan-out, but it must still be joined ahead
+  // of rewrite-assessment, which overwrites the same path. Dispatch order is what the clockless
+  // harness can observe; the explicit await enforcing resolution order lives in the script.
+  const corrected = { ungrounded: [{ citation: 'alpha.js:1', problem: 'mismatch', detail: 'd' }], correctedBody: 'C' }
+  const { calls } = await med({ 'ground#': () => corrected })
+  const wrote = calls.indexOf('write-assessment')
+  const rewrote = calls.indexOf('rewrite-assessment')
+  assert.ok(wrote !== -1 && rewrote !== -1, 'both the initial persist and the corrective re-write fired')
+  assert.ok(wrote < rewrote, 'write-assessment is ordered before rewrite-assessment')
+})
+
 test('partial correction: a corrected finding is re-written but an uncorrected mismatch still degrades', async () => {
   const fix = { ungrounded: [{ citation: 'alpha.js:1', problem: 'mismatch', detail: 'd' }], correctedBody: 'FIXED-1' }
   const noFix = { ungrounded: [{ citation: 'beta.js:1', problem: 'missing', detail: 'gone' }] }
