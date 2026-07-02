@@ -581,11 +581,11 @@ const OBS_SCHEMA = {
 // verifiers ('verify:<lens>#i'), the grounding agents ('ground#n'), and the verbatim
 // write-agent ('write-assessment') — they
 // read, cross-check, or transcribe; none reason about the assessment as a whole. The
-// judgment roles omit `model` and inherit the caller's top tier (Opus in production):
+// judgment roles omit `model` and inherit the caller's top tier (Opus/Fable in production):
 // the planner, plan-critic/revise, completeness-critic, consolidation verifier ('verify'),
 // and synthesizer.
 // Known limitation: under evals the harness pins ONE base model (evals.yaml:
-// `model: claude-sonnet-4-5`), which overrides per-agent inheritance — so the judgment
+// `model: claude-sonnet-5`), which overrides per-agent inheritance — so the judgment
 // roles also run on the base and the two-tier split is never exercised by evals. It is a
 // production cost optimization; its structure is locked instead by the deterministic
 // harness (workflows/test/orchestration.test.mjs, "model tiers" test).
