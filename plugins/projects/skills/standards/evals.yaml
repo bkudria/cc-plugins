@@ -28,7 +28,7 @@ max_budget_usd: 20.0
 # standards-knowledge overrides this down to a single shot.
 scenarios:
   base:
-    model: claude-sonnet-4-5
+    model: claude-sonnet-5
     additional_tools:
       - Workflow
     timeout: 600
