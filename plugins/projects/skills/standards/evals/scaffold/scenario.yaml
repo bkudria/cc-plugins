@@ -3,6 +3,17 @@ prompt: |
   command-line tool for managing dashboard widgets. Set it up with project
   standards.
 
+# This scenario's persona selects base+cli = 43 standards (37 prompt-based),
+# and workflows/scaffold.md turns that into ~43 file creations plus a full
+# two-round audit fanning out one haiku verifier per standard. That workload
+# does not fit the suite defaults: recorded reps crashed on the base 600s
+# timeout (sonnet-4-5) and on scuttlerun's default 50 agent turns
+# (claude-sonnet-5). Give the rep real headroom on all three per-session
+# limits — each still bounds a runaway session.
+timeout: 1800
+max_turns: 150
+max_budget_usd: 10.0
+
 user:
   max_turns: 6
   persona: |
