@@ -52,6 +52,7 @@ const HAPPY = {
   'source-digest': { overview: 'orientation overview', landmarks: [{ location: 'alpha.js:1-9', what: 'the alpha entrypoint', relevance: 'bears on area alpha' }] },
   'completeness-critic': { complete: true, gaps: [] },
   verify: { checksPerformed: ['cross-ref'], corrections: [], reliabilityFlags: [] },
+  'apply-corrections': { corrections: [] },
   synthesize: {
     assessmentTitle: 'T',
     scopeSummary: 's',
