@@ -6,7 +6,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { runWorkflow, withOverrides, THROW } from './_harness.mjs'
+import { runWorkflow, withOverrides, THROW, AREAS } from './_harness.mjs'
 
 const low = (overrides) => runWorkflow({ args: { scope: 's', effort: 'low' }, agent: withOverrides(overrides) })
 const med = (overrides) => runWorkflow({ args: { scope: 's', effort: 'medium' }, agent: withOverrides(overrides) })
@@ -255,11 +255,11 @@ test('empty observations + coverage loss: emptiness with dropped areas escalates
   assert.equal(result.coverage.dropped.length, 3)
 })
 
-test('high effort: the overclaim lens is dispatched at high but not at medium', async () => {
+test('high effort: the overclaim lens is applied at high but not at medium', async () => {
   const hi = await high()
-  assert.ok(hi.calls.some((l) => l.startsWith('verify:overclaim#')))
+  assert.ok(hi.calls.some((l) => l.startsWith('verify:grounding+overclaim#')))
   const lo = await med()
-  assert.ok(!lo.calls.some((l) => l.startsWith('verify:overclaim#')))
+  assert.ok(!lo.calls.some((l) => l.includes('overclaim')))
 })
 
 test('grounding lens prompt: carries the folded reliability instruction', async () => {
@@ -280,11 +280,33 @@ test('medium effort: a single combined lens dispatches per verify target', async
   assert.ok(!calls.some((l) => l.startsWith('verify:reliability#')))
 })
 
-test('high effort: lenses are grounding and overclaim only', async () => {
+test('high effort: lenses are grounding and overclaim only, merged into one verifier', async () => {
   const { calls } = await high()
-  assert.ok(calls.some((l) => l.startsWith('verify:grounding#')))
-  assert.ok(calls.some((l) => l.startsWith('verify:overclaim#')))
+  assert.ok(calls.some((l) => l.startsWith('verify:grounding+overclaim#')))
+  assert.ok(!calls.some((l) => l.startsWith('verify:grounding#')))
+  assert.ok(!calls.some((l) => l.startsWith('verify:overclaim#')))
   assert.ok(!calls.some((l) => l.startsWith('verify:reliability#')))
+})
+
+test('high effort: one merged verifier dispatches per verify target', async () => {
+  const { calls } = await high()
+  const verifyLabels = calls.filter((l) => l.startsWith('verify:'))
+  // One merged job per probed observation (the fixture yields one observation per area),
+  // not one per (observation × lens).
+  assert.equal(verifyLabels.length, AREAS.length)
+  assert.ok(verifyLabels.every((l) => l.startsWith('verify:grounding+overclaim#')))
+})
+
+test('merged verifier prompt: carries both lens texts and the resolution rule', async () => {
+  let captured = ''
+  const capture = (prompt) => { captured = prompt; return { verdict: 'holds', confidence: 'high', rationale: 'ok' } }
+  const { calls } = await high({ 'verify:grounding+overclaim#0': capture })
+  assert.ok(calls.includes('verify:grounding+overclaim#0'))
+  // Unique anchors: each lens's opening phrase appears only in its VERIFY_LENSES text,
+  // and the severity-resolution rule only in the merged closing instruction.
+  assert.ok(captured.includes('Grounding/citation accuracy'))
+  assert.ok(captured.includes('Over-claim / significance inflation'))
+  assert.ok(captured.includes('drop > correct > holds'))
 })
 
 test('adaptive (no ceiling): a lone-high minority yields the median effort, not the max — the overclaim lens stays off', async () => {
