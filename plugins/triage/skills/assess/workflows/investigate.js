@@ -84,14 +84,13 @@ const VERIFY_GLOBAL_FILL_HEADROOM = 4
 // stay flat regardless of how many findings synthesis emits.
 const MAX_GROUND_TARGETS = 6
 const VERIFY_LENSES = {
-  grounding: 'Grounding/citation accuracy. Independently re-derive this observation\'s cited evidence from source using your read-only tools. Do the named files, line numbers, and values actually exist and say what the observation claims? Verdict "drop" if the evidence is fabricated or does not support the claim; "correct" if it is partially right with a fixable inaccuracy; "holds" if fully grounded.',
+  grounding: 'Grounding/citation accuracy. Independently re-derive this observation\'s cited evidence from source using your read-only tools. Do the named files, line numbers, and values actually exist and say what the observation claims? Verdict "drop" if the evidence is fabricated or does not support the claim; "correct" if it is partially right with a fixable inaccuracy; "holds" if fully grounded. While re-deriving, also judge whether the observation could rest on tool output that was truncated, timed out, or silently failed — check whether the underlying source is larger or different than the evidence implies, and record any such concern in reliabilityConcern.',
   overclaim: 'Over-claim / significance inflation. Judge whether the observation\'s framing and significance are justified by its evidence, or inflated. Is a "high" significance genuinely load-bearing, or is this working-as-designed, minor, or speculative? Verdict "drop" (confidence high or medium) if it is working-as-designed or not a real issue — this removes it. Verdict "correct" with correctedSignificance set to the LOWER level (high→medium or medium→low) when the issue is real but its significance is inflated — significance is only ever lowered, never raised; add a "correction" only if the claim wording itself also needs fixing. Verdict "holds" if proportionate.',
-  reliability: 'Reliability / truncation. Judge whether this observation could rest on tool output that was truncated, timed out, or silently failed. Use your tools to check whether the underlying source is larger or different than the evidence implies. Record any concern in reliabilityConcern; verdict "drop" if the basis is likely unreliable; "holds" if solid.',
 }
 const EFFORT_LENSES = {
   low: [],
-  medium: ['grounding', 'reliability'],
-  high: ['grounding', 'overclaim', 'reliability'],
+  medium: ['grounding'],
+  high: ['grounding', 'overclaim'],
 }
 // Shared read-only framing for the tool-using sub-agents (investigator, the two
 // verifiers, and grounding): one identical statement of the toolset, the primary-source
@@ -774,7 +773,7 @@ const VERIFY_SCHEMA = {
 // branches on probedKeys: with none (low effort / no lens fan-out) the original
 // three-check single-pass battery runs unchanged — it is the only verification on that
 // path. With probedKeys it narrows to cross-area cross-referencing (the one check no
-// per-observation agent can do) plus a spot-check of the UNPROBED tail — the lenses
+// per-observation agent can do) plus a spot-check of the UNPROBED tail — the lens pass
 // already did per-observation grounding and reliability on the probed set, so the
 // standalone numeric spot-check and full-set reliability sweep would re-do their work.
 const verifyConsolidated = (obs, probedKeys) => agent(
