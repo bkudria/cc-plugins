@@ -609,11 +609,12 @@ test('low effort: plan-critic, completeness, lenses, and grounding are skipped a
   // The single-shot consolidation verify (exact label 'verify') still runs at low — not asserted absent.
 })
 
-// ---- source digest (one-time orientation map shared by the area investigators) -------------
-// A single agent reads the source once and hands every investigator a shared orientation map,
-// so they target their reads instead of each re-ingesting the whole source. The map is advisory
-// (investigators still read source) and scoped to investigators only — verify and grounding keep
-// raw-source access because they re-derive citations against actual source.
+// ---- source digest (one-time orientation map shared across the run's agents) ---------------
+// A single agent reads the source once and hands the investigators, verifiers, and grounding
+// agents a shared orientation map, so they target their reads instead of each re-orienting in
+// the whole source. The map is advisory (every recipient still reads source); verifier prompts
+// mark it navigation-only so the map shared with the investigators being checked never stands
+// in as evidence, and the verbatim writer and corrections translator never receive it.
 
 const SENTINEL_DIGEST = (_p, opts) =>
   (opts && opts.label) === 'source-digest'
@@ -639,20 +640,54 @@ test('source digest fires exactly once before the area fan-out and reaches the i
   assert.match(investPrompt, /SENTINEL_WHAT/)
 })
 
-test('source digest is for investigators only: verify and grounding never receive the map', async () => {
-  let verifyPrompt = ''
-  let groundPrompt = ''
-  const { calls } = await med({
+test('source digest reaches the lens verifiers and the consolidation verifier, marked navigation-only', async () => {
+  let lensPrompt = ''
+  let consolidationPrompt = ''
+  const { result, calls } = await med({
     'source-digest': SENTINEL_DIGEST,
-    'verify:': (prompt) => { verifyPrompt = prompt; return { verdict: 'holds', confidence: 'high', rationale: 'ok' } },
+    'verify:': (prompt) => { lensPrompt = prompt; return { verdict: 'holds', confidence: 'high', rationale: 'ok' } },
+    verify: (prompt) => { consolidationPrompt = prompt; return { checksPerformed: ['cross-ref'], corrections: [], reliabilityFlags: [] } },
+  })
+  assert.ok(calls.includes('source-digest')) // the digest actually fired (the override was live)
+  assert.ok(lensPrompt && consolidationPrompt, 'lens and consolidation prompts were captured')
+  assert.match(lensPrompt, /SENTINEL\.js:42/) // the map's landmark reached the lens verifier...
+  assert.match(consolidationPrompt, /SENTINEL\.js:42/) // ...and the consolidation verifier
+  // ...but marked navigation-only: verifiers check claims from the same investigators the map
+  // was shared with, so the map itself must never stand in as evidence.
+  assert.match(lensPrompt, /never as evidence/i)
+  assert.match(consolidationPrompt, /never as evidence/i)
+  assert.equal(result.status, 'ok')
+})
+
+test('the map never reaches the verbatim writer or the corrections translator', async () => {
+  let writePrompt = ''
+  let applierPrompt = ''
+  const { result } = await med({
+    'source-digest': SENTINEL_DIGEST,
+    // A live correction forces the apply-corrections translator to dispatch.
+    verify: { checksPerformed: ['cross-ref'], corrections: [{ claim: 'c', issue: 'i', correctedClaim: 'cc' }], reliabilityFlags: [] },
+    'apply-corrections': (prompt) => { applierPrompt = prompt; return { corrections: [] } },
+    'write-assessment': (prompt) => { writePrompt = prompt; return { written: true, path: '/tmp/assessment-test.md' } },
+  })
+  assert.ok(writePrompt && applierPrompt, 'write and applier prompts were captured')
+  assert.ok(!writePrompt.includes('SENTINEL.js:42')) // neither the writer (no source access needed)...
+  assert.ok(!applierPrompt.includes('SENTINEL.js:42')) // ...nor the translator (pure keyed rewrite) gets the map
+  assert.ok(!/orientation map/i.test(writePrompt))
+  assert.ok(!/orientation map/i.test(applierPrompt))
+  assert.equal(result.status, 'ok')
+})
+
+test('source digest reaches the grounding agents', async () => {
+  let groundPrompt = ''
+  const { result, calls } = await med({
+    'source-digest': SENTINEL_DIGEST,
     'ground#': (prompt) => { groundPrompt = prompt; return { ungrounded: [] } },
   })
-  assert.ok(calls.includes('source-digest')) // the digest actually fired (the override was live)...
-  assert.ok(verifyPrompt && groundPrompt, 'verify and ground prompts were captured')
-  assert.ok(!verifyPrompt.includes('SENTINEL.js:42')) // ...but the map is absent from the verify prompt
-  assert.ok(!groundPrompt.includes('SENTINEL.js:42')) // ...and from the grounding prompt
-  assert.ok(!/orientation map/i.test(verifyPrompt))
-  assert.ok(!/orientation map/i.test(groundPrompt))
+  assert.ok(calls.includes('source-digest')) // the digest actually fired (the override was live)
+  assert.ok(groundPrompt, 'ground prompt was captured')
+  assert.match(groundPrompt, /SENTINEL\.js:42/) // the map's landmark reached the grounding agent
+  assert.match(groundPrompt, /orientation map/i)
+  assert.equal(result.status, 'ok')
 })
 
 test('source digest is skipped at low effort (a quick scan pays no front barrier)', async () => {

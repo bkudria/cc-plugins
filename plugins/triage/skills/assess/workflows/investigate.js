@@ -4,7 +4,7 @@ export const meta = {
   whenToUse: 'Invoked by the assess skill (by path) once scope/focus/effort are resolved. Runs Phases 2-4 headless; the skill keeps Phase 0-1 (scope resolution + interview).',
   phases: [
     { title: 'Plan', detail: 'break the scope into semi-independent areas' },
-    { title: 'Digest', detail: 'read the source once; share an orientation map with the area investigators' },
+    { title: 'Digest', detail: 'read the source once; share an orientation map with the investigating, verifying, and grounding agents' },
     { title: 'Investigate', detail: 'one agent per area, observation-only, in parallel' },
     { title: 'Completeness', detail: 'critic names coverage gaps; effort-scaled targeted re-investigation' },
     { title: 'Verify', detail: 'per-observation adversarial lenses on the most significant observations; verdicts applied in code (drop/correct), then a cross-area consolidation pass that overlaps synthesis, with a verification audit trail in the result' },
@@ -44,11 +44,11 @@ const MAX_AREAS = 8
 // enough areas for coverage/overlap problems to be real; below this a 1-2 area split
 // can't meaningfully be mis-divided, so the critic is skipped.
 const PLAN_CRITIC_MIN_AREAS = 3
-// The source digest reads the source ONCE and shares an orientation map with the area
-// investigators so they target their reads instead of each re-ingesting the whole source. It
-// only pays off when there is fan-out to amortize across, so it is gated to runs with at least
-// this many areas (a single area would just mean two full reads — digest + lone investigator —
-// instead of one).
+// The source digest reads the source ONCE and shares an orientation map with the investigating,
+// verifying, and grounding agents so they target their reads instead of each re-ingesting the
+// whole source. It only pays off when there is fan-out to amortize across, so it is gated to
+// runs with at least this many areas (a single area would just mean two full reads — digest +
+// lone investigator — instead of one).
 const DIGEST_MIN_AREAS = 2
 // Completeness-critic loop: max critic rounds scale with overall effort, so
 // simple scopes never pay for it. Each round may surface a few gap areas, hard-
@@ -466,11 +466,11 @@ const areaNames = areas.map((a) => a.name)
 log('Investigating ' + areas.length + ' area(s) at ' + overallEffort + ' effort: ' + areaNames.join(', '))
 
 /* test-seam:pure-fn:start */
-// Render the one-time source digest into the orientation block injected into every area
-// investigator's prompt. The digest is shared ORIENTATION, not a source replacement:
-// investigators still read source for depth, so the block points them at landmarks rather
+// Render the one-time source digest into the orientation block injected into the investigator,
+// verifier, and grounding prompts. The digest is shared ORIENTATION, not a source replacement:
+// every recipient still reads source for depth, so the block points them at landmarks rather
 // than standing in for it. Returns '' for a missing/empty digest, so a failed or skipped
-// digest degrades to today's behaviour (investigators read source unaided).
+// digest degrades cleanly (agents read source unaided).
 const renderOrientation = (digest) => {
   const marks = (digest && digest.landmarks) || []
   if (!marks.length) return ''
@@ -483,14 +483,21 @@ const renderOrientation = (digest) => {
 }
 /* test-seam:pure-fn:end */
 
-// ---- Source digest (one-time orientation map; shared by the area investigators) ----------
+// Verifiers navigate by the same map as the investigators whose claims they check; this rider
+// keeps the shared map from becoming shared blindness — navigation only, never evidence.
+const VERIFY_MAP_CAVEAT = 'This map was also shared with the investigators whose claims you are ' +
+  'checking — use it to navigate the source, never as evidence that a claim is correct.'
+
+// ---- Source digest (one-time orientation map; shared across the run's agents) ------------
 // One cheap-tier agent absorbs the single expensive full-source read (and any chunking a large
-// source needs) ONCE, then hands every area investigator a shared orientation map so they target
-// their reads instead of each re-ingesting the whole source. Gated to runs with real fan-out
-// (>= DIGEST_MIN_AREAS areas) and off at low effort, where a quick scan should not pay a front
-// barrier. The map is advisory: verify and grounding keep full raw-source access (they re-derive
-// citations against actual source), and investigators still read source for depth — so a failed or
-// skipped digest degrades cleanly to unaided investigation (renderOrientation returns '').
+// source needs) ONCE, then hands the investigators, verifiers, and grounding agents a shared
+// orientation map so they target their reads instead of each re-orienting in the whole source.
+// Gated to runs with real fan-out (>= DIGEST_MIN_AREAS areas) and off at low effort, where a
+// quick scan should not pay a front barrier. The map is advisory: every recipient still reads
+// actual source (verify and grounding re-derive citations against it, and verifier prompts carry
+// VERIFY_MAP_CAVEAT so the map is navigation, never evidence) — so a failed or skipped digest
+// degrades cleanly to unaided reads (renderOrientation returns ''). The verbatim writers and the
+// corrections translator never receive it; they do not read source at all.
 const DIGEST_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -499,8 +506,9 @@ const DIGEST_SCHEMA = {
     overview: { type: 'string', description: '1-3 sentences orienting the reader to the source as a whole' },
     landmarks: {
       type: 'array',
-      // Bounded: the map is re-sent to every investigator, so an unbounded map would recreate the
-      // payload duplication it removes. Keep it a compact set of the load-bearing landmarks.
+      // Bounded: the map is re-sent to every investigator, verifier, and grounding agent, so an
+      // unbounded map would recreate the payload duplication it removes. Keep it a compact set of
+      // the load-bearing landmarks.
       maxItems: 20,
       items: {
         type: 'object',
@@ -544,8 +552,8 @@ if (overallEffort !== 'low' && areas.length >= DIGEST_MIN_AREAS) {
   }
   orientation = renderOrientation(digest)
   log(orientation
-    ? 'Source orientation map: ' + ((digest && digest.landmarks) || []).length + ' landmark(s) shared with investigators.'
-    : 'Source digest produced no usable map; investigators will read source unaided.')
+    ? 'Source orientation map: ' + ((digest && digest.landmarks) || []).length + ' landmark(s) shared with the investigating, verifying, and grounding agents.'
+    : 'Source digest produced no usable map; agents will read source unaided.')
 }
 
 // ---- Investigate (parallel fan-out, observation-only) -----------------------
@@ -769,6 +777,7 @@ const VERIFY_SCHEMA = {
 const verifyConsolidated = (obs, probedKeys) => agent(
   'You are verifying investigation observations before synthesis. ' + READ_ONLY_TOOLS + '\n\n' +
   'Scope: ' + scope + '\n\n' +
+  (orientation ? orientation + '\n' + VERIFY_MAP_CAVEAT + '\n\n' : '') +
   'Observations (JSON):\n' + JSON.stringify(obs, null, 2) + '\n\n' +
   'Perform these checks:\n' +
   '1. Cross-reference claims across areas: where two observations touch the same file, value, or claim, ' +
@@ -989,6 +998,7 @@ if (!lenses.length || !allObs.length) {
       'You are an adversarial verifier applying ONE lens to ONE investigation observation before synthesis. ' +
       READ_ONLY_TOOLS + '\n\n' +
       'Scope: ' + scope + '\n' +
+      (orientation ? orientation + '\n' + VERIFY_MAP_CAVEAT + '\n\n' : '') +
       'Lens — ' + VERIFY_LENSES[lens] + '\n\n' +
       'Observation (JSON):\n' + JSON.stringify(o, null, 2) + '\n\n' +
       'Apply ONLY this lens. Be skeptical and check independently rather than trusting the observation. ' +
@@ -1260,6 +1270,7 @@ if (overallEffort !== 'low' && synthFindings.length) {
       'You are grounding ONE finding from a finished assessment against source, at the synthesis boundary. ' +
       READ_ONLY_TOOLS + '\n\n' +
       'Scope: ' + scope + '\n\n' +
+      (orientation ? orientation + '\n\n' : '') +
       'Finding (JSON, with the structured citations it rests on):\n' + JSON.stringify(fnd, null, 2) + '\n\n' +
       'Independently open each cited location and confirm it exists and says what the finding claims. ' +
       observationOnlyRule('grounding') + ' Report every citation that fails to ground in "ungrounded":\n' +
