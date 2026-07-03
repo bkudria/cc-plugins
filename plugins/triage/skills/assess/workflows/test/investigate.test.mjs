@@ -10,7 +10,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { helpers } from './_load.mjs'
 
-const { degradationSummary, renderAssessment, applyVerdicts, applyFindingCorrections, pickOverallQuestion, selectVerifyTargets, verifyTargetBudget, selectProbedKeys, summarizeAudit, runReliabilityFlags, clampEffort, deriveOverallEffort, collectObs, renderOrientation } = helpers
+const { degradationSummary, renderAssessment, applyVerdicts, applyFindingCorrections, pickOverallQuestion, selectVerifyTargets, verifyTargetBudget, selectProbedKeys, selectGroundTargets, summarizeAudit, runReliabilityFlags, clampEffort, deriveOverallEffort, collectObs, renderOrientation } = helpers
 
 test('renderAssessment emits the deterministic assess<->iterate format contract', () => {
   const md = renderAssessment({
@@ -314,6 +314,25 @@ test('selectVerifyTargets: preserves each observation original index', () => {
   const targets = selectVerifyTargets(list, 3)
   for (const t of targets) assert.equal(list[t.i], t.o)
   assert.deepEqual(targets.map((t) => t.i).sort((a, b) => a - b), [0, 1, 2])
+})
+
+// Ground targets: findings resting only on out-of-band basis carry no source-locatable
+// citations, so they are skipped and their budget slots backfill with later findings.
+const gfnd = (number, citations) => ({ number, title: 'F' + number, significance: 'high', body: 'b' + number, citations })
+
+test('selectGroundTargets: citation-less findings are skipped and later findings backfill', () => {
+  const findings = [gfnd(1, []), gfnd(2, ['a.js:1']), gfnd(3, ['b.js:1'])]
+  assert.deepEqual(selectGroundTargets(findings, 2).map((f) => f.number), [2, 3])
+})
+
+test('selectGroundTargets: the cap applies after filtering, not before', () => {
+  const findings = [gfnd(1, []), ...Array.from({ length: 7 }, (_, n) => gfnd(n + 2, ['a.js:' + n]))]
+  assert.deepEqual(selectGroundTargets(findings, 6).map((f) => f.number), [2, 3, 4, 5, 6, 7])
+})
+
+test('selectGroundTargets: a missing citations field is treated as empty', () => {
+  const findings = [{ number: 1, title: 'F1', significance: 'high', body: 'b1' }, gfnd(2, ['a.js:1'])]
+  assert.deepEqual(selectGroundTargets(findings, 6).map((f) => f.number), [2])
 })
 
 // probedKeys tells the consolidation verifier which observations were "already

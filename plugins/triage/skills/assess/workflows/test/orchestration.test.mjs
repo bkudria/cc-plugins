@@ -227,6 +227,44 @@ test('corrective re-write runs on the cheap tier', async () => {
   assert.equal(rw.model, 'sonnet')
 })
 
+const synthWith = (findings) => ({
+  assessmentTitle: 'T', scopeSummary: 's', areasCovered: 'a', findings, summary: 'sum',
+})
+
+test('ground cap: only the top MAX_GROUND_TARGETS findings are dispatched', async () => {
+  const seven = Array.from({ length: 7 }, (_, n) => ({
+    number: n + 1, title: 'F' + (n + 1), significance: 'high', body: 'b' + (n + 1), citations: ['alpha.js:' + (n + 1)],
+  }))
+  const { calls } = await med({ synthesize: synthWith(seven) })
+  for (let n = 1; n <= 6; n++) assert.ok(calls.includes('ground#' + n), 'ground#' + n + ' dispatched')
+  assert.ok(!calls.includes('ground#7')) // the seventh finding falls past the grounding budget
+})
+
+test('out-of-band basis: citation-less findings are skipped and their slots backfill', async () => {
+  const findings = [
+    { number: 1, title: 'F1', significance: 'high', body: 'b1', citations: [], outOfBandBasis: ['human-reported ground truth items 5 and 7'] },
+    ...Array.from({ length: 6 }, (_, n) => ({
+      number: n + 2, title: 'F' + (n + 2), significance: 'high', body: 'b' + (n + 2), citations: ['alpha.js:' + (n + 2)],
+    })),
+  ]
+  const { result, calls } = await med({ synthesize: synthWith(findings) })
+  assert.ok(!calls.includes('ground#1')) // nothing groundable — no agent re-derives "unverifiable"
+  assert.ok(calls.includes('ground#7')) // the freed slot backfills with the next groundable finding
+  assert.equal(result.grounding.skipped, 1)
+})
+
+test('ground prompt excludes out-of-band basis', async () => {
+  const one = [{ number: 1, title: 'F1', significance: 'high', body: 'b1', citations: ['alpha.js:1'], outOfBandBasis: ['user-stated intent'] }]
+  let groundPrompt = ''
+  const { calls } = await med({
+    synthesize: synthWith(one),
+    'ground#': (prompt) => { groundPrompt = prompt; return { ungrounded: [] } },
+  })
+  assert.ok(calls.includes('ground#1'))
+  assert.ok(groundPrompt.includes('alpha.js:1'), 'the checkable citation reaches the agent')
+  assert.ok(!groundPrompt.includes('user-stated intent'), 'the out-of-band basis does not reach the agent')
+})
+
 test('synthesis failure: a synthesizer that fails after retry produces a failed run', async () => {
   const { result } = await med({ synthesize: THROW })
   assert.equal(result.status, 'failed')
