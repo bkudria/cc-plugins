@@ -73,12 +73,58 @@ test('consolidation verify payload: a long observation body is excerpted, not se
   assert.match(captured, /body excerpted/) // and marked as excerpted so the verifier knows it is partial
 })
 
+test('consolidation verify payload (single-pass path): a long body is excerpted at low effort too', async () => {
+  let captured = ''
+  const longBody = 'X'.repeat(4000)
+  const capture = (prompt) => { captured = prompt; return { checksPerformed: ['x'], corrections: [], reliabilityFlags: [] } }
+  const bigObs = () => ({ area: 'alpha', observations: [{ title: 'big', body: longBody, evidence: ['alpha.js:1'], significance: 'high' }] })
+  const { calls } = await low({ verify: capture, 'area:alpha': bigObs })
+  assert.ok(calls.includes('verify'))
+  assert.ok(!captured.includes(longBody)) // the single-pass branch excerpts like the lens branch
+  assert.ok(captured.includes('X'.repeat(1200)))
+  assert.match(captured, /body excerpted/)
+})
+
 test('consolidation verify prompt: directs the verifier to re-read cited source for full claim text', async () => {
   let captured = ''
   const capture = (prompt) => { captured = prompt; return { checksPerformed: ['x'], corrections: [], reliabilityFlags: [] } }
   const { calls } = await med({ verify: capture })
   assert.ok(calls.includes('verify'))
   assert.match(captured, /re-read the cited source/i)
+})
+
+test('consolidation verify prompt (lens path): checks narrow to cross-reference + unprobed-tail spot-check', async () => {
+  let captured = ''
+  const capture = (prompt) => { captured = prompt; return { checksPerformed: ['x'], corrections: [], reliabilityFlags: [] } }
+  const { calls } = await med({ verify: capture })
+  assert.ok(calls.includes('verify'))
+  // Narrowed check 1 resolves cross-observation disagreements against source.
+  assert.match(captured, /re-read the cited source to determine which is right/)
+  // Narrowed check 2 is scoped to the observations the lenses did not probe.
+  assert.match(captured, /For each observation NOT in that list/)
+  assert.ok(captured.includes('alpha / alpha observation')) // the probed-keys list still rides the prompt
+  // The lens-covered checks are gone: the standalone numeric spot-check and the full-set
+  // reliability sweep (anchors use the old block's unique wording — VERIFY_INTENSITY.medium
+  // legitimately keeps a lowercase "spot-check the most significant numeric claim").
+  assert.ok(!captured.includes('Spot-check the single most significant numeric claim'))
+  assert.ok(!captured.includes('could have been truncated'))
+  assert.ok(!captured.includes('Give the OTHER observations closer scrutiny'))
+  // The shared riders survive the narrowing.
+  assert.ok(captured.includes('Cross-reference overlapping claims across areas and spot-check the most significant numeric claim.'))
+  assert.match(captured, /re-read the cited source rather than relying solely on the body text/)
+})
+
+test('consolidation verify prompt (single-pass path): the original three-check battery is unchanged at low effort', async () => {
+  let captured = ''
+  const capture = (prompt) => { captured = prompt; return { checksPerformed: ['x'], corrections: [], reliabilityFlags: [] } }
+  const { calls } = await low({ verify: capture })
+  assert.ok(calls.includes('verify'))
+  assert.match(captured, /Perform these checks:/)
+  assert.match(captured, /1\. Cross-reference claims across areas/)
+  assert.ok(captured.includes('independently verify the shared element. Where areas are disjoint, say so and move on.'))
+  assert.ok(captured.includes('2. Spot-check the single most significant numeric claim'))
+  assert.ok(captured.includes('could have been truncated, timed out, or silently failed'))
+  assert.ok(!captured.includes('already individually probed')) // no probed-keys steer on this branch
 })
 
 test('large run: every area is adversarially probed even when area count exceeds the minimum budget', async () => {
