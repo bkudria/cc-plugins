@@ -7,8 +7,8 @@ export const meta = {
     { title: 'Digest', detail: 'read the source once; share an orientation map with the area investigators' },
     { title: 'Investigate', detail: 'one agent per area, observation-only, in parallel' },
     { title: 'Completeness', detail: 'critic names coverage gaps; effort-scaled targeted re-investigation' },
-    { title: 'Verify', detail: 'per-observation adversarial lenses on the most significant observations; verdicts applied in code (drop/correct), then a cross-area consolidation barrier, with a verification audit trail in the result' },
-    { title: 'Synthesize', detail: 'merge/filter/order into structured numbered findings, render the markdown deterministically, and write the file; a degraded or failed run is reflected in the result status and coverage' },
+    { title: 'Verify', detail: 'per-observation adversarial lenses on the most significant observations; verdicts applied in code (drop/correct), then a cross-area consolidation pass that overlaps synthesis, with a verification audit trail in the result' },
+    { title: 'Synthesize', detail: 'merge/filter/order into structured numbered findings, apply cross-area verification corrections mechanically, render the markdown deterministically, and write the file; a degraded or failed run is reflected in the result status and coverage' },
     { title: 'Ground', detail: 'post-synthesis grounding: re-read each finding citation against source, flag any that do not resolve, and re-write the file to correct any finding whose body contradicts source' },
   ],
 }
@@ -67,7 +67,8 @@ const VERIFY_INTENSITY = {
   high: 'Be thorough — cross-reference every overlapping claim, spot-check each significant numeric claim, and independently re-derive the most consequential findings.',
 }
 // Adversarial verification: the most significant observations are each probed by
-// perspective-diverse skeptic lenses before a consolidation barrier. Effort sets
+// perspective-diverse skeptic lenses before a consolidation pass (which itself
+// overlaps synthesis rather than serializing ahead of it). Effort sets
 // the lens COUNT (low skips the fan-out entirely); significance sets WHICH
 // observations get the lenses (top-K). Both caps keep cost bounded regardless of
 // observation count, and a consolidation agent preserves the cross-reference and
@@ -578,9 +579,9 @@ const OBS_SCHEMA = {
 // ---- model-tier strategy ----------------------------------------------------
 // Two tiers. The mechanical / IO-bound roles pin `model: 'sonnet'` (the cheap tier):
 // the source digest ('source-digest'), the area & gap investigators (here), the per-lens
-// verifiers ('verify:<lens>#i'), the grounding agents ('ground#n'), and the verbatim
-// write-agent ('write-assessment') — they
-// read, cross-check, or transcribe; none reason about the assessment as a whole. The
+// verifiers ('verify:<lens>#i'), the grounding agents ('ground#n'), the corrections
+// translator ('apply-corrections'), and the verbatim write-agent ('write-assessment') — they
+// read, cross-check, translate, or transcribe; none reason about the assessment as a whole. The
 // judgment roles omit `model` and inherit the caller's top tier (Opus/Fable in production):
 // the planner, plan-critic/revise, completeness-critic, consolidation verifier ('verify'),
 // and synthesizer.
@@ -759,8 +760,9 @@ const VERIFY_SCHEMA = {
     spotCheckedNumber: { type: 'string', description: 'The most significant numeric claim checked, and the result' },
   },
 }
-// Cross-area consolidation barrier: cross-reference, numeric spot-check, and
-// reliability over the (already enforced) observation set. Per-observation lens
+// Cross-area consolidation pass: cross-reference, numeric spot-check, and
+// reliability over the (already enforced) observation set; dispatched unawaited so it
+// overlaps the synthesize call and is joined after it. Per-observation lens
 // verdicts are applied in code upstream — not folded here. With no probedKeys this
 // is byte-identical to the original single-pass verifier, so the low-effort /
 // empty-observation path is unchanged.
@@ -784,7 +786,9 @@ const verifyConsolidated = (obs, probedKeys) => agent(
   'When verifying a specific claim, re-read the cited source rather than relying solely on the body text shown ' +
   'here (bodies may be excerpted).\n' +
   observationOnlyRule('verifier'),
-  { label: 'verify', schema: VERIFY_SCHEMA }
+  // Explicit phase: this call is dispatched unawaited and may settle during Synthesize, so it
+  // must not rely on the global phase() state at settle time for its progress grouping.
+  { label: 'verify', phase: 'Verify', schema: VERIFY_SCHEMA }
 )
 
 // Per-observation skeptic verdict — applied to the observation set in code (applyVerdicts).
@@ -939,6 +943,9 @@ const excerptForVerify = (obs) => obs.map((o) =>
 
 const lenses = EFFORT_LENSES[overallEffort] || []
 let verification
+// The in-flight consolidation verify: dispatched below (either branch) but joined only after
+// the synthesize call, so the two slowest serial stages run concurrently.
+let verificationPromise = null
 let verdicts = []
 let verdictsExpected = 0
 let auditActions = []
@@ -957,7 +964,12 @@ const safeVerify = async (obs, probed) => {
 if (!lenses.length || !allObs.length) {
   // Low effort or no observations: the single-pass verifier over the full set,
   // unchanged. No lens verdicts exist here, so nothing is enforced in code.
-  verification = await safeVerify(allObs)
+  // Dispatch the consolidation verify but DO NOT await it here: the synthesizer does not read
+  // its result (corrections are applied in code after both settle), so it runs concurrently
+  // with synthesis instead of as a serial stage ahead of it. safeVerify catches internally and
+  // always RESOLVES (fallback object; verifyFailed set at settle time), so the held promise can
+  // never produce an unhandled rejection — joined below, after the synthesize call.
+  verificationPromise = safeVerify(allObs)
 } else {
   // Area-aware target selection: a per-area floor (every area's best observation)
   // then significance-fill, so the top-K lens budget spreads across areas instead
@@ -995,15 +1007,9 @@ if (!lenses.length || !allObs.length) {
     auditActions.filter((a) => a.action === 'corrected').length + ' corrected, ' +
     auditActions.filter((a) => a.action === 'flagged').length + ' flagged.')
   const probedKeys = selectProbedKeys(targets, verdicts)
-  verification = await safeVerify(excerptForVerify(verifiedObs), probedKeys)
-}
-
-// A dispatched-but-empty lens pass is a silent total loss of adversarial
-// verification — distinct from a thrown consolidation (verifyFailed). Flag it
-// (mirroring safeVerify's skipped-consolidation flag) and degrade the run below.
-const verifyLost = lenses.length > 0 && allObs.length > 0 && verdicts.length === 0
-if (verifyLost && verification && Array.isArray(verification.reliabilityFlags)) {
-  verification.reliabilityFlags.push('adversarial lens verification was dispatched but every verdict was lost; observations were not adversarially checked')
+  // Dispatched unawaited for the same synthesis overlap as the single-pass branch above;
+  // safeVerify's never-rejects invariant makes holding the promise safe here too.
+  verificationPromise = safeVerify(excerptForVerify(verifiedObs), probedKeys)
 }
 
 // ---- Synthesize + write -----------------------------------------------------
@@ -1063,15 +1069,13 @@ const coverageNote = droppedAreaNames.length
 // Empty-observation runs skip the (expensive) synthesizer entirely — there is nothing to
 // synthesize — and render a deterministic empty assessment below; the cheap write-agent still
 // persists it so Phase 3 has a file to read.
-const synth = allObs.length ? await withRetry('synthesize', () => agent(
+let synth = allObs.length ? await withRetry('synthesize', () => agent(
   'You are synthesizing investigation observations into a final numbered assessment, returned as STRUCTURED DATA.\n\n' +
   'Scope: ' + scope + '\n' +
   'Areas covered: ' + completedAreaNames.join(', ') + '\n\n' +
   coverageNote +
   'Observations (JSON) — already reconciled against per-observation verification; honor any ' +
   '"verificationNotes" field (applied corrections / reliability flags):\n' + JSON.stringify(verifiedObs) + '\n\n' +
-  'Cross-area verification corrections (apply these):\n' +
-  JSON.stringify((verification && verification.corrections) || []) + '\n\n' +
   'SYNTHESIS RULES:\n' +
   '- Sub-agent numbering is discarded. Each finding number comes from significance order (most impactful first), ' +
   'and each finding carries an explicit significance of high/medium/low — the highest significance among the ' +
@@ -1105,6 +1109,77 @@ const synth = allObs.length ? await withRetry('synthesize', () => agent(
   '- summary: a brief overall assessment paragraph.',
   { label: 'synthesize', phase: 'Synthesize', schema: SYNTH_SCHEMA }
 )) : null
+
+// Join the consolidation verify that has been in flight alongside synthesis; everything from
+// here on (the corrections applier, the run's flags and audit) reads the settled result. The
+// join is unconditional so the null-synth and empty-observation paths settle it too.
+verification = await verificationPromise
+
+// A dispatched-but-empty lens pass is a silent total loss of adversarial
+// verification — distinct from a thrown consolidation (verifyFailed). Flag it
+// (mirroring safeVerify's skipped-consolidation flag) and degrade the run below.
+const verifyLost = lenses.length > 0 && allObs.length > 0 && verdicts.length === 0
+if (verifyLost && verification && Array.isArray(verification.reliabilityFlags)) {
+  verification.reliabilityFlags.push('adversarial lens verification was dispatched but every verdict was lost; observations were not adversarially checked')
+}
+
+// ---- Apply consolidation corrections (translated, then applied in code) -----
+// The consolidation verifier's corrections are claim-level free text ({claim, issue,
+// correctedClaim}) with no finding target, so they cannot feed applyFindingCorrections
+// directly. A cheap translation agent maps each correction onto the finding whose body
+// carries the wrong claim; the rewrite is then applied in code BEFORE the document is
+// written and BEFORE the Ground fan-out, so correction-derived text is grounded against
+// source like everything the synthesizer wrote.
+const APPLY_CORRECTIONS_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['corrections'],
+  properties: {
+    corrections: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['findingNumber', 'correctedBody'],
+        properties: {
+          findingNumber: { type: 'integer', description: 'The number of the finding whose body carries the wrong claim' },
+          correctedBody: { type: 'string', description: 'That finding\'s body with the corrected claim in place of the wrong one — the same single observation-only paragraph, changing only what the correction contradicts' },
+        },
+      },
+    },
+  },
+}
+// A failed applier is advisory-grade (like the critics): the findings stand uncorrected and
+// the shortfall is disclosed as a reliability flag rather than degrading the run status.
+let correctionApplyFailed = false
+const consolidationCorrections = (verification && verification.corrections) || []
+if (consolidationCorrections.length && synth && Array.isArray(synth.findings) && synth.findings.length) {
+  const applied = await withRetry('apply-corrections', () => agent(
+    'You are applying cross-area verification corrections to the numbered findings of a finished assessment.\n\n' +
+    'Findings (JSON, projected to number/title/body):\n' +
+    JSON.stringify(synth.findings.map((f) => ({ number: f.number, title: f.title, body: f.body })), null, 2) + '\n\n' +
+    'Corrections (JSON) — each names a wrong claim and its corrected form:\n' +
+    JSON.stringify(consolidationCorrections, null, 2) + '\n\n' +
+    'For each correction, identify the finding whose body states the wrong claim and return that finding\'s ' +
+    'number with its body rewritten so the corrected claim replaces the wrong one — keep the rest of the ' +
+    'paragraph verbatim, changing only what the correction contradicts. Do NOT add, remove, or renumber ' +
+    'findings. Skip any correction that matches no finding; if none apply, return an empty corrections list. ' +
+    OBS_ONLY_BASE,
+    // Cheap tier: keyed translation of given corrections onto given findings — no judgment
+    // about the assessment as a whole (see model-tier strategy above).
+    { label: 'apply-corrections', phase: 'Synthesize', schema: APPLY_CORRECTIONS_SCHEMA, model: 'sonnet' }
+  ))
+  if (applied) {
+    const usable = (applied.corrections || []).filter((c) => typeof c.correctedBody === 'string' && c.correctedBody)
+    if (usable.length) {
+      synth = { ...synth, findings: applyFindingCorrections(synth.findings, usable) }
+      log('Consolidation corrections: applied ' + usable.length + ' of ' + consolidationCorrections.length + ' to the findings.')
+    }
+  } else {
+    correctionApplyFailed = true
+    log('Consolidation corrections: the applier failed after retry; the findings stand uncorrected.')
+  }
+}
 
 // On the empty-observation path synth is null and the document is rendered deterministically;
 // otherwise it is rendered from the synthesizer's structured output.
@@ -1265,6 +1340,7 @@ const { status, coverage } = degradationSummary({
 const reliabilityFlags = [
   ...runReliabilityFlags({ planCriticFailed, completenessCriticFailed, verdictsReceived: verdicts.length, verdictsExpected }),
   ...(rewriteFailed ? ['post-synthesis corrections were found but the corrective re-write failed; the original document stands'] : []),
+  ...(correctionApplyFailed ? ['consolidation corrections could not be applied; the findings stand uncorrected'] : []),
   ...((verification && verification.reliabilityFlags) || []),
 ]
 log('Run status=' + status + (reliabilityFlags.length ? '; ' + reliabilityFlags.length + ' reliability flag(s).' : '.'))

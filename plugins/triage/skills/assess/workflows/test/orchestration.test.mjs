@@ -299,7 +299,7 @@ test('model tiers: mechanical roles are pinned to the cheap tier; judgment roles
   // Pinned to the cheap tier: the area/gap investigators, the per-lens verifiers
   // (verify:<lens>#i), the grounding agents, and the verbatim write-agent — none reason.
   const CHEAP_PREFIX = /^(area:|gap:|verify:|ground#)/
-  const CHEAP_EXACT = new Set(['source-digest', 'write-assessment', 'rewrite-assessment'])
+  const CHEAP_EXACT = new Set(['source-digest', 'write-assessment', 'rewrite-assessment', 'apply-corrections'])
   // Inherit the caller's model: the judgment roles. NB: bare 'verify' is the consolidation
   // verifier (judgment) — distinct from the 'verify:<lens>#i' per-lens verifiers above.
   const INHERIT = new Set(['plan', 'plan-critic', 'plan-revise', 'completeness-critic', 'verify', 'synthesize'])
@@ -396,10 +396,12 @@ test('synthesizer payload: corrections reach the synthesizer without re-sending 
   assert.ok(!captured.includes('significanceDowngrade')) // audit-only downgrade provenance is gone
 })
 
-test('synthesizer payload: consolidation corrections reach the synthesizer; audit-only verifier fields do not', async () => {
-  // The whole consolidation `verification` object used to be JSON.stringify'd into the synth prompt.
-  // Only `corrections` is actionable there; `reliabilityFlags` is already surfaced in the result and
-  // `checksPerformed` is audit-only — both must be projected out of this (Opus-tier, largest) prompt.
+test('synthesizer payload: nothing from the consolidation verifier rides the synth prompt', async () => {
+  // Consolidation corrections used to be JSON.stringify'd into the synthesize prompt as an
+  // advisory instruction — the mechanism that let a false correction ship unrecorded. They are
+  // now translated and applied in code after synthesis (apply-corrections → applyFindingCorrections),
+  // so no field of the verification object may reach this (top-tier, largest) prompt: not the
+  // corrections, and not the audit-only fields that were already projected out.
   const verification = {
     checksPerformed: ['CHECK_SENTINEL'],
     corrections: [{ claim: 'CLAIM_SENTINEL', issue: 'ISSUE_SENTINEL', correctedClaim: 'FIXED_SENTINEL' }],
@@ -412,9 +414,113 @@ test('synthesizer payload: consolidation corrections reach the synthesizer; audi
   }
   const { calls } = await med({ verify: verification, synthesize: capture })
   assert.ok(calls.includes('synthesize'))          // the synthesizer actually ran
-  assert.match(captured, /FIXED_SENTINEL/)         // the actionable correction reaches it...
-  assert.ok(!captured.includes('FLAG_SENTINEL'))   // ...but reliabilityFlags are not duplicated (surfaced in the result instead)
-  assert.ok(!captured.includes('CHECK_SENTINEL'))  // ...and audit-only checksPerformed is not sent
+  assert.ok(!captured.includes('FIXED_SENTINEL'))  // corrections no longer ride the prompt...
+  assert.ok(!captured.includes('CLAIM_SENTINEL'))
+  assert.ok(!captured.includes('Cross-area verification corrections')) // ...nor their instruction header
+  assert.ok(!captured.includes('FLAG_SENTINEL'))   // reliabilityFlags stay out (surfaced in the result instead)
+  assert.ok(!captured.includes('CHECK_SENTINEL'))  // audit-only checksPerformed stays out
+})
+
+test('consolidation corrections: a cheap applier lands them on the findings before write and ground', async () => {
+  // The consolidation verifier's corrections are claim-level free text with no finding target.
+  // A cheap translation agent maps them onto finding numbers and the correction is applied in
+  // code BEFORE the persist and BEFORE grounding — so corrected text is itself still grounded.
+  const verification = {
+    checksPerformed: [],
+    corrections: [{ claim: 'CLAIM_SENTINEL', issue: 'ISSUE_SENTINEL', correctedClaim: 'FIXED_SENTINEL' }],
+    reliabilityFlags: [],
+  }
+  let writePrompt = ''
+  let groundPrompt = ''
+  const { result, calls, dispatches } = await med({
+    verify: verification,
+    'apply-corrections': { corrections: [{ findingNumber: 1, correctedBody: 'CONSOLIDATION-CORRECTED BODY' }] },
+    'write-assessment': (prompt) => { writePrompt = prompt; return { written: true, path: '/tmp/assessment-test.md' } },
+    'ground#1': (prompt) => { groundPrompt = prompt; return { ungrounded: [] } },
+  })
+  const applier = dispatches.find((d) => d.label === 'apply-corrections')
+  assert.ok(applier, 'apply-corrections was dispatched')
+  assert.equal(applier.model, 'sonnet') // mechanical translation runs on the cheap tier
+  assert.ok(calls.indexOf('apply-corrections') < calls.indexOf('write-assessment')) // applied before the persist
+  assert.ok(result.markdown.includes('CONSOLIDATION-CORRECTED BODY')) // the delivered document carries the correction
+  assert.ok(writePrompt.includes('CONSOLIDATION-CORRECTED BODY'))     // ...as does the persisted copy
+  assert.ok(groundPrompt.includes('CONSOLIDATION-CORRECTED BODY'))    // grounding checks the corrected text
+  assert.equal(result.status, 'ok')
+})
+
+test('consolidation-corrections applier is gated: no corrections, no findings, or failed synthesis skips it', async () => {
+  // Happy fixture: the consolidation verifier returns no corrections → nothing to translate.
+  const happy = await med()
+  assert.ok(!happy.calls.includes('apply-corrections'))
+  const corr = { checksPerformed: [], corrections: [{ claim: 'c', issue: 'i', correctedClaim: 'cc' }], reliabilityFlags: [] }
+  // Corrections exist but synthesis produced zero findings → nothing to apply them to.
+  const noFindings = await med({
+    verify: corr,
+    synthesize: { assessmentTitle: 'T', scopeSummary: 's', areasCovered: 'a', findings: [], summary: 'sum' },
+  })
+  assert.ok(!noFindings.calls.includes('apply-corrections'))
+  // Corrections exist but the synthesizer failed → the run fails without dispatching the applier.
+  const failed = await med({ verify: corr, synthesize: THROW })
+  assert.ok(!failed.calls.includes('apply-corrections'))
+  assert.equal(failed.result.status, 'failed')
+})
+
+test('consolidation-corrections applier failure: the run stays ok, is flagged, and the original body stands', async () => {
+  const corr = { checksPerformed: [], corrections: [{ claim: 'c', issue: 'i', correctedClaim: 'cc' }], reliabilityFlags: [] }
+  const { result, calls } = await med({ verify: corr, 'apply-corrections': THROW })
+  assert.ok(calls.includes('apply-corrections')) // the applier was dispatched and failed after retry
+  assert.equal(result.status, 'ok') // like the advisory critics, a lost applier does not degrade the run
+  assert.ok(result.reliabilityFlags.some((f) => /consolidation corrections could not be applied/.test(f)))
+  assert.ok(result.markdown.includes('b1')) // the original finding body stands uncorrected
+})
+
+// ---- verify-consolidation / synthesize overlap ----------------------------------------------
+// The consolidation verifier and the synthesizer are the two slowest serial stages, and the only
+// data flowing between them (corrections) is now applied in code after both settle — so the
+// consolidation promise is held unawaited across the synthesize call and joined after it. These
+// two scenarios prove the overlap on both dispatch paths: the verify override settles only on a
+// later event-loop turn (setImmediate), so `overlapped` is true only if synthesize dispatched
+// while the consolidation verify was still pending. safeVerify never rejects, so holding the
+// promise is safe; the late-settling result must still reach the run's flags and audit.
+
+const OVERLAP_SYNTH = {
+  assessmentTitle: 'T',
+  scopeSummary: 's',
+  areasCovered: 'a',
+  findings: [{ number: 1, title: 'F1', significance: 'high', body: 'b1', citations: ['alpha.js:1'] }],
+  summary: 'sum',
+}
+const lateVerify = (onSettle) => () => new Promise((resolve) => setImmediate(() => {
+  onSettle()
+  resolve({ checksPerformed: ['late'], corrections: [], reliabilityFlags: ['LATE_FLAG'] })
+}))
+
+test('verify-consolidation overlaps synthesis (lens path): synthesize dispatches while consolidation is pending', async () => {
+  let verifySettled = false
+  let overlapped = false
+  const { result, calls } = await med({
+    verify: lateVerify(() => { verifySettled = true }),
+    synthesize: () => { overlapped = !verifySettled; return OVERLAP_SYNTH },
+  })
+  assert.ok(calls.indexOf('verify') < calls.indexOf('synthesize')) // consolidation still dispatches first...
+  assert.ok(overlapped, 'synthesize dispatched while the consolidation verify was still pending')
+  assert.ok(result.reliabilityFlags.includes('LATE_FLAG'))         // the late result still reaches the run's flags
+  assert.deepEqual(result.verification.checks.checksPerformed, ['late']) // ...and the verification audit
+  assert.equal(result.status, 'ok')
+})
+
+test('verify-consolidation overlaps synthesis (single-pass path): the low-effort verifier is also held unawaited', async () => {
+  let verifySettled = false
+  let overlapped = false
+  const { result, calls } = await low({
+    verify: lateVerify(() => { verifySettled = true }),
+    synthesize: () => { overlapped = !verifySettled; return OVERLAP_SYNTH },
+  })
+  assert.ok(calls.indexOf('verify') < calls.indexOf('synthesize'))
+  assert.ok(overlapped, 'synthesize dispatched while the single-pass verify was still pending')
+  assert.ok(result.reliabilityFlags.includes('LATE_FLAG'))
+  assert.deepEqual(result.verification.checks.checksPerformed, ['late'])
+  assert.equal(result.status, 'ok')
 })
 
 test('synthesizer fidelity: the prompt forbids claims and specifics not present in the observations', async () => {
