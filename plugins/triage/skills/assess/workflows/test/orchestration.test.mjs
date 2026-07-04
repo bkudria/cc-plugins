@@ -428,12 +428,16 @@ test('cheap write-agent: the verbatim write-assessment runs on the cheap tier, n
 test('model tiers: mechanical roles are pinned to the cheap tier; judgment roles inherit the caller', async () => {
   const { dispatches } = await med()
   // Pinned to the cheap tier: the area/gap investigators, the per-lens verifiers
-  // (verify:<lens>#i), the grounding agents, and the verbatim write-agent — none reason.
+  // (verify:<lens>#i), the grounding agents, the verbatim write/rewrite and corrections agents,
+  // and the two advisory critics (plan-critic, completeness-critic) — mechanical roles, plus
+  // critics whose verdicts are advisory and self-healing.
   const CHEAP_PREFIX = /^(area:|gap:|verify:|ground#)/
-  const CHEAP_EXACT = new Set(['source-digest', 'write-assessment', 'rewrite-assessment', 'apply-corrections'])
-  // Inherit the caller's model: the judgment roles. NB: bare 'verify' is the consolidation
-  // verifier (judgment) — distinct from the 'verify:<lens>#i' per-lens verifiers above.
-  const INHERIT = new Set(['plan', 'plan-critic', 'plan-revise', 'completeness-critic', 'verify', 'synthesize'])
+  const CHEAP_EXACT = new Set(['source-digest', 'write-assessment', 'rewrite-assessment', 'apply-corrections', 'plan-critic', 'completeness-critic'])
+  // Inherit the caller's top tier: the generative judgment roles — the planner and plan-revise
+  // (they produce the decomposition), the consolidation verifier ('verify', a deep cross-check),
+  // and the synthesizer (the product). NB: bare 'verify' is the consolidation verifier, distinct
+  // from the 'verify:<lens>#i' per-lens verifiers above.
+  const INHERIT = new Set(['plan', 'plan-revise', 'verify', 'synthesize'])
   for (const d of dispatches) {
     if (CHEAP_PREFIX.test(d.label) || CHEAP_EXACT.has(d.label)) {
       assert.equal(d.model, 'sonnet', `${d.label} should be pinned to the cheap tier`)

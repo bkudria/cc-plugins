@@ -517,7 +517,7 @@ if (overallEffort !== 'low' && areas.length >= PLAN_CRITIC_MIN_AREAS) {
     'investigate the scope; reach your verdict from the areas, rationales, efforts, and scaling rules ' +
     'alone. Name only GENUINE structural problems, do NOT propose fixes, and do NOT invent issues to ' +
     'seem thorough. If the decomposition is sound, set sound=true and return an empty issues list.',
-    { label: 'plan-critic', phase: 'Plan', schema: PLAN_REVIEW_SCHEMA }
+    { label: 'plan-critic', phase: 'Plan', schema: PLAN_REVIEW_SCHEMA, model: 'sonnet' }
   ))
   const issues = (review && review.issues) || []
   if (!review) {
@@ -627,10 +627,13 @@ const OBS_SCHEMA = {
 // the source digest ('source-digest'), the area & gap investigators (here), the per-lens
 // verifiers ('verify:<lens>#i'), the grounding agents ('ground#n'), the corrections
 // translator ('apply-corrections'), and the verbatim write-agent ('write-assessment') — they
-// read, cross-check, translate, or transcribe; none reason about the assessment as a whole. The
-// judgment roles omit `model` and inherit the caller's top tier (Opus/Fable in production):
-// the planner, plan-critic/revise, completeness-critic, consolidation verifier ('verify'),
-// and synthesizer.
+// read, cross-check, translate, or transcribe; none reason about the assessment as a whole.
+// The two advisory critics — plan-critic and completeness-critic — also pin 'sonnet': they
+// reason, but their verdicts are advisory and self-healing (a rejected plan falls back to the
+// original decomposition; a spurious or missed gap only spends or omits one cheap investigator),
+// so the cheaper tier trades little quality. The generative judgment roles omit `model` and
+// inherit the caller's top tier (Opus/Fable in production): the planner and plan-revise (they
+// produce the decomposition), the consolidation verifier ('verify'), and the synthesizer.
 // Known limitation: under evals the harness pins ONE base model (evals.yaml:
 // `model: claude-sonnet-5`), which overrides per-agent inheritance — so the judgment
 // roles also run on the base and the two-tier split is never exercised by evals. It is a
@@ -740,7 +743,7 @@ if (criticRounds > 0 && allObs.length) {
       'effort to how much investigation it genuinely needs, sized the way a planner sizes an area: a binary ' +
       'or single-value lookup is low; a facet needing broad reading across many threads is high. If coverage ' +
       'is already sufficient, set complete=true and return an empty gaps list. At most ' + MAX_GAPS_PER_ROUND + ' gaps.',
-      { label: 'completeness-critic', phase: 'Completeness', schema: GAP_SCHEMA }
+      { label: 'completeness-critic', phase: 'Completeness', schema: GAP_SCHEMA, model: 'sonnet' }
     ))
     if (!critique) {
       completenessCriticFailed = true
