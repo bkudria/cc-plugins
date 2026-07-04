@@ -407,10 +407,78 @@ const pickOverallQuestion = ({ plan, revised, scope }) => {
 /* test-seam:pure-fn:end */
 let overallQuestion = pickOverallQuestion({ plan, scope })
 
+// ---- Source digest (one-time orientation map; shared across the run's agents) ------------
+// One cheap-tier agent absorbs the single expensive full-source read (and any chunking a large
+// source needs) ONCE, then hands the investigators, verifiers, and grounding agents a shared
+// orientation map so they target their reads instead of each re-orienting in the whole source.
+// Gated to runs with real fan-out (>= DIGEST_MIN_AREAS areas) and off at low effort, where a
+// quick scan should not pay a front barrier. The digest depends only on the planned areas and
+// overall question, so it is dispatched unawaited alongside the plan critic and joined before
+// the Investigate fan-out; an adopted plan revision discards the in-flight map and re-dispatches
+// against the revised decomposition (rare — one wasted cheap-tier digest), and a revision that
+// no longer qualifies drops it. The map is advisory: every recipient still reads
+// actual source (verify and grounding re-derive citations against it, and verifier prompts carry
+// VERIFY_MAP_CAVEAT so the map is navigation, never evidence) — so a failed or skipped digest
+// degrades cleanly to unaided reads (renderOrientation returns ''). The verbatim writers and the
+// corrections translator never receive it; they do not read source at all.
+const DIGEST_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['overview', 'landmarks'],
+  properties: {
+    overview: { type: 'string', description: '1-3 sentences orienting the reader to the source as a whole' },
+    landmarks: {
+      type: 'array',
+      // Bounded: the map is re-sent to every investigator, verifier, and grounding agent, so an
+      // unbounded map would recreate the payload duplication it removes. Keep it a compact set of
+      // the load-bearing landmarks.
+      maxItems: 20,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['location', 'what', 'relevance'],
+        properties: {
+          location: { type: 'string', description: 'Concrete pointer: file path with an optional line range, e.g. src/foo.js:120-145' },
+          what: { type: 'string', description: 'What is at this location' },
+          relevance: { type: 'string', description: 'Why it matters to the investigation / which thread it bears on' },
+        },
+      },
+    },
+  },
+}
+const digestWanted = (effort, areaCount) => effort !== 'low' && areaCount >= DIGEST_MIN_AREAS
+// No retry (a front-loaded optional step should not add a serial retry barrier to every run),
+// and .catch at dispatch: the promise is held unawaited across the plan critic, so a rejection
+// must resolve to null (unaided reads) rather than crash the run.
+const dispatchDigest = (names, question) => agent(
+  'You are the source digest for a parallel investigation (an assessment). A team of ' +
+  'investigators is about to examine this scope; you read the source ONCE so they do not each ' +
+  're-ingest it.\n' +
+  'Scope: ' + scope + '\n' +
+  'Overall question: ' + question + '\n' +
+  'Areas the investigators will examine (orient toward these — do NOT investigate or judge them ' +
+  'yourself): ' + names.join('; ') + '\n' +
+  'Surface landmarks relevant to: ' + focus + '\n\n' +
+  READ_ONLY_TOOLS + '\n\n' +
+  'Read the source in full once (chunk large files across multiple reads rather than truncating). ' +
+  'Produce a compact orientation map: for each load-bearing landmark give a concrete location ' +
+  '(file path + line range), what is there, and why it matters. This is ORIENTATION, not findings: ' +
+  'point investigators at where things are so they can target their reads — do NOT draw conclusions, ' +
+  'judge significance, or propose anything. Keep it compact and point to the source; do not reproduce it.',
+  { label: 'source-digest', phase: 'Digest', schema: DIGEST_SCHEMA, model: 'sonnet' }
+).catch(() => null)
+let digestPromise = Promise.resolve(null)
+let digestDispatched = false
+if (digestWanted(overallEffort, areas.length)) {
+  digestPromise = dispatchDigest(areas.map((a) => a.name), overallQuestion)
+  digestDispatched = true
+}
+
 // ---- Plan critic (gated; one bounded revision) ------------------------------
 // Before paying for fan-out, a critic judges the decomposition for coverage, disjointness, and
 // count from the plan ALONE — it has tools but is instructed not to investigate. Gated on
-// effort + size so simple scopes skip it. On a genuine
+// effort + size so simple scopes skip it. The source digest runs concurrently with the critic:
+// only an adopted revision changes what the digest consumes. On a genuine
 // problem one revised plan is requested through the same prompt and bounds; a revision
 // that yields nothing usable falls back to the original plan.
 if (overallEffort !== 'low' && areas.length >= PLAN_CRITIC_MIN_AREAS) {
@@ -455,6 +523,17 @@ if (overallEffort !== 'low' && areas.length >= PLAN_CRITIC_MIN_AREAS) {
       overallEffort = deriveOverallEffort(areas, effortCeiling)
       overallQuestion = pickOverallQuestion({ plan, revised, scope })
       log('Revised plan: ' + areas.length + ' area(s).')
+      // The in-flight digest was oriented to the rejected decomposition — discard it and, when
+      // the revised plan still qualifies, re-dispatch against the revised areas.
+      if (digestWanted(overallEffort, areas.length)) {
+        log('Plan revised; re-dispatching the source digest for the revised areas.')
+        digestPromise = dispatchDigest(areas.map((a) => a.name), overallQuestion)
+        digestDispatched = true
+      } else if (digestDispatched) {
+        log('Revised plan no longer qualifies for a digest; discarding the in-flight map.')
+        digestPromise = Promise.resolve(null)
+        digestDispatched = false
+      }
     } else {
       log('Revision produced no usable areas; keeping original plan.')
     }
@@ -489,69 +568,11 @@ const renderOrientation = (digest) => {
 const VERIFY_MAP_CAVEAT = 'This map was also shared with the investigators whose claims you are ' +
   'checking — use it to navigate the source, never as evidence that a claim is correct.'
 
-// ---- Source digest (one-time orientation map; shared across the run's agents) ------------
-// One cheap-tier agent absorbs the single expensive full-source read (and any chunking a large
-// source needs) ONCE, then hands the investigators, verifiers, and grounding agents a shared
-// orientation map so they target their reads instead of each re-orienting in the whole source.
-// Gated to runs with real fan-out (>= DIGEST_MIN_AREAS areas) and off at low effort, where a
-// quick scan should not pay a front barrier. The map is advisory: every recipient still reads
-// actual source (verify and grounding re-derive citations against it, and verifier prompts carry
-// VERIFY_MAP_CAVEAT so the map is navigation, never evidence) — so a failed or skipped digest
-// degrades cleanly to unaided reads (renderOrientation returns ''). The verbatim writers and the
-// corrections translator never receive it; they do not read source at all.
-const DIGEST_SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
-  required: ['overview', 'landmarks'],
-  properties: {
-    overview: { type: 'string', description: '1-3 sentences orienting the reader to the source as a whole' },
-    landmarks: {
-      type: 'array',
-      // Bounded: the map is re-sent to every investigator, verifier, and grounding agent, so an
-      // unbounded map would recreate the payload duplication it removes. Keep it a compact set of
-      // the load-bearing landmarks.
-      maxItems: 20,
-      items: {
-        type: 'object',
-        additionalProperties: false,
-        required: ['location', 'what', 'relevance'],
-        properties: {
-          location: { type: 'string', description: 'Concrete pointer: file path with an optional line range, e.g. src/foo.js:120-145' },
-          what: { type: 'string', description: 'What is at this location' },
-          relevance: { type: 'string', description: 'Why it matters to the investigation / which thread it bears on' },
-        },
-      },
-    },
-  },
-}
-let orientation = ''
-if (overallEffort !== 'low' && areas.length >= DIGEST_MIN_AREAS) {
-  phase('Digest')
-  // Non-critical: a thrown or null digest must not abort the run, and we deliberately do not
-  // retry — a front-loaded optional step should not add a serial retry barrier to every run.
-  let digest = null
-  try {
-    digest = await agent(
-      'You are the source digest for a parallel investigation (an assessment). A team of ' +
-      'investigators is about to examine this scope; you read the source ONCE so they do not each ' +
-      're-ingest it.\n' +
-      'Scope: ' + scope + '\n' +
-      'Overall question: ' + overallQuestion + '\n' +
-      'Areas the investigators will examine (orient toward these — do NOT investigate or judge them ' +
-      'yourself): ' + areaNames.join('; ') + '\n' +
-      'Surface landmarks relevant to: ' + focus + '\n\n' +
-      READ_ONLY_TOOLS + '\n\n' +
-      'Read the source in full once (chunk large files across multiple reads rather than truncating). ' +
-      'Produce a compact orientation map: for each load-bearing landmark give a concrete location ' +
-      '(file path + line range), what is there, and why it matters. This is ORIENTATION, not findings: ' +
-      'point investigators at where things are so they can target their reads — do NOT draw conclusions, ' +
-      'judge significance, or propose anything. Keep it compact and point to the source; do not reproduce it.',
-      { label: 'source-digest', phase: 'Digest', schema: DIGEST_SCHEMA, model: 'sonnet' }
-    )
-  } catch (e) {
-    digest = null
-  }
-  orientation = renderOrientation(digest)
+// Join the source digest dispatched alongside the plan critic (or its post-revision
+// re-dispatch); from here every fan-out prompt embeds the rendered orientation map.
+const digest = await digestPromise
+const orientation = renderOrientation(digest)
+if (digestDispatched) {
   log(orientation
     ? 'Source orientation map: ' + ((digest && digest.landmarks) || []).length + ' landmark(s) shared with the investigating, verifying, and grounding agents.'
     : 'Source digest produced no usable map; agents will read source unaided.')

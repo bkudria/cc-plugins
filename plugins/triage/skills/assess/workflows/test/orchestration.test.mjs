@@ -861,3 +861,68 @@ test('source digest runs on the cheap tier', async () => {
   assert.ok(digest, 'source-digest was dispatched')
   assert.equal(digest.model, 'sonnet')
 })
+
+test('source digest is dispatched before the plan critic settles (overlap)', async () => {
+  // The digest depends only on the planned areas and overall question — values a sound critic
+  // verdict leaves untouched — so it must not wait out the critic's serial latency.
+  let digestStarted = false
+  let criticSawDigest = false
+  const { calls } = await med({
+    'source-digest': (_p, opts) => { digestStarted = true; return SENTINEL_DIGEST(_p, opts) },
+    'plan-critic': () => { criticSawDigest = digestStarted; return { sound: true, issues: [] } },
+  })
+  assert.ok(calls.includes('plan-critic')) // the critic actually ran
+  assert.equal(calls.filter((l) => l === 'source-digest').length, 1) // still exactly one dispatch
+  assert.ok(criticSawDigest, 'the digest was in flight before the critic ran')
+})
+
+test('an adopted plan revision re-dispatches the digest for the revised areas and discards the stale map', async () => {
+  const revisedPlan = {
+    overallQuestion: 'Is the revised thing sound?',
+    effortRationale: 'reshaped',
+    areas: ['delta', 'epsilon', 'zeta'].map((name) => ({ name, rationale: 'why ' + name, effort: 'medium' })),
+  }
+  const digestPrompts = []
+  const maps = [
+    { overview: 'stale', landmarks: [{ location: 'stale.js:1', what: 'STALE_MARK', relevance: 'r' }] },
+    { overview: 'fresh', landmarks: [{ location: 'fresh.js:1', what: 'REVISED_MARK', relevance: 'r' }] },
+  ]
+  let investPrompt = ''
+  const { calls } = await med({
+    'plan-critic': { sound: false, issues: [{ kind: 'overlap', detail: 'alpha duplicates beta' }] },
+    'plan-revise': revisedPlan,
+    'source-digest': (prompt) => { digestPrompts.push(prompt); return maps[digestPrompts.length - 1] },
+    'area:delta': (prompt) => {
+      investPrompt = prompt
+      return { area: 'delta', observations: [{ title: 't', body: 'b', evidence: ['x.js:1'], significance: 'high' }] }
+    },
+  })
+  assert.equal(calls.filter((l) => l === 'source-digest').length, 2) // stale + revised dispatches
+  assert.match(digestPrompts[0], /alpha/) // the first digest oriented to the rejected areas
+  assert.match(digestPrompts[1], /delta/) // the re-dispatch orients to the revised areas
+  assert.ok(investPrompt.includes('REVISED_MARK')) // investigators get the re-dispatched map...
+  assert.ok(!investPrompt.includes('STALE_MARK')) // ...never the stale one
+})
+
+test('a revision that lowers overall effort to low drops the in-flight digest', async () => {
+  // adaptive (no effort ceiling): the derived effort follows the revised areas down to low,
+  // where a digest would never have been dispatched — so the stale in-flight map is dropped.
+  const revisedLow = {
+    overallQuestion: 'Is the revised thing sound?',
+    effortRationale: 'simpler than planned',
+    areas: ['delta', 'epsilon', 'zeta'].map((name) => ({ name, rationale: 'why ' + name, effort: 'low' })),
+  }
+  let investPrompt = ''
+  const { calls } = await adaptive({
+    'plan-critic': { sound: false, issues: [{ kind: 'count', detail: 'over-decomposed' }] },
+    'plan-revise': revisedLow,
+    'source-digest': SENTINEL_DIGEST,
+    'area:delta': (prompt) => {
+      investPrompt = prompt
+      return { area: 'delta', observations: [{ title: 't', body: 'b', evidence: ['x.js:1'], significance: 'high' }] }
+    },
+  })
+  assert.equal(calls.filter((l) => l === 'source-digest').length, 1) // the pre-critic dispatch only
+  assert.ok(investPrompt, 'investigator prompt was captured')
+  assert.ok(!/orientation map/i.test(investPrompt)) // the stale map was discarded, not injected
+})
