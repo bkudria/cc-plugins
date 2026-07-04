@@ -680,6 +680,8 @@ if (criticRounds > 0 && allObs.length) {
     // The critic judges coverage and names uncovered facets — it does not re-verify claims, so it
     // does not need each observation's full prose body. Projecting to title/evidence/significance
     // preserves the coverage + thread signal while bounding the payload re-sent in full every round.
+    // Like the plan critic, it is fenced from investigating: anything a gap needs established is
+    // derived once, by the gap agent it spawns — not first by the critic at the top tier.
     const critiqueObs = allObs.map((o) => ({ area: o.area, title: o.title, significance: o.significance, evidence: o.evidence }))
     const critique = await withRetry('completeness-critic', () => agent(
       'You are a completeness critic for an investigation (an assessment). Judge whether the areas already ' +
@@ -689,6 +691,10 @@ if (criticRounds > 0 && allObs.length) {
       'Focus: ' + focus + '\n' +
       'Areas already investigated (do NOT propose any of these again): ' + areaNames.join('; ') + '\n\n' +
       'Observations gathered so far (JSON):\n' + JSON.stringify(critiqueObs, null, 2) + '\n\n' +
+      'Judge ONLY from the observations above — you have tools but must NOT read files, run commands, ' +
+      'or investigate the scope; reach your verdict from the areas, titles, significance, and evidence ' +
+      'entries alone. Each gap you name is investigated afterward by a dedicated agent — name the facet ' +
+      'and why it matters; do not investigate it yourself.\n\n' +
       'Name only GENUINE gaps: a facet, thread, or area materially relevant to the overall question that the ' +
       'existing areas do not cover — an unplanned thread surfaced by an observation counts. A gap must be a ' +
       'facet none of the existing areas covers, not the same theme under a different name. Do NOT restate ' +

@@ -377,6 +377,18 @@ test('completeness-critic prompt: gaps must be semantically distinct, not the sa
   assert.match(captured, /different name/)
 })
 
+test('completeness-critic prompt: the critic is fenced from investigating (coverage judgment only)', async () => {
+  // The critic's job is judging coverage of the observations payload, and each gap it names gets its
+  // own investigator — a critic that reads source itself derives at top tier what the gap agent then
+  // re-derives at cheap tier. The prompt must fence it the way the plan-critic is fenced.
+  let captured = ''
+  const capture = (prompt) => { captured = prompt; return { complete: true, gaps: [] } }
+  const { calls } = await high({ 'completeness-critic': capture })
+  assert.ok(calls.includes('completeness-critic'))
+  assert.match(captured, /must NOT read files, run commands/)
+  assert.match(captured, /dedicated agent/)
+})
+
 test('synthesizer payload: corrections reach the synthesizer without re-sending the body or audit-only downgrade provenance', async () => {
   // Every probed observation gets a 'correct' verdict that both rewrites the claim and downgrades
   // significance, so applyVerdicts folds corrections + a significanceDowngrade into the kept set.
