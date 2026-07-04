@@ -1062,6 +1062,11 @@ const SYNTH_SCHEMA = {
             items: { type: 'string' },
             description: 'Concrete source locations this finding rests on (file paths, line numbers, values, patterns), carried from the evidence of the observation(s) it synthesizes. INTERNAL — used only to ground the finding against source; never rendered into the document.',
           },
+          outOfBandBasis: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Grounds the finding rests on that are NOT locatable in the source record (human-reported facts, session-external context). INTERNAL like citations, but never checked against source — never repeat a "citations" entry here.',
+          },
         },
       },
     },
@@ -1125,6 +1130,8 @@ let synth = allObs.length ? await withRetry('synthesize', () => agent(
   '- For each finding, a "citations" list of the concrete source locations it rests on (file paths, line ' +
   'numbers, values, patterns), drawn from the "evidence" of the observation(s) you merged into it. Citations are ' +
   'INTERNAL — used to ground the finding against source; they are never shown to the reader.\n' +
+  '- Grounds that cannot be located in the source record (human-reported facts, out-of-band context) go in ' +
+  '"outOfBandBasis", NOT in "citations" — only "citations" entries are later checked against source.\n' +
   '- summary: a brief overall assessment paragraph.',
   { label: 'synthesize', phase: 'Synthesize', schema: SYNTH_SCHEMA }
 )) : null
@@ -1238,7 +1245,9 @@ const findingsCount = synth && Array.isArray(synth.findings) ? synth.findings.le
 // re-rendered, and the file is re-written once (the sole exception to "the synthesizer's
 // file stands"); everything else is additive audit trail. Only a PERSISTED correction clears
 // a finding from the degrading set — a failed re-write leaves the original wrong body, so
-// those findings stay ungrounded. Bounded to the top-K significance-ordered findings and
+// those findings stay ungrounded. Bounded to the top-K significance-ordered GROUNDABLE
+// findings — findings resting only on out-of-band basis (human reports, session-external
+// context) are skipped, their slots backfilling with the next groundable findings — and
 // fanned out in parallel (like the verify stage) so cost and wall-clock stay flat; gated like
 // the other added stages so a low-effort or zero-finding run skips it.
 phase('Ground')
@@ -1263,18 +1272,29 @@ const GROUND_SCHEMA = {
     correctedBody: { type: 'string', description: 'If a "mismatch" means the finding\'s body states something the source contradicts: the finding\'s body rewritten so every claim matches what the source actually shows — the same single observation-only paragraph, changing only what was wrong. Omit when nothing in the body needs fixing.' },
   },
 }
+/* test-seam:pure-fn:start */
+// Ground only findings that carry source-locatable citations: out-of-band basis (human
+// reports, session-external context) cannot ground by definition, so findings resting solely
+// on it are skipped and their slots backfill with the next significance-ordered groundable
+// findings. Pure (findings + budget in, findings out).
+const selectGroundTargets = (findings, maxK) =>
+  findings.filter((f) => (f.citations || []).length > 0).slice(0, maxK)
+/* test-seam:pure-fn:end */
 const synthFindings = (synth && synth.findings) || []
-let grounding = { ran: false, checked: 0, ungrounded: [], corrected: [] }
+let grounding = { ran: false, checked: 0, ungrounded: [], corrected: [], skipped: 0 }
 let rewriteFailed = false
 // The persist (write-assessment) is in flight concurrently with the grounding fan-out below;
 // these capture its joined result so synthOk can be computed once the write has settled.
 let wrote = null
 let writeJoined = false
 if (overallEffort !== 'low' && synthFindings.length) {
-  // Findings are significance-ordered (most impactful first), so the top-K are the ones
-  // worth grounding; each runs in its own read-only agent, in parallel.
-  const groundTargets = synthFindings.slice(0, MAX_GROUND_TARGETS)
-  const groundJobs = groundTargets.map((fnd) => () =>
+  // Findings are significance-ordered (most impactful first), so the top-K groundable ones
+  // are checked; each runs in its own read-only agent, in parallel.
+  const groundTargets = selectGroundTargets(synthFindings, MAX_GROUND_TARGETS)
+  const groundSkipped = synthFindings.length - synthFindings.filter((f) => (f.citations || []).length > 0).length
+  // The out-of-band basis is destructured away so the agent is never invited to re-check
+  // grounds that cannot resolve against source.
+  const groundJobs = groundTargets.map(({ outOfBandBasis: _oob, ...fnd }) => () =>
     agent(
       'You are grounding ONE finding from a finished assessment against source, at the synthesis boundary. ' +
       READ_ONLY_TOOLS + '\n\n' +
@@ -1329,9 +1349,10 @@ if (overallEffort !== 'low' && synthFindings.length) {
     }
   }
   const ungrounded = detected.filter((u) => !correctedNumbers.includes(u.findingNumber))
-  grounding = { ran: true, checked: groundResults.length, ungrounded, corrected: correctedNumbers }
+  grounding = { ran: true, checked: groundResults.length, ungrounded, corrected: correctedNumbers, skipped: groundSkipped }
   log('Grounding: ' + grounding.checked + ' of ' + synthFindings.length + ' finding(s) checked (top ' +
-    groundTargets.length + '), ' + correctedNumbers.length + ' corrected, ' + ungrounded.length + ' citation(s) unresolved.')
+    groundTargets.length + ' groundable), ' + correctedNumbers.length + ' corrected, ' + ungrounded.length +
+    ' citation(s) unresolved, ' + groundSkipped + ' skipped (no groundable citations).')
 }
 
 // Join the initial persist (a no-op if the grounding path already awaited it) and compute synthOk
