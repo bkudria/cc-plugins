@@ -58,8 +58,8 @@ const HAPPY = {
     scopeSummary: 's',
     areasCovered: AREAS.join(', '),
     findings: [
-      { number: 1, title: 'F1', significance: 'high', body: 'b1', citations: ['alpha.js:1'] },
-      { number: 2, title: 'F2', significance: 'medium', body: 'b2', citations: ['beta.js:1'] },
+      { number: 1, title: 'F1', significance: 'high', body: 'b1', citations: ['alpha.js:1'], sourceObservations: [{ area: 'alpha', title: 'alpha observation' }] },
+      { number: 2, title: 'F2', significance: 'medium', body: 'b2', citations: ['beta.js:1'], sourceObservations: [{ area: 'beta', title: 'beta observation' }] },
     ],
     summary: 'sum',
   },

@@ -10,7 +10,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { helpers } from './_load.mjs'
 
-const { degradationSummary, renderAssessment, applyVerdicts, applyFindingCorrections, pickOverallQuestion, selectVerifyTargets, verifyTargetBudget, selectProbedKeys, selectGroundTargets, summarizeAudit, runReliabilityFlags, clampEffort, deriveOverallEffort, collectObs, renderOrientation } = helpers
+const { degradationSummary, renderAssessment, applyVerdicts, applyFindingCorrections, pickOverallQuestion, selectVerifyTargets, verifyTargetBudget, selectProbedKeys, selectGroundTargets, summarizeAudit, runReliabilityFlags, clampEffort, deriveOverallEffort, collectObs, renderOrientation, unsynthesizedObservations } = helpers
 
 test('renderAssessment emits the deterministic assess<->iterate format contract', () => {
   const md = renderAssessment({
@@ -401,6 +401,7 @@ test('summarizeAudit counts corrections, drops, flags, ungrounded, and reliabili
       { action: 'flagged' }, { action: 'flagged' }, { action: 'flagged' },
     ],
     grounding: { ran: true, checked: 4, ungrounded: [{ findingNumber: 1 }, { findingNumber: 2 }], corrected: [3] },
+    provenance: { dropped: [{ area: 'a', title: 't1', significance: 'low' }, { area: 'b', title: 't2', significance: 'high' }] },
     reliabilityFlags: ['consolidation verification failed and was skipped'],
   })
   assert.deepEqual(summary, {
@@ -413,6 +414,7 @@ test('summarizeAudit counts corrections, drops, flags, ungrounded, and reliabili
     flagged: 3,
     ungrounded: 2,
     groundCorrected: 1,
+    unsynthesized: 2,
     reliabilityFlags: 1,
   })
 })
@@ -437,6 +439,7 @@ test('summarizeAudit on a clean run reports zeros and passes the funnel counts t
     flagged: 0,
     ungrounded: 0,
     groundCorrected: 0,
+    unsynthesized: 0,
     reliabilityFlags: 0,
   })
 })
@@ -453,6 +456,45 @@ test('summarizeAudit reports groundCorrected from the grounding.corrected list',
   })
   assert.equal(summary.groundCorrected, 2)
   assert.equal(summary.ungrounded, 0)
+})
+
+// unsynthesizedObservations: the observation→finding funnel's accounting. Each finding
+// echoes back the observations it synthesizes (sourceObservations, area+title verbatim);
+// the drop set is everything the synthesizer received but no finding references.
+const funnelObs = (area, title, significance = 'medium') => ({ area, title, body: 'b', evidence: ['e.js:1'], significance })
+
+test('unsynthesizedObservations: observations no finding references are returned with area, title, significance', () => {
+  const observations = [funnelObs('alpha', 'one', 'high'), funnelObs('beta', 'two', 'low'), funnelObs('gamma', 'three')]
+  const findings = [{ number: 1, sourceObservations: [{ area: 'alpha', title: 'one' }] }]
+  assert.deepEqual(unsynthesizedObservations({ observations, findings }), [
+    { area: 'beta', title: 'two', significance: 'low' },
+    { area: 'gamma', title: 'three', significance: 'medium' },
+  ])
+})
+
+test('unsynthesizedObservations: a mis-copied reference leaves the real observation in the drop set', () => {
+  const observations = [funnelObs('alpha', 'the exact title')]
+  const findings = [{ number: 1, sourceObservations: [{ area: 'alpha', title: 'the exact titel' }] }]
+  assert.deepEqual(unsynthesizedObservations({ observations, findings }), [
+    { area: 'alpha', title: 'the exact title', significance: 'medium' },
+  ])
+})
+
+test('unsynthesizedObservations: findings without sourceObservations are tolerated', () => {
+  const observations = [funnelObs('alpha', 'one', 'high')]
+  const findings = [{ number: 1 }]
+  assert.deepEqual(unsynthesizedObservations({ observations, findings }), [
+    { area: 'alpha', title: 'one', significance: 'high' },
+  ])
+})
+
+test('unsynthesizedObservations: fully referenced observations yield an empty drop set', () => {
+  const observations = [funnelObs('alpha', 'one'), funnelObs('beta', 'two')]
+  const findings = [
+    { number: 1, sourceObservations: [{ area: 'alpha', title: 'one' }] },
+    { number: 2, sourceObservations: [{ area: 'beta', title: 'two' }] },
+  ]
+  assert.deepEqual(unsynthesizedObservations({ observations, findings }), [])
 })
 
 // run-level reliability flags — disclose safeguards that silently no-op'd
