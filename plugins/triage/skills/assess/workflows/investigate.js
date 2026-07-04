@@ -192,8 +192,9 @@ const degradationSummary = ({ plannedAreas, droppedAreas, synthOk, verifyFailed,
 // and funnel signals into a notification-safe set of counts (the nested verification/
 // grounding objects are truncated from the completion notification). The observations→
 // synthesized→findings funnel is reported as raw counts (merge/split make it non-linear);
-// `unsynthesized` is the one derived funnel count — the provenance drop set's size,
-// computed from the findings' sourceObservations echo rather than inferred. Pure
+// the derived funnel counts come from the provenance block — `unsynthesized` (the drop
+// set's size, computed from the findings' sourceObservations echo rather than inferred)
+// and `duplicateGroups` (evidence-overlap candidate groups among what synthesis saw). Pure
 // (signals in, plain object out), so it is unit-tested alongside degradationSummary.
 /* test-seam:pure-fn:start */
 const summarizeAudit = ({ status, observationCount, synthInputCount, findingsCount, auditActions, grounding, provenance, reliabilityFlags }) => {
@@ -209,6 +210,7 @@ const summarizeAudit = ({ status, observationCount, synthInputCount, findingsCou
     ungrounded: grounding && Array.isArray(grounding.ungrounded) ? grounding.ungrounded.length : 0,
     groundCorrected: grounding && Array.isArray(grounding.corrected) ? grounding.corrected.length : 0,
     unsynthesized: provenance && Array.isArray(provenance.dropped) ? provenance.dropped.length : 0,
+    duplicateGroups: provenance && Array.isArray(provenance.duplicates) ? provenance.duplicates.length : 0,
     reliabilityFlags: Array.isArray(reliabilityFlags) ? reliabilityFlags.length : 0,
   }
 }
@@ -945,25 +947,89 @@ const applyVerdicts = (obs, verdicts) => {
 // slots. Pure (observations + budget in, [{o,i}] out; the original index i is
 // preserved for per-lens labelling and probedKeys).
 /* test-seam:pure-fn:start */
-const selectVerifyTargets = (obs, maxK) => {
+const selectVerifyTargets = (obs, maxK, penalties = {}) => {
   const sigRank = { high: 0, medium: 1, low: 2 }
   const rankOf = (x) => (x.significance in sigRank ? sigRank[x.significance] : 3)
+  // Duplicate non-representatives (penalties, by index) rank behind EVERYTHING — including
+  // an area's floor slot, which falls to the area's next unpenalized observation: verifying
+  // the same fact twice is exactly the waste being removed. They still fill leftover budget.
+  const penOf = (t) => (penalties[t.i] ? 1 : 0)
   const depth = new Map()
   return obs
     .map((o, i) => ({ o, i }))
-    .sort((a, b) => rankOf(a.o) - rankOf(b.o) || a.i - b.i)
+    .sort((a, b) => penOf(a) - penOf(b) || rankOf(a.o) - rankOf(b.o) || a.i - b.i)
     .map((t) => {
       const d = depth.get(t.o.area) || 0
       depth.set(t.o.area, d + 1)
       return { ...t, d }
     })
     .sort((a, b) =>
+      penOf(a) - penOf(b) ||           // duplicates last
       (a.d ? 1 : 0) - (b.d ? 1 : 0) || // floor: each area's best first
       rankOf(a.o) - rankOf(b.o) ||     // then global significance
       a.d - b.d ||                     // ties: round-robin across areas
       a.i - b.i)                       // stable
     .slice(0, maxK)
     .map(({ o, i }) => ({ o, i }))
+}
+/* test-seam:pure-fn:end */
+
+// Duplicate-candidate detection: concurrently-dispatched area agents can surface the same
+// underlying fact under different areas/titles, and nothing else in the pipeline compares
+// observation CONTENT. Evidence strings are free-form, so source refs are extracted as
+// path:line(-line) tokens (the path must look like a path); strings with no ref compare as
+// whitespace/case-normalized wholes. Two observations overlap when any ref pair shares a
+// path with intersecting line ranges, or an identical fallback token; overlap is grouped
+// transitively. Purely mechanical — semantic duplicates with disjoint citations are out of
+// scope. Deterministic: no Date/Math.random.
+/* test-seam:pure-fn:start */
+const duplicateObservationGroups = (obs) => {
+  const refsOf = (o) => {
+    const refs = []
+    const tokens = []
+    for (const ev of o.evidence || []) {
+      const s = String(ev)
+      let matched = false
+      for (const m of s.matchAll(/([\w@./-]+):(\d+)(?:-(\d+))?/g)) {
+        if (!/[./]/.test(m[1])) continue
+        matched = true
+        const start = Number(m[2])
+        refs.push({ path: m[1].replace(/^\.\//, ''), start, end: m[3] ? Number(m[3]) : start })
+      }
+      if (!matched) tokens.push(s.trim().toLowerCase().replace(/\s+/g, ' '))
+    }
+    return { refs, tokens }
+  }
+  const cited = obs.map(refsOf)
+  const overlaps = (a, b) =>
+    a.refs.some((r) => b.refs.some((q) => r.path === q.path && r.start <= q.end && q.start <= r.end)) ||
+    a.tokens.some((t) => b.tokens.includes(t))
+  const parent = obs.map((_, i) => i)
+  const find = (i) => (parent[i] === i ? i : (parent[i] = find(parent[i])))
+  for (let i = 0; i < obs.length; i++) {
+    for (let j = i + 1; j < obs.length; j++) {
+      if (overlaps(cited[i], cited[j])) parent[find(j)] = find(i)
+    }
+  }
+  const groups = new Map()
+  obs.forEach((_, i) => {
+    const root = find(i)
+    groups.set(root, (groups.get(root) || []).concat(i))
+  })
+  return [...groups.values()].filter((g) => g.length >= 2)
+}
+
+// Verify-slot penalties for duplicate groups: only the representative (highest significance,
+// ties by input order) competes for a slot normally; the rest fill leftover budget only.
+const duplicateVerifyPenalties = (obs, groups) => {
+  const sigRank = { high: 0, medium: 1, low: 2 }
+  const rankOf = (i) => (obs[i].significance in sigRank ? sigRank[obs[i].significance] : 3)
+  const penalties = {}
+  for (const g of groups) {
+    const ordered = [...g].sort((a, b) => rankOf(a) - rankOf(b) || a - b)
+    for (const i of ordered.slice(1)) penalties[i] = 1
+  }
+  return penalties
 }
 /* test-seam:pure-fn:end */
 
@@ -1044,7 +1110,8 @@ if (!lenses.length || !allObs.length) {
   // still probed instead of the floor consuming the whole budget.
   // Deterministic — no Date/Math.random (both forbidden in the harness).
   const distinctAreas = new Set(allObs.map((o) => o.area)).size
-  const targets = selectVerifyTargets(allObs, verifyTargetBudget(distinctAreas, MAX_VERIFY_TARGETS, MAX_TOTAL_AREAS, VERIFY_GLOBAL_FILL_HEADROOM))
+  const dupPenalties = duplicateVerifyPenalties(allObs, duplicateObservationGroups(allObs))
+  const targets = selectVerifyTargets(allObs, verifyTargetBudget(distinctAreas, MAX_VERIFY_TARGETS, MAX_TOTAL_AREAS, VERIFY_GLOBAL_FILL_HEADROOM), dupPenalties)
   log('Adversarial verify: ' + lenses.length + ' lens(es) over the top ' + targets.length +
     ' of ' + allObs.length + ' observation(s).')
   const verdictJobs = []
@@ -1154,6 +1221,19 @@ const coverageNote = droppedAreaNames.length
     'from these observations: ' + droppedAreaNames.join(', ') + '. Note this incompleteness briefly in the Summary; ' +
     'do not imply the assessment is exhaustive.\n\n'
   : ''
+// Duplicate-candidate groups among what the synthesizer will actually see (post-enforcement,
+// so enforcement drops don't resurface here). Pure code, so it runs at every effort level;
+// the groups feed the synthesize prompt, the provenance record, and the audit count.
+const dupGroups = duplicateObservationGroups(verifiedObs).map((g) =>
+  g.map((i) => ({ area: verifiedObs[i].area, title: verifiedObs[i].title, significance: verifiedObs[i].significance })))
+log('Duplicate detection: ' + dupGroups.length + ' candidate group(s) across ' +
+  dupGroups.reduce((n, g) => n + g.length, 0) + ' observation(s).')
+const duplicateNote = dupGroups.length
+  ? 'DUPLICATE-CANDIDATE GROUPS (evidence overlap): each group below cites overlapping source ' +
+    'locations and likely describes ONE underlying fact — merge each group into one finding, or ' +
+    'filter the redundant instance, per the synthesis rules:\n' +
+    dupGroups.map((g) => '- ' + g.map((m) => m.area + ' / ' + m.title).join('; ')).join('\n') + '\n\n'
+  : ''
 // Empty-observation runs skip the (expensive) synthesizer entirely — there is nothing to
 // synthesize — and render a deterministic empty assessment below; the cheap write-agent still
 // persists it so Phase 3 has a file to read.
@@ -1162,6 +1242,7 @@ let synth = allObs.length ? await withRetry('synthesize', () => agent(
   'Scope: ' + scope + '\n' +
   'Areas covered: ' + completedAreaNames.join(', ') + '\n\n' +
   coverageNote +
+  duplicateNote +
   'Observations (JSON) — already reconciled against per-observation verification; honor any ' +
   '"verificationNotes" field (applied corrections / reliability flags):\n' + JSON.stringify(verifiedObs) + '\n\n' +
   'SYNTHESIS RULES:\n' +
@@ -1310,6 +1391,7 @@ const provenance = {
   dropped: synth && Array.isArray(synth.findings)
     ? unsynthesizedObservations({ observations: verifiedObs, findings: synth.findings })
     : [],
+  duplicates: dupGroups,
 }
 log('Provenance: ' + provenance.dropped.length + ' observation(s) filtered out during synthesis.')
 

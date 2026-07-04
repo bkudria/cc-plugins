@@ -674,9 +674,52 @@ test('provenance: observations no finding references surface in result.provenanc
   const { result } = await med()
   assert.deepEqual(result.provenance, {
     dropped: [{ area: 'gamma', title: 'gamma observation', significance: 'high' }],
+    duplicates: [],
   })
   assert.equal(result.auditSummary.unsynthesized, 1)
   assert.equal(result.status, 'ok') // record-keeping, not a reliability problem
+})
+
+test('duplicate detection: overlapping evidence surfaces in provenance, the audit, and the synth prompt', async () => {
+  // Two areas independently cite the same source location — the classic concurrent-discovery
+  // duplicate. Detection is pure code (evidence overlap), so the run stays ok; the synthesizer
+  // is told about the candidate group and the record lands in provenance + audit.
+  let captured = ''
+  const synthFixture = {
+    assessmentTitle: 'T',
+    scopeSummary: 's',
+    areasCovered: AREAS.join(', '),
+    findings: [{
+      number: 1, title: 'F1', significance: 'high', body: 'b1', citations: ['alpha.js:1'],
+      sourceObservations: [{ area: 'alpha', title: 'alpha observation' }, { area: 'beta', title: 'beta observation' }],
+    }],
+    summary: 'sum',
+  }
+  const { result } = await med({
+    'area:beta': { area: 'beta', observations: [{ title: 'beta observation', body: 'same underlying fact', evidence: ['alpha.js:1'], significance: 'high' }] },
+    synthesize: (prompt) => { captured = prompt; return synthFixture },
+  })
+  assert.ok(captured.includes('DUPLICATE-CANDIDATE'))
+  assert.ok(captured.includes('alpha / alpha observation'))
+  assert.ok(captured.includes('beta / beta observation'))
+  assert.deepEqual(result.provenance.duplicates, [[
+    { area: 'alpha', title: 'alpha observation', significance: 'high' },
+    { area: 'beta', title: 'beta observation', significance: 'high' },
+  ]])
+  assert.equal(result.auditSummary.duplicateGroups, 1)
+  assert.equal(result.status, 'ok') // efficiency bookkeeping, not a reliability problem
+})
+
+test('duplicate detection: distinct evidence produces no groups and no prompt section', async () => {
+  let captured = ''
+  const capture = (prompt) => {
+    captured = prompt
+    return { assessmentTitle: 'T', scopeSummary: 's', areasCovered: 'a', findings: [], summary: 'sum' }
+  }
+  const { result } = await med({ synthesize: capture })
+  assert.deepEqual(result.provenance.duplicates, [])
+  assert.equal(result.auditSummary.duplicateGroups, 0)
+  assert.ok(!captured.includes('DUPLICATE-CANDIDATE'))
 })
 
 test('grounding payload: sourceObservations accounting stays out of the ground prompt', async () => {
