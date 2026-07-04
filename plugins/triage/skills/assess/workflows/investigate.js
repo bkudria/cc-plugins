@@ -59,12 +59,12 @@ const MAX_TOTAL_AREAS = MAX_AREAS + 4
 const EFFORT_GUIDANCE = {
   low: '1-2 targeted reads; confirm the load-bearing facts and move on — do not go deep.',
   medium: '5-10 tool calls; survey the area, then dig into whatever looks noteworthy.',
-  high: 'Exhaustive — follow every thread, read adjacent code, check edge cases; spend as many tool calls as the area genuinely warrants.',
+  high: '15-25 tool calls; follow the most load-bearing threads first, read adjacent code, check edge cases — if the area genuinely warrants more, report what you have and note what remains unexamined rather than exhausting it.',
 }
 const VERIFY_INTENSITY = {
   low: 'Effort is low — keep verification light; independently check only the single most load-bearing claim.',
   medium: 'Cross-reference overlapping claims across areas and spot-check the most significant numeric claim.',
-  high: 'Be thorough — cross-reference every overlapping claim, spot-check each significant numeric claim, and independently re-derive the most consequential findings.',
+  high: 'Be thorough — cross-reference overlapping claims, spot-check each significant numeric claim, and independently re-derive the few most consequential findings; bound the pass at roughly a dozen tool calls, flagging rather than chasing anything that would take more.',
 }
 // Adversarial verification: the most significant observations are each probed by
 // perspective-diverse skeptic lenses before a consolidation pass (which itself
