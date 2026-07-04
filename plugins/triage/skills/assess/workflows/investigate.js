@@ -1229,8 +1229,8 @@ const writePromise = synthStructured
       'Do NOT edit, reformat, summarize, re-order, or add anything — write it byte-for-byte as given. Then return ' +
       'whether the write succeeded and the path written.\n\n' +
       '----- BEGIN DOCUMENT -----\n' + markdown + '\n----- END DOCUMENT -----',
-      // Cheap tier: a verbatim Write with no reasoning (see model-tier strategy above).
-      { label: 'write-assessment', phase: 'Synthesize', schema: WRITE_SCHEMA, model: 'sonnet' }
+      // Cheap tier + low effort: a verbatim Write with no reasoning (see model-tier strategy above).
+      { label: 'write-assessment', phase: 'Synthesize', schema: WRITE_SCHEMA, model: 'sonnet', effort: 'low' }
     ))
   : Promise.resolve(null)
 const findingsCount = synth && Array.isArray(synth.findings) ? synth.findings.length : 0
@@ -1242,8 +1242,8 @@ const findingsCount = synth && Array.isArray(synth.findings) ? synth.findings.le
 // One read-only agent per finding re-reads that finding's structured citations, flags any
 // that do not resolve, and — when a mismatch means the body itself contradicts source —
 // returns a corrected body. Corrected findings are spliced back in, the document is
-// re-rendered, and the file is re-written once (the sole exception to "the synthesizer's
-// file stands"); everything else is additive audit trail. Only a PERSISTED correction clears
+// re-rendered, and the persisted file is corrected in place once (the sole exception to "the
+// synthesizer's file stands"); everything else is additive audit trail. Only a PERSISTED correction clears
 // a finding from the degrading set — a failed re-write leaves the original wrong body, so
 // those findings stay ungrounded. Bounded to the top-K significance-ordered GROUNDABLE
 // findings — findings resting only on out-of-band basis (human reports, session-external
@@ -1316,28 +1316,35 @@ if (overallEffort !== 'low' && synthFindings.length) {
   const groundResults = (await parallel(groundJobs)).filter(Boolean)
   const detected = groundResults.flatMap((r) =>
     r.ungrounded.map((u) => Object.assign({ findingNumber: r.findingNumber }, u)))
-  // Splice any corrected bodies back into the findings, re-render, and re-write the file — but
-  // only count a correction once it is actually persisted, so a failed re-write keeps those
-  // findings in the degrading set rather than silently claiming a fix that never landed.
+  // Splice any corrected bodies back into the findings, re-render, and correct the persisted
+  // file in place — but only count a correction once it is actually persisted, so a failed
+  // re-write keeps those findings in the degrading set rather than silently claiming a fix
+  // that never landed.
   const correctable = groundResults
     .filter((r) => r.correctedBody)
     .map((r) => ({ findingNumber: r.findingNumber, correctedBody: r.correctedBody }))
   let correctedNumbers = []
   // Join the persist that has been in flight alongside the grounding fan-out before the corrective
-  // re-write below, which overwrites the same path and must never race the initial write.
+  // re-write below, which edits the same path and must never race the initial write.
   wrote = await writePromise
   writeJoined = true
   const synthOk = !!(synthStructured && wrote && wrote.written)
   if (correctable.length && synthOk) {
     const correctedMarkdown = renderAssessment({ ...synth, findings: applyFindingCorrections(synthFindings, correctable) })
+    // Only the changed paragraphs travel to the agent — it applies each old-body → corrected-body
+    // replacement in place, so this serial tail agent moves a few paragraphs instead of
+    // transcribing the whole document. All-or-nothing: a missing OLD text (a mangled initial
+    // write) means no edits and a failed persist, landing in the rewrite-failed path below.
+    const bodyByNumber = new Map(synthFindings.map((f) => [f.number, f.body]))
     const rewrote = await withRetry('rewrite-assessment', () => agent(
-      'Write the following CORRECTED assessment document verbatim to exactly this path using the Write tool, ' +
-      'overwriting the existing file: ' + outPath + '\n' +
-      'Do NOT edit, reformat, summarize, re-order, or add anything — write it byte-for-byte as given. Then return ' +
-      'whether the write succeeded and the path written.\n\n' +
-      '----- BEGIN DOCUMENT -----\n' + correctedMarkdown + '\n----- END DOCUMENT -----',
-      // Cheap tier: a verbatim Write with no reasoning (see model-tier strategy above).
-      { label: 'rewrite-assessment', phase: 'Ground', schema: WRITE_SCHEMA, model: 'sonnet' }
+      'The assessment document at ' + outPath + ' needs ' + correctable.length + ' finding correction(s) applied in place.\n' +
+      'First Read that file and verify every OLD text below appears in it exactly. If any OLD text is missing, make NO ' +
+      'edits and report that the write did not succeed. Otherwise apply each correction with the Edit tool, replacing ' +
+      'OLD exactly with NEW and changing nothing else. Then return whether all corrections were applied and the path.\n\n' +
+      correctable.map((c) => '----- CORRECTION ' + c.findingNumber + ' -----\nOLD:\n' + bodyByNumber.get(c.findingNumber) +
+        '\nNEW:\n' + c.correctedBody).join('\n\n'),
+      // Cheap tier + low effort: mechanical text replacement with no reasoning (see model-tier strategy above).
+      { label: 'rewrite-assessment', phase: 'Ground', schema: WRITE_SCHEMA, model: 'sonnet', effort: 'low' }
     ))
     if (rewrote && rewrote.written) {
       markdown = correctedMarkdown

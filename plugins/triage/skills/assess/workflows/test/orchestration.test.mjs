@@ -227,6 +227,34 @@ test('corrective re-write runs on the cheap tier', async () => {
   assert.equal(rw.model, 'sonnet')
 })
 
+test('corrective rewrite sends targeted edits, not the full document', async () => {
+  // The corrected document is already rendered in-script, so the run's final, serial agent
+  // only needs the changed paragraphs — old body for exact matching, corrected body to put
+  // in its place — not a full-document transcription.
+  const corrected = { ungrounded: [{ citation: 'alpha.js:1', problem: 'mismatch', detail: 'd' }], correctedBody: 'CORRECTED BODY TEXT' }
+  let captured = ''
+  const { result } = await med({
+    'ground#1': () => corrected,
+    'rewrite-assessment': (prompt) => { captured = prompt; return { written: true, path: '/tmp/assessment-test.md' } },
+  })
+  assert.match(captured, /Edit tool/)                          // targeted edits, not a verbatim Write
+  assert.ok(captured.includes('b1'))                           // the finding's old body rides along
+  assert.ok(captured.includes('CORRECTED BODY TEXT'))          // and its corrected body
+  assert.ok(!captured.includes('----- BEGIN DOCUMENT -----'))  // the full document does not
+  assert.ok(result.markdown.includes('CORRECTED BODY TEXT'))   // the returned markdown still carries the fix
+})
+
+test('mechanical write dispatches run at low effort', async () => {
+  // Both persistence agents do zero-reasoning transcription; low effort keeps thinking
+  // tokens off the overlapped initial write and the serial tail correction alike.
+  const corrected = { ungrounded: [{ citation: 'alpha.js:1', problem: 'mismatch', detail: 'd' }], correctedBody: 'C' }
+  const efforts = {}
+  const capture = (label) => (_prompt, opts) => { efforts[label] = opts && opts.effort; return { written: true, path: '/tmp/assessment-test.md' } }
+  await med({ 'ground#': () => corrected, 'write-assessment': capture('write-assessment'), 'rewrite-assessment': capture('rewrite-assessment') })
+  assert.equal(efforts['write-assessment'], 'low')
+  assert.equal(efforts['rewrite-assessment'], 'low')
+})
+
 const synthWith = (findings) => ({
   assessmentTitle: 'T', scopeSummary: 's', areasCovered: 'a', findings, summary: 'sum',
 })
