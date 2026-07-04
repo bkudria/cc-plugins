@@ -68,11 +68,13 @@ const VERIFY_INTENSITY = {
 }
 // Adversarial verification: the most significant observations are each probed by
 // perspective-diverse skeptic lenses before a consolidation pass (which itself
-// overlaps synthesis rather than serializing ahead of it). Effort sets
-// the lens COUNT (low skips the fan-out entirely); significance sets WHICH
-// observations get the lenses (top-K). Both caps keep cost bounded regardless of
-// observation count, and a consolidation agent keeps the cross-area cross-reference,
-// narrowing its remaining checks to the observations the lenses did not probe.
+// overlaps synthesis rather than serializing ahead of it). Effort sets which
+// lenses apply (low skips the fan-out entirely); a target's lenses all ride in
+// ONE verifier agent, so the fan-out is one agent per probed observation.
+// Significance sets WHICH observations get probed (top-K). Both caps keep cost
+// bounded regardless of observation count, and a consolidation agent keeps the
+// cross-area cross-reference, narrowing its remaining checks to the observations
+// the lenses did not probe.
 const MAX_VERIFY_TARGETS = 6
 // Extra budget reserved above the per-area floor for the global-significance fill, so a
 // high-area run isn't limited to one observation per area: the budget is area-count + this,
@@ -1001,19 +1003,21 @@ if (!lenses.length || !allObs.length) {
   log('Adversarial verify: ' + lenses.length + ' lens(es) over the top ' + targets.length +
     ' of ' + allObs.length + ' observation(s).')
   const verdictJobs = []
-  targets.forEach(({ o, i }) => lenses.forEach((lens) => verdictJobs.push(() =>
+  targets.forEach(({ o, i }) => verdictJobs.push(() =>
     agent(
-      'You are an adversarial verifier applying ONE lens to ONE investigation observation before synthesis. ' +
+      'You are an adversarial verifier applying a fixed set of verification lenses to ONE investigation observation before synthesis. ' +
       READ_ONLY_TOOLS + '\n\n' +
       'Scope: ' + scope + '\n' +
       (orientation ? orientation + '\n' + VERIFY_MAP_CAVEAT + '\n\n' : '') +
-      'Lens — ' + VERIFY_LENSES[lens] + '\n\n' +
+      lenses.map((lens) => 'Lens — ' + VERIFY_LENSES[lens]).join('\n\n') + '\n\n' +
       'Observation (JSON):\n' + JSON.stringify(o, null, 2) + '\n\n' +
-      'Apply ONLY this lens. Be skeptical and check independently rather than trusting the observation. ' +
+      'Apply ONLY the lenses above. Be skeptical and check independently rather than trusting the observation. ' +
+      'Apply every lens; if they point to different verdicts, report the most severe (drop > correct > holds), ' +
+      'and include any correction, significance downgrade, or reliability concern any lens surfaced. ' +
       'You may correct an inaccurate CLAIM. ' + observationOnlyRule('verifier'),
-      { label: 'verify:' + lens + '#' + i, phase: 'Verify', schema: VERDICT_SCHEMA, model: 'sonnet' }
-    ).then((v) => v && Object.assign({ area: o.area, title: o.title, lens: lens }, v))
-  )))
+      { label: 'verify:' + lenses.join('+') + '#' + i, phase: 'Verify', schema: VERDICT_SCHEMA, model: 'sonnet' }
+    ).then((v) => v && Object.assign({ area: o.area, title: o.title, lens: lenses.join('+') }, v))
+  ))
   verdictsExpected = verdictJobs.length
   verdicts = (await parallel(verdictJobs)).filter(Boolean)
   // Enforce the keyed verdicts in code, then verify the reconciled set.
