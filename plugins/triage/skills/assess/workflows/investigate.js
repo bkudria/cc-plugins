@@ -71,8 +71,8 @@ const VERIFY_INTENSITY = {
 // overlaps synthesis rather than serializing ahead of it). Effort sets
 // the lens COUNT (low skips the fan-out entirely); significance sets WHICH
 // observations get the lenses (top-K). Both caps keep cost bounded regardless of
-// observation count, and a consolidation agent preserves the cross-reference and
-// numeric spot-check the single-pass verifier did.
+// observation count, and a consolidation agent keeps the cross-area cross-reference,
+// narrowing its remaining checks to the observations the lenses did not probe.
 const MAX_VERIFY_TARGETS = 6
 // Extra budget reserved above the per-area floor for the global-significance fill, so a
 // high-area run isn't limited to one observation per area: the budget is area-count + this,
@@ -768,29 +768,36 @@ const VERIFY_SCHEMA = {
     spotCheckedNumber: { type: 'string', description: 'The most significant numeric claim checked, and the result' },
   },
 }
-// Cross-area consolidation pass: cross-reference, numeric spot-check, and
-// reliability over the (already enforced) observation set; dispatched unawaited so it
-// overlaps the synthesize call and is joined after it. Per-observation lens
-// verdicts are applied in code upstream — not folded here. With no probedKeys this
-// is byte-identical to the original single-pass verifier, so the low-effort /
-// empty-observation path is unchanged.
+// Cross-area consolidation pass over the (already enforced) observation set; dispatched
+// unawaited so it overlaps the synthesize call and is joined after it. Per-observation
+// lens verdicts are applied in code upstream — not folded here. The check battery
+// branches on probedKeys: with none (low effort / no lens fan-out) the original
+// three-check single-pass battery runs unchanged — it is the only verification on that
+// path. With probedKeys it narrows to cross-area cross-referencing (the one check no
+// per-observation agent can do) plus a spot-check of the UNPROBED tail — the lenses
+// already did per-observation grounding and reliability on the probed set, so the
+// standalone numeric spot-check and full-set reliability sweep would re-do their work.
 const verifyConsolidated = (obs, probedKeys) => agent(
   'You are verifying investigation observations before synthesis. ' + READ_ONLY_TOOLS + '\n\n' +
   'Scope: ' + scope + '\n\n' +
   (orientation ? orientation + '\n' + VERIFY_MAP_CAVEAT + '\n\n' : '') +
   'Observations (JSON):\n' + JSON.stringify(obs, null, 2) + '\n\n' +
-  'Perform these checks:\n' +
-  '1. Cross-reference claims across areas: where two observations touch the same file, value, or claim, ' +
-  'independently verify the shared element. Where areas are disjoint, say so and move on.\n' +
-  '2. Spot-check the single most significant numeric claim (a count, frequency, or statistic) by running one ' +
-  'independent check.\n' +
-  '3. Reliability: flag any observation that appears to rely on tool output that could have been truncated, ' +
-  'timed out, or silently failed.\n' +
   (probedKeys && probedKeys.length
-    ? 'These observations were already individually probed by adversarial lenses and reconciled: ' +
-      probedKeys.join('; ') + '. Give the OTHER observations closer scrutiny and flag anything ' +
-      'obviously unsupported.\n'
-    : '') +
+    ? 'Perform these checks:\n' +
+      '1. Cross-reference claims across areas: where two observations touch the same file, value, or claim, ' +
+      'check that they agree; where they disagree, re-read the cited source to determine which is right. ' +
+      'Where areas are disjoint, say so and move on.\n' +
+      '2. These observations were already individually probed by adversarial lenses and reconciled: ' +
+      probedKeys.join('; ') + '. For each observation NOT in that list, spot-check its most significant ' +
+      'claim and flag anything obviously unsupported or resting on tool output that was truncated, ' +
+      'timed out, or silently failed.\n'
+    : 'Perform these checks:\n' +
+      '1. Cross-reference claims across areas: where two observations touch the same file, value, or claim, ' +
+      'independently verify the shared element. Where areas are disjoint, say so and move on.\n' +
+      '2. Spot-check the single most significant numeric claim (a count, frequency, or statistic) by running one ' +
+      'independent check.\n' +
+      '3. Reliability: flag any observation that appears to rely on tool output that could have been truncated, ' +
+      'timed out, or silently failed.\n') +
   VERIFY_INTENSITY[overallEffort] + '\n' +
   'When verifying a specific claim, re-read the cited source rather than relying solely on the body text shown ' +
   'here (bodies may be excerpted).\n' +
@@ -927,11 +934,12 @@ const verifyTargetBudget = (distinctAreaCount, minBudget, maxCap, headroom) =>
 /* test-seam:pure-fn:end */
 
 // The consolidation verifier is told which observations were "already probed and
-// reconciled" so it scrutinises the others. Key that off the verdicts that
-// actually returned, not the dispatched targets: on a lost verdict (wholly or
+// reconciled" so its spot-check covers only the others. Key that off the verdicts
+// that actually returned, not the dispatched targets: on a lost verdict (wholly or
 // partly) applyVerdicts leaves the observation unreconciled, so claiming it was
-// probed would steer scrutiny away from a never-checked observation. An
-// observation counts as probed when at least one of its lens verdicts returned.
+// probed would exclude a never-checked observation from the one check it would
+// still get. An observation counts as probed when at least one of its lens
+// verdicts returned.
 /* test-seam:pure-fn:start */
 const selectProbedKeys = (targets, verdicts) => {
   const probed = new Set(verdicts.map((v) => v.area + ' / ' + v.title))
@@ -971,14 +979,15 @@ const safeVerify = async (obs, probed) => {
   }
 }
 if (!lenses.length || !allObs.length) {
-  // Low effort or no observations: the single-pass verifier over the full set,
-  // unchanged. No lens verdicts exist here, so nothing is enforced in code.
+  // Low effort or no observations: the single-pass verifier over the full observation
+  // set, bodies excerpted like the lens path. No lens verdicts exist here, so nothing
+  // is enforced in code.
   // Dispatch the consolidation verify but DO NOT await it here: the synthesizer does not read
   // its result (corrections are applied in code after both settle), so it runs concurrently
   // with synthesis instead of as a serial stage ahead of it. safeVerify catches internally and
   // always RESOLVES (fallback object; verifyFailed set at settle time), so the held promise can
   // never produce an unhandled rejection — joined below, after the synthesize call.
-  verificationPromise = safeVerify(allObs)
+  verificationPromise = safeVerify(excerptForVerify(allObs))
 } else {
   // Area-aware target selection: a per-area floor (every area's best observation)
   // then significance-fill, so the top-K lens budget spreads across areas instead
