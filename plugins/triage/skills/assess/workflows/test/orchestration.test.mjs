@@ -533,6 +533,18 @@ test('completeness-critic prompt: gaps must be semantically distinct, not the sa
   assert.match(captured, /different name/)
 })
 
+test('completeness-critic prompt: the critic is fenced from investigating (coverage judgment only)', async () => {
+  // The critic's job is judging coverage of the observations payload, and each gap it names gets its
+  // own investigator — a critic that reads source itself derives at top tier what the gap agent then
+  // re-derives at cheap tier. The prompt must fence it the way the plan-critic is fenced.
+  let captured = ''
+  const capture = (prompt) => { captured = prompt; return { complete: true, gaps: [] } }
+  const { calls } = await high({ 'completeness-critic': capture })
+  assert.ok(calls.includes('completeness-critic'))
+  assert.match(captured, /must NOT read files, run commands/)
+  assert.match(captured, /dedicated agent/)
+})
+
 test('synthesizer payload: corrections reach the synthesizer without re-sending the body or audit-only downgrade provenance', async () => {
   // Every probed observation gets a 'correct' verdict that both rewrites the claim and downgrades
   // significance, so applyVerdicts folds corrections + a significanceDowngrade into the kept set.
@@ -575,6 +587,42 @@ test('synthesizer payload: nothing from the consolidation verifier rides the syn
   assert.ok(!captured.includes('Cross-area verification corrections')) // ...nor their instruction header
   assert.ok(!captured.includes('FLAG_SENTINEL'))   // reliabilityFlags stay out (surfaced in the result instead)
   assert.ok(!captured.includes('CHECK_SENTINEL'))  // audit-only checksPerformed stays out
+})
+
+test('synthesize prompt: requires per-finding sourceObservations echoed verbatim', async () => {
+  // The synthesizer is the only stage that knows the observation→finding mapping; without an
+  // echo-back requirement the funnel is unaccountable and dropped observations vanish silently.
+  let captured = ''
+  const capture = (prompt) => {
+    captured = prompt
+    return { assessmentTitle: 'T', scopeSummary: 's', areasCovered: 'a', findings: [], summary: 'sum' }
+  }
+  const { calls } = await med({ synthesize: capture })
+  assert.ok(calls.includes('synthesize'))
+  assert.ok(captured.includes('sourceObservations'))
+  assert.ok(captured.includes('copied verbatim'))
+})
+
+test('provenance: observations no finding references surface in result.provenance.dropped', async () => {
+  // Happy fixture: findings reference alpha's and beta's observations; gamma's is filtered by
+  // synthesis. The drop set is computed in code from the echo-back, so the loss is recorded
+  // even though filtering itself is legitimate.
+  const { result } = await med()
+  assert.deepEqual(result.provenance, {
+    dropped: [{ area: 'gamma', title: 'gamma observation', significance: 'high' }],
+  })
+  assert.equal(result.auditSummary.unsynthesized, 1)
+  assert.equal(result.status, 'ok') // record-keeping, not a reliability problem
+})
+
+test('grounding payload: sourceObservations accounting stays out of the ground prompt', async () => {
+  // The ground agent checks citations against source; the funnel accounting is internal and
+  // would only bloat its payload (it is stripped like outOfBandBasis).
+  let groundPrompt = ''
+  const { calls } = await med({ 'ground#1': (prompt) => { groundPrompt = prompt; return { ungrounded: [] } } })
+  assert.ok(calls.includes('ground#1'))
+  assert.ok(groundPrompt.includes('"b1"')) // the finding body still rides the payload
+  assert.ok(!groundPrompt.includes('sourceObservations'))
 })
 
 test('consolidation corrections: a cheap applier lands them on the findings before write and ground', async () => {
@@ -885,4 +933,69 @@ test('source digest runs on the cheap tier', async () => {
   const digest = dispatches.find((d) => d.label === 'source-digest')
   assert.ok(digest, 'source-digest was dispatched')
   assert.equal(digest.model, 'sonnet')
+})
+
+test('source digest is dispatched before the plan critic settles (overlap)', async () => {
+  // The digest depends only on the planned areas and overall question — values a sound critic
+  // verdict leaves untouched — so it must not wait out the critic's serial latency.
+  let digestStarted = false
+  let criticSawDigest = false
+  const { calls } = await med({
+    'source-digest': (_p, opts) => { digestStarted = true; return SENTINEL_DIGEST(_p, opts) },
+    'plan-critic': () => { criticSawDigest = digestStarted; return { sound: true, issues: [] } },
+  })
+  assert.ok(calls.includes('plan-critic')) // the critic actually ran
+  assert.equal(calls.filter((l) => l === 'source-digest').length, 1) // still exactly one dispatch
+  assert.ok(criticSawDigest, 'the digest was in flight before the critic ran')
+})
+
+test('an adopted plan revision re-dispatches the digest for the revised areas and discards the stale map', async () => {
+  const revisedPlan = {
+    overallQuestion: 'Is the revised thing sound?',
+    effortRationale: 'reshaped',
+    areas: ['delta', 'epsilon', 'zeta'].map((name) => ({ name, rationale: 'why ' + name, effort: 'medium' })),
+  }
+  const digestPrompts = []
+  const maps = [
+    { overview: 'stale', landmarks: [{ location: 'stale.js:1', what: 'STALE_MARK', relevance: 'r' }] },
+    { overview: 'fresh', landmarks: [{ location: 'fresh.js:1', what: 'REVISED_MARK', relevance: 'r' }] },
+  ]
+  let investPrompt = ''
+  const { calls } = await med({
+    'plan-critic': { sound: false, issues: [{ kind: 'overlap', detail: 'alpha duplicates beta' }] },
+    'plan-revise': revisedPlan,
+    'source-digest': (prompt) => { digestPrompts.push(prompt); return maps[digestPrompts.length - 1] },
+    'area:delta': (prompt) => {
+      investPrompt = prompt
+      return { area: 'delta', observations: [{ title: 't', body: 'b', evidence: ['x.js:1'], significance: 'high' }] }
+    },
+  })
+  assert.equal(calls.filter((l) => l === 'source-digest').length, 2) // stale + revised dispatches
+  assert.match(digestPrompts[0], /alpha/) // the first digest oriented to the rejected areas
+  assert.match(digestPrompts[1], /delta/) // the re-dispatch orients to the revised areas
+  assert.ok(investPrompt.includes('REVISED_MARK')) // investigators get the re-dispatched map...
+  assert.ok(!investPrompt.includes('STALE_MARK')) // ...never the stale one
+})
+
+test('a revision that lowers overall effort to low drops the in-flight digest', async () => {
+  // adaptive (no effort ceiling): the derived effort follows the revised areas down to low,
+  // where a digest would never have been dispatched — so the stale in-flight map is dropped.
+  const revisedLow = {
+    overallQuestion: 'Is the revised thing sound?',
+    effortRationale: 'simpler than planned',
+    areas: ['delta', 'epsilon', 'zeta'].map((name) => ({ name, rationale: 'why ' + name, effort: 'low' })),
+  }
+  let investPrompt = ''
+  const { calls } = await adaptive({
+    'plan-critic': { sound: false, issues: [{ kind: 'count', detail: 'over-decomposed' }] },
+    'plan-revise': revisedLow,
+    'source-digest': SENTINEL_DIGEST,
+    'area:delta': (prompt) => {
+      investPrompt = prompt
+      return { area: 'delta', observations: [{ title: 't', body: 'b', evidence: ['x.js:1'], significance: 'high' }] }
+    },
+  })
+  assert.equal(calls.filter((l) => l === 'source-digest').length, 1) // the pre-critic dispatch only
+  assert.ok(investPrompt, 'investigator prompt was captured')
+  assert.ok(!/orientation map/i.test(investPrompt)) // the stale map was discarded, not injected
 })

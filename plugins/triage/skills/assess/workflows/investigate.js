@@ -191,11 +191,12 @@ const degradationSummary = ({ plannedAreas, droppedAreas, synthOk, verifyFailed,
 // Flat scalar audit summary for Phase 3: collapses the run's verification, grounding,
 // and funnel signals into a notification-safe set of counts (the nested verification/
 // grounding objects are truncated from the completion notification). The observations→
-// synthesized→findings funnel is reported as raw counts so the reduction is visible
-// without claiming a single "filtered" number (merge/split make it non-linear). Pure
+// synthesized→findings funnel is reported as raw counts (merge/split make it non-linear);
+// `unsynthesized` is the one derived funnel count — the provenance drop set's size,
+// computed from the findings' sourceObservations echo rather than inferred. Pure
 // (signals in, plain object out), so it is unit-tested alongside degradationSummary.
 /* test-seam:pure-fn:start */
-const summarizeAudit = ({ status, observationCount, synthInputCount, findingsCount, auditActions, grounding, reliabilityFlags }) => {
+const summarizeAudit = ({ status, observationCount, synthInputCount, findingsCount, auditActions, grounding, provenance, reliabilityFlags }) => {
   const count = (action) => auditActions.filter((a) => a.action === action).length
   return {
     status,
@@ -207,8 +208,23 @@ const summarizeAudit = ({ status, observationCount, synthInputCount, findingsCou
     flagged: count('flagged'),
     ungrounded: grounding && Array.isArray(grounding.ungrounded) ? grounding.ungrounded.length : 0,
     groundCorrected: grounding && Array.isArray(grounding.corrected) ? grounding.corrected.length : 0,
+    unsynthesized: provenance && Array.isArray(provenance.dropped) ? provenance.dropped.length : 0,
     reliabilityFlags: Array.isArray(reliabilityFlags) ? reliabilityFlags.length : 0,
   }
+}
+/* test-seam:pure-fn:end */
+
+// The observation→finding funnel's accounting: each finding echoes back the observations it
+// synthesizes (sourceObservations, area+title copied verbatim); the drop set is everything the
+// synthesizer received but no finding references. A mis-copied reference fails to match and so
+// over-reports a drop — the safe direction; a hallucinated reference subtracts nothing.
+/* test-seam:pure-fn:start */
+const unsynthesizedObservations = ({ observations, findings }) => {
+  const keyOf = (x) => x.area + ' ' + x.title
+  const referenced = new Set(findings.flatMap((f) => (f.sourceObservations || []).map(keyOf)))
+  return observations
+    .filter((o) => !referenced.has(keyOf(o)))
+    .map((o) => ({ area: o.area, title: o.title, significance: o.significance }))
 }
 /* test-seam:pure-fn:end */
 
@@ -409,10 +425,78 @@ const pickOverallQuestion = ({ plan, revised, scope }) => {
 /* test-seam:pure-fn:end */
 let overallQuestion = pickOverallQuestion({ plan, scope })
 
+// ---- Source digest (one-time orientation map; shared across the run's agents) ------------
+// One cheap-tier agent absorbs the single expensive full-source read (and any chunking a large
+// source needs) ONCE, then hands the investigators, verifiers, and grounding agents a shared
+// orientation map so they target their reads instead of each re-orienting in the whole source.
+// Gated to runs with real fan-out (>= DIGEST_MIN_AREAS areas) and off at low effort, where a
+// quick scan should not pay a front barrier. The digest depends only on the planned areas and
+// overall question, so it is dispatched unawaited alongside the plan critic and joined before
+// the Investigate fan-out; an adopted plan revision discards the in-flight map and re-dispatches
+// against the revised decomposition (rare — one wasted cheap-tier digest), and a revision that
+// no longer qualifies drops it. The map is advisory: every recipient still reads
+// actual source (verify and grounding re-derive citations against it, and verifier prompts carry
+// VERIFY_MAP_CAVEAT so the map is navigation, never evidence) — so a failed or skipped digest
+// degrades cleanly to unaided reads (renderOrientation returns ''). The verbatim writers and the
+// corrections translator never receive it; they do not read source at all.
+const DIGEST_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['overview', 'landmarks'],
+  properties: {
+    overview: { type: 'string', description: '1-3 sentences orienting the reader to the source as a whole' },
+    landmarks: {
+      type: 'array',
+      // Bounded: the map is re-sent to every investigator, verifier, and grounding agent, so an
+      // unbounded map would recreate the payload duplication it removes. Keep it a compact set of
+      // the load-bearing landmarks.
+      maxItems: 20,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['location', 'what', 'relevance'],
+        properties: {
+          location: { type: 'string', description: 'Concrete pointer: file path with an optional line range, e.g. src/foo.js:120-145' },
+          what: { type: 'string', description: 'What is at this location' },
+          relevance: { type: 'string', description: 'Why it matters to the investigation / which thread it bears on' },
+        },
+      },
+    },
+  },
+}
+const digestWanted = (effort, areaCount) => effort !== 'low' && areaCount >= DIGEST_MIN_AREAS
+// No retry (a front-loaded optional step should not add a serial retry barrier to every run),
+// and .catch at dispatch: the promise is held unawaited across the plan critic, so a rejection
+// must resolve to null (unaided reads) rather than crash the run.
+const dispatchDigest = (names, question) => agent(
+  'You are the source digest for a parallel investigation (an assessment). A team of ' +
+  'investigators is about to examine this scope; you read the source ONCE so they do not each ' +
+  're-ingest it.\n' +
+  'Scope: ' + scope + '\n' +
+  'Overall question: ' + question + '\n' +
+  'Areas the investigators will examine (orient toward these — do NOT investigate or judge them ' +
+  'yourself): ' + names.join('; ') + '\n' +
+  'Surface landmarks relevant to: ' + focus + '\n\n' +
+  READ_ONLY_TOOLS + '\n\n' +
+  'Read the source in full once. ' +
+  'Produce a compact orientation map: for each load-bearing landmark give a concrete location ' +
+  '(file path + line range), what is there, and why it matters. This is ORIENTATION, not findings: ' +
+  'point investigators at where things are so they can target their reads — do NOT draw conclusions, ' +
+  'judge significance, or propose anything. Keep it compact and point to the source; do not reproduce it.',
+  { label: 'source-digest', phase: 'Digest', schema: DIGEST_SCHEMA, model: 'sonnet' }
+).catch(() => null)
+let digestPromise = Promise.resolve(null)
+let digestDispatched = false
+if (digestWanted(overallEffort, areas.length)) {
+  digestPromise = dispatchDigest(areas.map((a) => a.name), overallQuestion)
+  digestDispatched = true
+}
+
 // ---- Plan critic (gated; one bounded revision) ------------------------------
 // Before paying for fan-out, a critic judges the decomposition for coverage, disjointness, and
 // count from the plan ALONE — it has tools but is instructed not to investigate. Gated on
-// effort + size so simple scopes skip it. On a genuine
+// effort + size so simple scopes skip it. The source digest runs concurrently with the critic:
+// only an adopted revision changes what the digest consumes. On a genuine
 // problem one revised plan is requested through the same prompt and bounds; a revision
 // that yields nothing usable falls back to the original plan.
 if (overallEffort !== 'low' && areas.length >= PLAN_CRITIC_MIN_AREAS) {
@@ -457,6 +541,17 @@ if (overallEffort !== 'low' && areas.length >= PLAN_CRITIC_MIN_AREAS) {
       overallEffort = deriveOverallEffort(areas, effortCeiling)
       overallQuestion = pickOverallQuestion({ plan, revised, scope })
       log('Revised plan: ' + areas.length + ' area(s).')
+      // The in-flight digest was oriented to the rejected decomposition — discard it and, when
+      // the revised plan still qualifies, re-dispatch against the revised areas.
+      if (digestWanted(overallEffort, areas.length)) {
+        log('Plan revised; re-dispatching the source digest for the revised areas.')
+        digestPromise = dispatchDigest(areas.map((a) => a.name), overallQuestion)
+        digestDispatched = true
+      } else if (digestDispatched) {
+        log('Revised plan no longer qualifies for a digest; discarding the in-flight map.')
+        digestPromise = Promise.resolve(null)
+        digestDispatched = false
+      }
     } else {
       log('Revision produced no usable areas; keeping original plan.')
     }
@@ -491,69 +586,11 @@ const renderOrientation = (digest) => {
 const VERIFY_MAP_CAVEAT = 'This map was also shared with the investigators whose claims you are ' +
   'checking — use it to navigate the source, never as evidence that a claim is correct.'
 
-// ---- Source digest (one-time orientation map; shared across the run's agents) ------------
-// One cheap-tier agent absorbs the single expensive full-source read (and any chunking a large
-// source needs) ONCE, then hands the investigators, verifiers, and grounding agents a shared
-// orientation map so they target their reads instead of each re-orienting in the whole source.
-// Gated to runs with real fan-out (>= DIGEST_MIN_AREAS areas) and off at low effort, where a
-// quick scan should not pay a front barrier. The map is advisory: every recipient still reads
-// actual source (verify and grounding re-derive citations against it, and verifier prompts carry
-// VERIFY_MAP_CAVEAT so the map is navigation, never evidence) — so a failed or skipped digest
-// degrades cleanly to unaided reads (renderOrientation returns ''). The verbatim writers and the
-// corrections translator never receive it; they do not read source at all.
-const DIGEST_SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
-  required: ['overview', 'landmarks'],
-  properties: {
-    overview: { type: 'string', description: '1-3 sentences orienting the reader to the source as a whole' },
-    landmarks: {
-      type: 'array',
-      // Bounded: the map is re-sent to every investigator, verifier, and grounding agent, so an
-      // unbounded map would recreate the payload duplication it removes. Keep it a compact set of
-      // the load-bearing landmarks.
-      maxItems: 20,
-      items: {
-        type: 'object',
-        additionalProperties: false,
-        required: ['location', 'what', 'relevance'],
-        properties: {
-          location: { type: 'string', description: 'Concrete pointer: file path with an optional line range, e.g. src/foo.js:120-145' },
-          what: { type: 'string', description: 'What is at this location' },
-          relevance: { type: 'string', description: 'Why it matters to the investigation / which thread it bears on' },
-        },
-      },
-    },
-  },
-}
-let orientation = ''
-if (overallEffort !== 'low' && areas.length >= DIGEST_MIN_AREAS) {
-  phase('Digest')
-  // Non-critical: a thrown or null digest must not abort the run, and we deliberately do not
-  // retry — a front-loaded optional step should not add a serial retry barrier to every run.
-  let digest = null
-  try {
-    digest = await agent(
-      'You are the source digest for a parallel investigation (an assessment). A team of ' +
-      'investigators is about to examine this scope; you read the source ONCE so they do not each ' +
-      're-ingest it.\n' +
-      'Scope: ' + scope + '\n' +
-      'Overall question: ' + overallQuestion + '\n' +
-      'Areas the investigators will examine (orient toward these — do NOT investigate or judge them ' +
-      'yourself): ' + areaNames.join('; ') + '\n' +
-      'Surface landmarks relevant to: ' + focus + '\n\n' +
-      READ_ONLY_TOOLS + '\n\n' +
-      'Read the source in full once. ' +
-      'Produce a compact orientation map: for each load-bearing landmark give a concrete location ' +
-      '(file path + line range), what is there, and why it matters. This is ORIENTATION, not findings: ' +
-      'point investigators at where things are so they can target their reads — do NOT draw conclusions, ' +
-      'judge significance, or propose anything. Keep it compact and point to the source; do not reproduce it.',
-      { label: 'source-digest', phase: 'Digest', schema: DIGEST_SCHEMA, model: 'sonnet' }
-    )
-  } catch (e) {
-    digest = null
-  }
-  orientation = renderOrientation(digest)
+// Join the source digest dispatched alongside the plan critic (or its post-revision
+// re-dispatch); from here every fan-out prompt embeds the rendered orientation map.
+const digest = await digestPromise
+const orientation = renderOrientation(digest)
+if (digestDispatched) {
   log(orientation
     ? 'Source orientation map: ' + ((digest && digest.landmarks) || []).length + ' landmark(s) shared with the investigating, verifying, and grounding agents.'
     : 'Source digest produced no usable map; agents will read source unaided.')
@@ -683,6 +720,8 @@ if (criticRounds > 0 && allObs.length) {
     // The critic judges coverage and names uncovered facets — it does not re-verify claims, so it
     // does not need each observation's full prose body. Projecting to title/evidence/significance
     // preserves the coverage + thread signal while bounding the payload re-sent in full every round.
+    // Like the plan critic, it is fenced from investigating: anything a gap needs established is
+    // derived once, by the gap agent it spawns — not first by the critic at the top tier.
     const critiqueObs = allObs.map((o) => ({ area: o.area, title: o.title, significance: o.significance, evidence: o.evidence }))
     const critique = await withRetry('completeness-critic', () => agent(
       'You are a completeness critic for an investigation (an assessment). Judge whether the areas already ' +
@@ -692,6 +731,10 @@ if (criticRounds > 0 && allObs.length) {
       'Focus: ' + focus + '\n' +
       'Areas already investigated (do NOT propose any of these again): ' + areaNames.join('; ') + '\n\n' +
       'Observations gathered so far (JSON):\n' + JSON.stringify(critiqueObs, null, 2) + '\n\n' +
+      'Judge ONLY from the observations above — you have tools but must NOT read files, run commands, ' +
+      'or investigate the scope; reach your verdict from the areas, titles, significance, and evidence ' +
+      'entries alone. Each gap you name is investigated afterward by a dedicated agent — name the facet ' +
+      'and why it matters; do not investigate it yourself.\n\n' +
       'Name only GENUINE gaps: a facet, thread, or area materially relevant to the overall question that the ' +
       'existing areas do not cover — an unplanned thread surfaced by an observation counts. A gap must be a ' +
       'facet none of the existing areas covers, not the same theme under a different name. Do NOT restate ' +
@@ -1056,7 +1099,7 @@ const SYNTH_SCHEMA = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['number', 'title', 'significance', 'body', 'citations'],
+        required: ['number', 'title', 'significance', 'body', 'citations', 'sourceObservations'],
         properties: {
           number: { type: 'integer', description: 'Finding number from significance order (1 = most impactful); rendered as the "### N." heading' },
           title: { type: 'string', description: 'Short descriptive finding title; rendered after the number on the heading line' },
@@ -1071,6 +1114,19 @@ const SYNTH_SCHEMA = {
             type: 'array',
             items: { type: 'string' },
             description: 'Grounds the finding rests on that are NOT locatable in the source record (human-reported facts, session-external context). INTERNAL like citations, but never checked against source — never repeat a "citations" entry here.',
+          },
+          sourceObservations: {
+            type: 'array',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['area', 'title'],
+              properties: {
+                area: { type: 'string', description: 'The observation\'s "area", copied verbatim from the observations payload' },
+                title: { type: 'string', description: 'The observation\'s "title", copied verbatim from the observations payload' },
+              },
+            },
+            description: 'The observation(s) this finding synthesizes, each identified by its area and title copied VERBATIM from the observations payload. INTERNAL — used to account for the observation→finding funnel; never rendered into the document.',
           },
         },
       },
@@ -1137,6 +1193,9 @@ let synth = allObs.length ? await withRetry('synthesize', () => agent(
   'INTERNAL — used to ground the finding against source; they are never shown to the reader.\n' +
   '- Grounds that cannot be located in the source record (human-reported facts, out-of-band context) go in ' +
   '"outOfBandBasis", NOT in "citations" — only "citations" entries are later checked against source.\n' +
+  '- For each finding, a "sourceObservations" list identifying the observation(s) merged into it, each as its ' +
+  '"area" and "title" copied verbatim from the observations payload. INTERNAL bookkeeping (never shown to the ' +
+  'reader) that records the observation→finding funnel — observations you filter out are detected by their absence.\n' +
   '- summary: a brief overall assessment paragraph.',
   { label: 'synthesize', phase: 'Synthesize', schema: SYNTH_SCHEMA }
 )) : null
@@ -1240,6 +1299,17 @@ const writePromise = synthStructured
   : Promise.resolve(null)
 const findingsCount = synth && Array.isArray(synth.findings) ? synth.findings.length : 0
 
+// Funnel accounting: which received observations no finding references. Computed in code
+// from the findings' sourceObservations echo — a record of legitimate filtering, not a
+// reliability signal (it never changes status). Empty when synthesis failed (nothing to
+// account against) or when there was nothing to synthesize.
+const provenance = {
+  dropped: synth && Array.isArray(synth.findings)
+    ? unsynthesizedObservations({ observations: verifiedObs, findings: synth.findings })
+    : [],
+}
+log('Provenance: ' + provenance.dropped.length + ' observation(s) filtered out during synthesis.')
+
 // ---- Ground (post-synthesis citation grounding; gated; corrective) ----------
 // The synthesizer reshapes observations into findings (merge / split / renumber) with no
 // read-only tools, so nothing has re-grounded the FINAL findings against source — the
@@ -1298,8 +1368,9 @@ if (overallEffort !== 'low' && synthFindings.length) {
   const groundTargets = selectGroundTargets(synthFindings, MAX_GROUND_TARGETS)
   const groundSkipped = synthFindings.length - synthFindings.filter((f) => (f.citations || []).length > 0).length
   // The out-of-band basis is destructured away so the agent is never invited to re-check
-  // grounds that cannot resolve against source.
-  const groundJobs = groundTargets.map(({ outOfBandBasis: _oob, ...fnd }) => () =>
+  // grounds that cannot resolve against source; the sourceObservations funnel accounting is
+  // internal and stays out of the payload too.
+  const groundJobs = groundTargets.map(({ outOfBandBasis: _oob, sourceObservations: _src, ...fnd }) => () =>
     agent(
       'You are grounding ONE finding from a finished assessment against source, at the synthesis boundary. ' +
       READ_ONLY_TOOLS + '\n\n' +
@@ -1400,6 +1471,7 @@ const auditSummary = summarizeAudit({
   findingsCount,
   auditActions,
   grounding,
+  provenance,
   reliabilityFlags,
 })
 
@@ -1414,6 +1486,7 @@ return {
   observationCount: allObs.length,
   findingsCount,
   auditSummary,
+  provenance,
   outPath: finalPath,
   markdown,
   ...(synthOk ? {} : { error: 'synthesis failed' }),
