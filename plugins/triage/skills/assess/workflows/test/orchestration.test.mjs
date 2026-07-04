@@ -305,8 +305,9 @@ test('grounding lens prompt: carries the folded reliability instruction', async 
   const capture = (prompt) => { captured = prompt; return { verdict: 'holds', confidence: 'high', rationale: 'ok' } }
   const { calls } = await med({ 'verify:grounding#0': capture })
   assert.ok(calls.includes('verify:grounding#0'))
-  // Unique anchors: 'larger or different' and 'reliabilityConcern' appear in no other
-  // prompt string, so a hit can only come from the lens text itself.
+  // 'larger or different' is unique to the lens text, so that hit can only come from the
+  // lens itself; 'reliabilityConcern' also appears in the output-fields instruction, so it
+  // checks the prompt carries the field name, not the lens.
   assert.ok(captured.includes('larger or different than the evidence implies'))
   assert.ok(captured.includes('reliabilityConcern'))
   assert.ok(captured.includes('Grounding/citation accuracy'))
@@ -345,6 +346,30 @@ test('merged verifier prompt: carries both lens texts and the resolution rule', 
   assert.ok(captured.includes('Grounding/citation accuracy'))
   assert.ok(captured.includes('Over-claim / significance inflation'))
   assert.ok(captured.includes('drop > correct > holds'))
+})
+
+test('verify-lens prompt: names the top-level verdict fields the schema requires', async () => {
+  // The lens agents' schema rejects any wrapper object (additionalProperties: false), and a prompt
+  // that embeds an Observation JSON payload but never says what to return invites exactly that
+  // wrapping. The prompt must state the output fields the way the Ground prompt states its own.
+  let captured = ''
+  const capture = (prompt) => { captured = prompt; return { verdict: 'holds', confidence: 'high', rationale: 'ok' } }
+  const { calls } = await med({ 'verify:grounding#0': capture })
+  assert.ok(calls.includes('verify:grounding#0'))
+  assert.ok(captured.includes('top-level fields'))
+  assert.ok(captured.includes('"verdict" (holds/correct/drop)'))
+  assert.ok(captured.includes('never wrap'))
+})
+
+test('read-only tool framing: instructs paging large files across multiple Read calls', async () => {
+  // A single whole-file Read of a large source fails on the token cap and loses the round-trip.
+  // The paging guidance lives once in READ_ONLY_TOOLS so every tool-using role carries it; the
+  // verify prompt is the capture site because lens verifiers re-read the primary source.
+  let captured = ''
+  const capture = (prompt) => { captured = prompt; return { verdict: 'holds', confidence: 'high', rationale: 'ok' } }
+  await med({ 'verify:grounding#0': capture })
+  assert.ok(captured.includes('Read large files in pages'))
+  assert.ok(captured.includes('token cap'))
 })
 
 test('adaptive (no ceiling): a lone-high minority yields the median effort, not the max — the overclaim lens stays off', async () => {
