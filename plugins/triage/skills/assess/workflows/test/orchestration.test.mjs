@@ -552,6 +552,42 @@ test('synthesizer payload: nothing from the consolidation verifier rides the syn
   assert.ok(!captured.includes('CHECK_SENTINEL'))  // audit-only checksPerformed stays out
 })
 
+test('synthesize prompt: requires per-finding sourceObservations echoed verbatim', async () => {
+  // The synthesizer is the only stage that knows the observation→finding mapping; without an
+  // echo-back requirement the funnel is unaccountable and dropped observations vanish silently.
+  let captured = ''
+  const capture = (prompt) => {
+    captured = prompt
+    return { assessmentTitle: 'T', scopeSummary: 's', areasCovered: 'a', findings: [], summary: 'sum' }
+  }
+  const { calls } = await med({ synthesize: capture })
+  assert.ok(calls.includes('synthesize'))
+  assert.ok(captured.includes('sourceObservations'))
+  assert.ok(captured.includes('copied verbatim'))
+})
+
+test('provenance: observations no finding references surface in result.provenance.dropped', async () => {
+  // Happy fixture: findings reference alpha's and beta's observations; gamma's is filtered by
+  // synthesis. The drop set is computed in code from the echo-back, so the loss is recorded
+  // even though filtering itself is legitimate.
+  const { result } = await med()
+  assert.deepEqual(result.provenance, {
+    dropped: [{ area: 'gamma', title: 'gamma observation', significance: 'high' }],
+  })
+  assert.equal(result.auditSummary.unsynthesized, 1)
+  assert.equal(result.status, 'ok') // record-keeping, not a reliability problem
+})
+
+test('grounding payload: sourceObservations accounting stays out of the ground prompt', async () => {
+  // The ground agent checks citations against source; the funnel accounting is internal and
+  // would only bloat its payload (it is stripped like outOfBandBasis).
+  let groundPrompt = ''
+  const { calls } = await med({ 'ground#1': (prompt) => { groundPrompt = prompt; return { ungrounded: [] } } })
+  assert.ok(calls.includes('ground#1'))
+  assert.ok(groundPrompt.includes('"b1"')) // the finding body still rides the payload
+  assert.ok(!groundPrompt.includes('sourceObservations'))
+})
+
 test('consolidation corrections: a cheap applier lands them on the findings before write and ground', async () => {
   // The consolidation verifier's corrections are claim-level free text with no finding target.
   // A cheap translation agent maps them onto finding numbers and the correction is applied in

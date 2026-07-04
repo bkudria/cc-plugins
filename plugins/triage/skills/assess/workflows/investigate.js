@@ -189,11 +189,12 @@ const degradationSummary = ({ plannedAreas, droppedAreas, synthOk, verifyFailed,
 // Flat scalar audit summary for Phase 3: collapses the run's verification, grounding,
 // and funnel signals into a notification-safe set of counts (the nested verification/
 // grounding objects are truncated from the completion notification). The observations→
-// synthesized→findings funnel is reported as raw counts so the reduction is visible
-// without claiming a single "filtered" number (merge/split make it non-linear). Pure
+// synthesized→findings funnel is reported as raw counts (merge/split make it non-linear);
+// `unsynthesized` is the one derived funnel count — the provenance drop set's size,
+// computed from the findings' sourceObservations echo rather than inferred. Pure
 // (signals in, plain object out), so it is unit-tested alongside degradationSummary.
 /* test-seam:pure-fn:start */
-const summarizeAudit = ({ status, observationCount, synthInputCount, findingsCount, auditActions, grounding, reliabilityFlags }) => {
+const summarizeAudit = ({ status, observationCount, synthInputCount, findingsCount, auditActions, grounding, provenance, reliabilityFlags }) => {
   const count = (action) => auditActions.filter((a) => a.action === action).length
   return {
     status,
@@ -205,8 +206,23 @@ const summarizeAudit = ({ status, observationCount, synthInputCount, findingsCou
     flagged: count('flagged'),
     ungrounded: grounding && Array.isArray(grounding.ungrounded) ? grounding.ungrounded.length : 0,
     groundCorrected: grounding && Array.isArray(grounding.corrected) ? grounding.corrected.length : 0,
+    unsynthesized: provenance && Array.isArray(provenance.dropped) ? provenance.dropped.length : 0,
     reliabilityFlags: Array.isArray(reliabilityFlags) ? reliabilityFlags.length : 0,
   }
+}
+/* test-seam:pure-fn:end */
+
+// The observation→finding funnel's accounting: each finding echoes back the observations it
+// synthesizes (sourceObservations, area+title copied verbatim); the drop set is everything the
+// synthesizer received but no finding references. A mis-copied reference fails to match and so
+// over-reports a drop — the safe direction; a hallucinated reference subtracts nothing.
+/* test-seam:pure-fn:start */
+const unsynthesizedObservations = ({ observations, findings }) => {
+  const keyOf = (x) => x.area + ' ' + x.title
+  const referenced = new Set(findings.flatMap((f) => (f.sourceObservations || []).map(keyOf)))
+  return observations
+    .filter((o) => !referenced.has(keyOf(o)))
+    .map((o) => ({ area: o.area, title: o.title, significance: o.significance }))
 }
 /* test-seam:pure-fn:end */
 
@@ -1051,7 +1067,7 @@ const SYNTH_SCHEMA = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['number', 'title', 'significance', 'body', 'citations'],
+        required: ['number', 'title', 'significance', 'body', 'citations', 'sourceObservations'],
         properties: {
           number: { type: 'integer', description: 'Finding number from significance order (1 = most impactful); rendered as the "### N." heading' },
           title: { type: 'string', description: 'Short descriptive finding title; rendered after the number on the heading line' },
@@ -1066,6 +1082,19 @@ const SYNTH_SCHEMA = {
             type: 'array',
             items: { type: 'string' },
             description: 'Grounds the finding rests on that are NOT locatable in the source record (human-reported facts, session-external context). INTERNAL like citations, but never checked against source — never repeat a "citations" entry here.',
+          },
+          sourceObservations: {
+            type: 'array',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['area', 'title'],
+              properties: {
+                area: { type: 'string', description: 'The observation\'s "area", copied verbatim from the observations payload' },
+                title: { type: 'string', description: 'The observation\'s "title", copied verbatim from the observations payload' },
+              },
+            },
+            description: 'The observation(s) this finding synthesizes, each identified by its area and title copied VERBATIM from the observations payload. INTERNAL — used to account for the observation→finding funnel; never rendered into the document.',
           },
         },
       },
@@ -1132,6 +1161,9 @@ let synth = allObs.length ? await withRetry('synthesize', () => agent(
   'INTERNAL — used to ground the finding against source; they are never shown to the reader.\n' +
   '- Grounds that cannot be located in the source record (human-reported facts, out-of-band context) go in ' +
   '"outOfBandBasis", NOT in "citations" — only "citations" entries are later checked against source.\n' +
+  '- For each finding, a "sourceObservations" list identifying the observation(s) merged into it, each as its ' +
+  '"area" and "title" copied verbatim from the observations payload. INTERNAL bookkeeping (never shown to the ' +
+  'reader) that records the observation→finding funnel — observations you filter out are detected by their absence.\n' +
   '- summary: a brief overall assessment paragraph.',
   { label: 'synthesize', phase: 'Synthesize', schema: SYNTH_SCHEMA }
 )) : null
@@ -1235,6 +1267,17 @@ const writePromise = synthStructured
   : Promise.resolve(null)
 const findingsCount = synth && Array.isArray(synth.findings) ? synth.findings.length : 0
 
+// Funnel accounting: which received observations no finding references. Computed in code
+// from the findings' sourceObservations echo — a record of legitimate filtering, not a
+// reliability signal (it never changes status). Empty when synthesis failed (nothing to
+// account against) or when there was nothing to synthesize.
+const provenance = {
+  dropped: synth && Array.isArray(synth.findings)
+    ? unsynthesizedObservations({ observations: verifiedObs, findings: synth.findings })
+    : [],
+}
+log('Provenance: ' + provenance.dropped.length + ' observation(s) filtered out during synthesis.')
+
 // ---- Ground (post-synthesis citation grounding; gated; corrective) ----------
 // The synthesizer reshapes observations into findings (merge / split / renumber) with no
 // read-only tools, so nothing has re-grounded the FINAL findings against source — the
@@ -1293,8 +1336,9 @@ if (overallEffort !== 'low' && synthFindings.length) {
   const groundTargets = selectGroundTargets(synthFindings, MAX_GROUND_TARGETS)
   const groundSkipped = synthFindings.length - synthFindings.filter((f) => (f.citations || []).length > 0).length
   // The out-of-band basis is destructured away so the agent is never invited to re-check
-  // grounds that cannot resolve against source.
-  const groundJobs = groundTargets.map(({ outOfBandBasis: _oob, ...fnd }) => () =>
+  // grounds that cannot resolve against source; the sourceObservations funnel accounting is
+  // internal and stays out of the payload too.
+  const groundJobs = groundTargets.map(({ outOfBandBasis: _oob, sourceObservations: _src, ...fnd }) => () =>
     agent(
       'You are grounding ONE finding from a finished assessment against source, at the synthesis boundary. ' +
       READ_ONLY_TOOLS + '\n\n' +
@@ -1395,6 +1439,7 @@ const auditSummary = summarizeAudit({
   findingsCount,
   auditActions,
   grounding,
+  provenance,
   reliabilityFlags,
 })
 
@@ -1409,6 +1454,7 @@ return {
   observationCount: allObs.length,
   findingsCount,
   auditSummary,
+  provenance,
   outPath: finalPath,
   markdown,
   ...(synthOk ? {} : { error: 'synthesis failed' }),
