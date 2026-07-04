@@ -892,33 +892,30 @@ const applyVerdicts = (obs, verdicts) => {
 // Choose which observations get the full adversarial lens set. Significance-first,
 // but area-aware: every area with any observation gets at least one slot (its
 // highest-significance one) before the remaining budget is filled by global
-// significance — so the lens budget can't be monopolised by whichever area the
-// planner happened to list first. Pure (observations + budget in, [{o,i}] out;
-// the original index i is preserved for per-lens labelling and probedKeys).
+// significance, ties broken round-robin across areas (each area's second
+// observation before any area's third) — so plan order can't monopolise tied
+// slots. Pure (observations + budget in, [{o,i}] out; the original index i is
+// preserved for per-lens labelling and probedKeys).
 /* test-seam:pure-fn:start */
 const selectVerifyTargets = (obs, maxK) => {
   const sigRank = { high: 0, medium: 1, low: 2 }
   const rankOf = (x) => (x.significance in sigRank ? sigRank[x.significance] : 3)
-  const bySig = obs
+  const depth = new Map()
+  return obs
     .map((o, i) => ({ o, i }))
     .sort((a, b) => rankOf(a.o) - rankOf(b.o) || a.i - b.i)
-  const chosen = []
-  const taken = new Set()
-  // Floor: one best observation per area, areas ordered by their best's
-  // significance (ties: first appearance), capped at the budget.
-  const seenArea = new Set()
-  for (const t of bySig) {
-    if (chosen.length >= maxK) break
-    if (seenArea.has(t.o.area)) continue
-    seenArea.add(t.o.area); chosen.push(t); taken.add(t.i)
-  }
-  // Fill the remaining budget by global significance across all areas.
-  for (const t of bySig) {
-    if (chosen.length >= maxK) break
-    if (taken.has(t.i)) continue
-    chosen.push(t); taken.add(t.i)
-  }
-  return chosen
+    .map((t) => {
+      const d = depth.get(t.o.area) || 0
+      depth.set(t.o.area, d + 1)
+      return { ...t, d }
+    })
+    .sort((a, b) =>
+      (a.d ? 1 : 0) - (b.d ? 1 : 0) || // floor: each area's best first
+      rankOf(a.o) - rankOf(b.o) ||     // then global significance
+      a.d - b.d ||                     // ties: round-robin across areas
+      a.i - b.i)                       // stable
+    .slice(0, maxK)
+    .map(({ o, i }) => ({ o, i }))
 }
 /* test-seam:pure-fn:end */
 
@@ -991,8 +988,8 @@ if (!lenses.length || !allObs.length) {
   verificationPromise = safeVerify(excerptForVerify(allObs))
 } else {
   // Area-aware target selection: a per-area floor (every area's best observation)
-  // then significance-fill, so the top-K lens budget spreads across areas instead
-  // of concentrating on whichever one sorts first. The budget is the area count plus
+  // then significance-fill (ties round-robin across areas), so the top-K lens
+  // budget spreads across areas instead of concentrating on whichever one sorts first. The budget is the area count plus
   // VERIFY_GLOBAL_FILL_HEADROOM (bounded by MAX_TOTAL_AREAS): every area keeps a floor
   // slot even when completeness pushes the count past MAX_VERIFY_TARGETS, and the
   // headroom leaves slots for the global fill so a hot area's second observation is

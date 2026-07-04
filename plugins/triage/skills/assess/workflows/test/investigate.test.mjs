@@ -259,10 +259,19 @@ test('selectVerifyTargets: per-area floor quota spreads slots, including a lone 
   ]
   const targets = selectVerifyTargets(list, 6)
   assert.equal(targets.length, 6)
-  // Every area gets its floor; A keeps the surplus. The old top-6-by-significance
-  // slice would take all six high-sig A observations and never probe C's medium.
-  assert.deepEqual(countByArea(targets), { A: 4, B: 1, C: 1 })
+  // Every area gets its floor; the surplus round-robins across the areas that
+  // still have high-significance material, so B's second high beats A's third.
+  assert.deepEqual(countByArea(targets), { A: 3, B: 2, C: 1 })
   assert.ok(targets.some((t) => t.o.area === 'C'))
+})
+
+test('selectVerifyTargets: tied-significance fill is dispatch-order independent', () => {
+  const listA = Array.from({ length: 6 }, (_, n) => vobs('A', 'high', 'a' + n))
+  const listB = Array.from({ length: 6 }, (_, n) => vobs('B', 'high', 'b' + n))
+  // Equal high-significance material either way round: the fill must split the
+  // budget evenly instead of handing every surplus slot to the first-listed area.
+  assert.deepEqual(countByArea(selectVerifyTargets([...listA, ...listB], 6)), { A: 3, B: 3 })
+  assert.deepEqual(countByArea(selectVerifyTargets([...listB, ...listA], 6)), { A: 3, B: 3 })
 })
 
 test('selectVerifyTargets: a low-only area gets just its floor; higher significance fills the rest', () => {
@@ -281,6 +290,18 @@ test('selectVerifyTargets: a single area is unchanged from the top-K slice (no r
   const targets = selectVerifyTargets(list, 6)
   assert.equal(targets.length, 6)
   assert.deepEqual(targets.map((t) => t.i), [0, 1, 2, 3, 4, 5])
+})
+
+test('selectVerifyTargets: floor truncation keeps the areas with the strongest best observations', () => {
+  const list = [
+    vobs('A', 'high', 'a0'),
+    vobs('B', 'low', 'b0'),
+    vobs('C', 'high', 'c0'),
+  ]
+  const targets = selectVerifyTargets(list, 2)
+  // Budget below the area count: floors go to areas by their best observation's
+  // significance, so the low-best area is the one cut.
+  assert.deepEqual(countByArea(targets), { A: 1, C: 1 })
 })
 
 test('selectVerifyTargets: returns all observations when fewer than the budget', () => {
