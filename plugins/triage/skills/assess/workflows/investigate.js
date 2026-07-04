@@ -106,7 +106,9 @@ const READ_ONLY_TOOLS =
   'repository, or paths it names. Never launch an unbounded traversal of the home directory or the ' +
   'filesystem root (e.g. `find /`, `find ~`, or a recursive search rooted at `/` or `$HOME`): such ' +
   'scans are pathologically slow and, on macOS, block on per-application data-access permission ' +
-  'prompts. If you cannot locate a path, narrow from a known root rather than scanning everything.'
+  'prompts. If you cannot locate a path, narrow from a known root rather than scanning everything. ' +
+  'Read large files in pages (offset/limit) across multiple Read calls — a single whole-file Read of a ' +
+  'large source fails on the token cap and loses the round-trip.'
 /* test-seam:pure-fn:start */
 // Shared observation-only discipline: describe what IS, never prescribe a fix. One base shared by
 // every role, composed with per-role clauses, with the consequence-description vs. prescription
@@ -476,7 +478,7 @@ const dispatchDigest = (names, question) => agent(
   'yourself): ' + names.join('; ') + '\n' +
   'Surface landmarks relevant to: ' + focus + '\n\n' +
   READ_ONLY_TOOLS + '\n\n' +
-  'Read the source in full once (chunk large files across multiple reads rather than truncating). ' +
+  'Read the source in full once. ' +
   'Produce a compact orientation map: for each load-bearing landmark give a concrete location ' +
   '(file path + line range), what is there, and why it matters. This is ORIENTATION, not findings: ' +
   'point investigators at where things are so they can target their reads — do NOT draw conclusions, ' +
@@ -1057,7 +1059,10 @@ if (!lenses.length || !allObs.length) {
       'Apply ONLY the lenses above. Be skeptical and check independently rather than trusting the observation. ' +
       'Apply every lens; if they point to different verdicts, report the most severe (drop > correct > holds), ' +
       'and include any correction, significance downgrade, or reliability concern any lens surfaced. ' +
-      'You may correct an inaccurate CLAIM. ' + observationOnlyRule('verifier'),
+      'You may correct an inaccurate CLAIM. ' +
+      'Return your verdict as top-level fields — "verdict" (holds/correct/drop), "confidence", and "rationale", ' +
+      'plus "correction", "correctedSignificance", or "reliabilityConcern" when a lens surfaced one; never wrap ' +
+      'or JSON-encode them inside another property. ' + observationOnlyRule('verifier'),
       { label: 'verify:' + lenses.join('+') + '#' + i, phase: 'Verify', schema: VERDICT_SCHEMA, model: 'sonnet' }
     ).then((v) => v && Object.assign({ area: o.area, title: o.title, lens: lenses.join('+') }, v))
   ))
