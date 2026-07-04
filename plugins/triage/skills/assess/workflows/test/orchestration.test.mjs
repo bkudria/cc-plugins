@@ -262,6 +262,31 @@ test('high effort: the overclaim lens is dispatched at high but not at medium', 
   assert.ok(!lo.calls.some((l) => l.startsWith('verify:overclaim#')))
 })
 
+test('grounding lens prompt: carries the folded reliability instruction', async () => {
+  let captured = ''
+  const capture = (prompt) => { captured = prompt; return { verdict: 'holds', confidence: 'high', rationale: 'ok' } }
+  const { calls } = await med({ 'verify:grounding#0': capture })
+  assert.ok(calls.includes('verify:grounding#0'))
+  // Unique anchors: 'larger or different' and 'reliabilityConcern' appear in no other
+  // prompt string, so a hit can only come from the lens text itself.
+  assert.ok(captured.includes('larger or different than the evidence implies'))
+  assert.ok(captured.includes('reliabilityConcern'))
+  assert.ok(captured.includes('Grounding/citation accuracy'))
+})
+
+test('medium effort: a single combined lens dispatches per verify target', async () => {
+  const { calls } = await med()
+  assert.ok(calls.some((l) => l.startsWith('verify:grounding#')))
+  assert.ok(!calls.some((l) => l.startsWith('verify:reliability#')))
+})
+
+test('high effort: lenses are grounding and overclaim only', async () => {
+  const { calls } = await high()
+  assert.ok(calls.some((l) => l.startsWith('verify:grounding#')))
+  assert.ok(calls.some((l) => l.startsWith('verify:overclaim#')))
+  assert.ok(!calls.some((l) => l.startsWith('verify:reliability#')))
+})
+
 test('adaptive (no ceiling): a lone-high minority yields the median effort, not the max — the overclaim lens stays off', async () => {
   // 2 of 5 areas rated high, the rest lower. The old max rule made this a 'high' run; the
   // median lands it at 'medium', so the high-only overclaim lens never fires, while the
