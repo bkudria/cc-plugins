@@ -10,7 +10,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { helpers } from './_load.mjs'
 
-const { degradationSummary, renderAssessment, applyVerdicts, applyFindingCorrections, pickOverallQuestion, selectVerifyTargets, verifyTargetBudget, selectProbedKeys, selectGroundTargets, summarizeAudit, runReliabilityFlags, clampEffort, deriveOverallEffort, collectObs, renderOrientation, unsynthesizedObservations } = helpers
+const { degradationSummary, renderAssessment, applyVerdicts, applyFindingCorrections, pickOverallQuestion, selectVerifyTargets, verifyTargetBudget, selectProbedKeys, selectGroundTargets, summarizeAudit, runReliabilityFlags, clampEffort, deriveOverallEffort, collectObs, renderOrientation, unsynthesizedObservations, duplicateObservationGroups, duplicateVerifyPenalties } = helpers
 
 test('renderAssessment emits the deterministic assess<->iterate format contract', () => {
   const md = renderAssessment({
@@ -316,6 +316,92 @@ test('selectVerifyTargets: preserves each observation original index', () => {
   assert.deepEqual(targets.map((t) => t.i).sort((a, b) => a - b), [0, 1, 2])
 })
 
+// Duplicate-candidate detection: observations citing overlapping source locations are
+// grouped so downstream stages can spend verify slots on distinct facts and the
+// synthesizer sees the candidate merges explicitly.
+const dupObs = (area, title, evidence, significance = 'medium') => ({ area, title, body: 'b', evidence, significance })
+
+test('duplicateObservationGroups: two observations citing the same file:line form one group', () => {
+  const list = [
+    dupObs('A', 't0', ['src/a.js:10']),
+    dupObs('B', 't1', ['src/a.js:10']),
+    dupObs('C', 't2', ['src/c.js:1']),
+  ]
+  assert.deepEqual(duplicateObservationGroups(list), [[0, 1]])
+})
+
+test('duplicateObservationGroups: intersecting line ranges group; prose around the ref is ignored', () => {
+  const list = [
+    dupObs('A', 't0', ['src/f.js:10-20 — the retry loop']),
+    dupObs('B', 't1', ['./src/f.js:15']),
+  ]
+  assert.deepEqual(duplicateObservationGroups(list), [[0, 1]])
+})
+
+test('duplicateObservationGroups: same file with disjoint line ranges does not group', () => {
+  const list = [dupObs('A', 't0', ['f.js:10-12']), dupObs('B', 't1', ['f.js:20'])]
+  assert.deepEqual(duplicateObservationGroups(list), [])
+})
+
+test('duplicateObservationGroups: non-parseable evidence groups on whitespace/case-normalized equality', () => {
+  const list = [
+    dupObs('A', 't0', ['the retry  config value']),
+    dupObs('B', 't1', ['The retry config value']),
+    dupObs('C', 't2', ['a different pattern entirely']),
+  ]
+  assert.deepEqual(duplicateObservationGroups(list), [[0, 1]])
+})
+
+test('duplicateObservationGroups: overlap is transitive — chained citations form one group', () => {
+  const list = [
+    dupObs('A', 't0', ['a.js:1']),
+    dupObs('B', 't1', ['a.js:1', 'b.js:2']),
+    dupObs('C', 't2', ['b.js:2']),
+  ]
+  assert.deepEqual(duplicateObservationGroups(list), [[0, 1, 2]])
+})
+
+test('duplicateObservationGroups: fully distinct evidence yields no groups', () => {
+  const list = [dupObs('A', 't0', ['a.js:1']), dupObs('B', 't1', ['b.js:1'])]
+  assert.deepEqual(duplicateObservationGroups(list), [])
+})
+
+test('duplicateVerifyPenalties: the highest-significance member is exempt, the rest are penalized', () => {
+  const list = [
+    dupObs('A', 't0', ['a.js:1'], 'low'),
+    dupObs('B', 't1', ['a.js:1'], 'high'),
+    dupObs('C', 't2', ['a.js:1'], 'medium'),
+  ]
+  assert.deepEqual(duplicateVerifyPenalties(list, [[0, 1, 2]]), { 0: 1, 2: 1 })
+})
+
+test('duplicateVerifyPenalties: significance ties break by input order; no groups means no penalties', () => {
+  const list = [dupObs('A', 't0', ['a.js:1']), dupObs('B', 't1', ['a.js:1'])]
+  assert.deepEqual(duplicateVerifyPenalties(list, [[0, 1]]), { 1: 1 })
+  assert.deepEqual(duplicateVerifyPenalties(list, []), {})
+})
+
+test('selectVerifyTargets: a penalized member fills only leftover budget, behind lower significance', () => {
+  const list = [vobs('A', 'high', 'a0'), vobs('B', 'high', 'b0'), vobs('C', 'medium', 'c0')]
+  // b0 is a duplicate non-representative: under a tight budget the slot goes to the
+  // distinct medium observation instead of re-verifying the same fact.
+  const tight = selectVerifyTargets(list, 2, { 1: 1 })
+  assert.deepEqual(countByArea(tight), { A: 1, C: 1 })
+  // With budget to spare the penalized member is still probed, last.
+  const loose = selectVerifyTargets(list, 3, { 1: 1 })
+  assert.deepEqual(loose.map((t) => t.i), [0, 2, 1])
+})
+
+test('selectVerifyTargets: an area\'s floor falls to its next unpenalized observation', () => {
+  const list = [
+    vobs('A', 'high', 'a0'),
+    vobs('B', 'high', 'b0'), // duplicate non-representative
+    vobs('B', 'medium', 'b1'),
+  ]
+  const targets = selectVerifyTargets(list, 2, { 1: 1 })
+  assert.deepEqual(targets.map((t) => t.i), [0, 2]) // B's floor slot goes to b1, not the duplicate
+})
+
 // Ground targets: findings resting only on out-of-band basis carry no source-locatable
 // citations, so they are skipped and their budget slots backfill with later findings.
 const gfnd = (number, citations) => ({ number, title: 'F' + number, significance: 'high', body: 'b' + number, citations })
@@ -401,7 +487,13 @@ test('summarizeAudit counts corrections, drops, flags, ungrounded, and reliabili
       { action: 'flagged' }, { action: 'flagged' }, { action: 'flagged' },
     ],
     grounding: { ran: true, checked: 4, ungrounded: [{ findingNumber: 1 }, { findingNumber: 2 }], corrected: [3] },
-    provenance: { dropped: [{ area: 'a', title: 't1', significance: 'low' }, { area: 'b', title: 't2', significance: 'high' }] },
+    provenance: {
+      dropped: [{ area: 'a', title: 't1', significance: 'low' }, { area: 'b', title: 't2', significance: 'high' }],
+      duplicates: [
+        [{ area: 'a', title: 't1', significance: 'low' }, { area: 'b', title: 't2', significance: 'high' }],
+        [{ area: 'c', title: 't3', significance: 'medium' }, { area: 'd', title: 't4', significance: 'medium' }],
+      ],
+    },
     reliabilityFlags: ['consolidation verification failed and was skipped'],
   })
   assert.deepEqual(summary, {
@@ -415,6 +507,7 @@ test('summarizeAudit counts corrections, drops, flags, ungrounded, and reliabili
     ungrounded: 2,
     groundCorrected: 1,
     unsynthesized: 2,
+    duplicateGroups: 2,
     reliabilityFlags: 1,
   })
 })
@@ -440,6 +533,7 @@ test('summarizeAudit on a clean run reports zeros and passes the funnel counts t
     ungrounded: 0,
     groundCorrected: 0,
     unsynthesized: 0,
+    duplicateGroups: 0,
     reliabilityFlags: 0,
   })
 })
