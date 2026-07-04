@@ -127,6 +127,38 @@ test('consolidation verify prompt (single-pass path): the original three-check b
   assert.ok(!captured.includes('already individually probed')) // no probed-keys steer on this branch
 })
 
+test('high-effort area guidance: the investigator prompt carries the tool-call budget and stop rule', async () => {
+  // Fan-out wall-clock equals the slowest member, so the high tier must bound the
+  // straggler: a numeric budget plus an instruction to report-and-note rather than
+  // exhaust the area (the noted remainder gives the completeness round a target).
+  let captured = ''
+  const highPlan = {
+    overallQuestion: 'Is the thing sound?',
+    effortRationale: 'three deep facets',
+    areas: AREAS.map((name) => ({ name, rationale: 'why ' + name, effort: 'high' })),
+  }
+  const capture = (prompt) => {
+    captured = prompt
+    return { area: 'alpha', observations: [{ title: 'alpha observation', body: 'b', evidence: ['alpha.js:1'], significance: 'high' }] }
+  }
+  const { result } = await high({ plan: highPlan, 'area:alpha': capture })
+  assert.equal(result.status, 'ok')
+  assert.ok(captured.includes('Effort for this area: high'))
+  assert.match(captured, /15-25 tool calls/)
+  assert.match(captured, /note what remains unexamined/)
+})
+
+test('high-effort consolidation verify: the intensity rider carries the bounded-pass instruction', async () => {
+  // The consolidation verifier overlaps synthesis but extends the critical path when
+  // it outlasts the synthesizer, so its high tier is bounded like the investigator's.
+  let captured = ''
+  const capture = (prompt) => { captured = prompt; return { checksPerformed: ['x'], corrections: [], reliabilityFlags: [] } }
+  const { calls } = await high({ verify: capture })
+  assert.ok(calls.includes('verify'))
+  assert.match(captured, /roughly a dozen tool calls/)
+  assert.match(captured, /flagging rather than chasing/)
+})
+
 test('large run: every area is adversarially probed even when area count exceeds the minimum budget', async () => {
   // Seven areas (one observation each) — above MAX_VERIFY_TARGETS (6). With a fixed
   // budget the per-area floor fills all six slots with the first six areas and the
