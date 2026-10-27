@@ -38,4 +38,6 @@ Projects without a `project.yaml` are not tracked — the audit is opt-in per pr
 
 ## How the audit runs
 
-The deterministic runner (`skills/standards/scripts/run-audit.sh`) is a six-verb state machine — `--init`, `--collect`, `--merge`, `--gate`, `--render`, `--check` — operating on a per-audit state directory. It runs in two rounds: required standards first, and suggested standards only if every required one passes. Judgment-based checks are delegated to a background `Workflow` (`skills/standards/workflows/verify.js`) that fans out one verifier per pending standard. The `--check` verb gives a clean CI pass/fail exit code.
+The deterministic runner (`skills/standards/scripts/run-audit.sh`) is a six-verb state machine — `--init`, `--collect`, `--merge`, `--gate`, `--render`, `--check` — operating on a per-audit state directory. It runs in two rounds: required standards first, and suggested standards only if every required one passes. Judgment-based checks are delegated to the plugin's saved workflow, `projects:standards-verify` (`skills/standards/workflows/verify.js`), which fans out one haiku verifier per pending standard in the background. The `--check` verb gives a clean CI pass/fail exit code.
+
+The workflow needs Claude Code's dynamic workflows. On Claude Pro they are off by default: turn on **Dynamic workflows** in `/config`, or the audit stops after the deterministic checks and says so.
