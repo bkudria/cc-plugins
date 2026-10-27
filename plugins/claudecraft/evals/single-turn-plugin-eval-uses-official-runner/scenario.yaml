@@ -1,0 +1,36 @@
+prompt: |
+  Use claude-code-evals to add an eval to this plugin (the current directory
+  is the plugin root). One case: the prompt "write my standup" should make the
+  standup skill fire, and the reply should have Yesterday, Today, and
+  Blockers headings. It's a single prompt with no follow-up turns. Write the
+  eval files; don't run anything.
+
+project:
+  files:
+    .claude-plugin/plugin.json: |
+      {
+        "name": "standup",
+        "description": "Draft a daily standup update from yesterday's commits.",
+        "version": "0.3.0",
+        "license": "MIT"
+      }
+    README.md: |
+      # standup
+
+      Drafts a daily standup update with Yesterday, Today, and Blockers.
+    skills/standup/SKILL.md: |
+      ---
+      name: standup
+      description: Draft a standup update with Yesterday, Today, and Blockers sections when the user asks for their standup.
+      ---
+
+      # Standup
+
+      Read `git log --since=yesterday` and summarize it under **Yesterday**.
+      Add a **Today** section and a **Blockers** section, each with a
+      placeholder bullet the user can fill in, and print the update.
+
+user:
+  persona: |
+    If asked a question, answer from your first message; otherwise say
+    "use your judgment".

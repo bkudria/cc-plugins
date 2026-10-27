@@ -1,0 +1,13 @@
+checks:
+  - loads-skill-creator:
+      check: "The transcript contains a Skill tool call that invokes skill-creator under any namespace (e.g. skill-creator:skill-creator or anthropic-skills:skill-creator)"
+      note: "skills/skillcraft — skillcraft hands drafting and description tuning to the official skill-creator instead of running its own create phases."
+  - writes-skill-md:
+      check: "The transcript contains a file-writing tool call (e.g. Write, or a Bash redirect) whose target path ends in changelog-writer/SKILL.md"
+      note: "Regression baseline — the handoff must still produce the skill. Presence anchor for no-skill-creator-evals-json."
+  - writes-craboodle-scenario:
+      check: "The transcript contains a file-writing tool call whose target is a scenario.yaml file under the changelog-writer skill's evals/ directory"
+      note: "Regression baseline — skillcraft still adds craboodle eval coverage (its Bootstrap Evals workflow) after skill-creator drafts the skill."
+  - no-skill-creator-evals-json:
+      check: "No file-writing tool call in the transcript targets a path ending in evals/evals.json"
+      note: "Paired with writes-skill-md. skill-creator's own eval loop writes evals/evals.json; skillcraft's handoff skips that loop so the skill has one eval format (craboodle)."

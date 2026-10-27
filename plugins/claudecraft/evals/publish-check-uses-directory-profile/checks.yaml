@@ -1,0 +1,10 @@
+checks:
+  - runs-directory-profile:
+      check: "The transcript contains a Bash tool call whose command argument runs `claude plugin validate` with the `--profile directory` option"
+      note: "skills/plugincraft — publish readiness for Anthropic's directory is checked with the official validator's directory profile rather than a hand-maintained checklist."
+  - reports-missing-license:
+      check: "The agent's final message identifies the missing license (no LICENSE file and no license field in plugin.json) as blocking the submission"
+      note: "Regression baseline — the fixture's one directory-blocking defect is the missing license; the readiness verdict must still surface it."
+  - points-to-pre-submission-checklist:
+      check: "The agent's final message links or names the official plugin pre-submission checklist (claude.com/docs/plugins/pre-submission-checklist) as covering checks the CLI does not run"
+      note: "skills/plugincraft — the directory runs a safety scan and policy review beyond the CLI; plugincraft points to the official checklist for those."

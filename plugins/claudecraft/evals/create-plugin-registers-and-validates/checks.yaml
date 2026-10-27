@@ -1,0 +1,13 @@
+checks:
+  - writes-manifest:
+      check: "The transcript contains a file-writing tool call (e.g. Write, or a Bash command such as a redirect) whose target path ends in plugins/pr-helper/.claude-plugin/plugin.json"
+      note: "Regression baseline — plugin creation still lands the manifest at the official layout. Presence anchor for no-hand-edited-marketplace."
+  - runs-marketplace-generator:
+      check: "The transcript contains a Bash tool call that runs plugincraft's marketplace-generate.sh script (the command argument contains marketplace-generate.sh)"
+      note: "skills/plugincraft — registers the new plugin by regenerating marketplace.json from plugin.json files instead of editing the marketplace by hand."
+  - no-hand-edited-marketplace:
+      check: "No Edit, Write, or MultiEdit tool call targets .claude-plugin/marketplace.json"
+      note: "Paired with writes-manifest. marketplace.json entries are derived from each plugin.json by the generator script."
+  - runs-official-validate:
+      check: "The transcript contains a Bash tool call whose command argument contains `claude plugin validate`"
+      note: "skills/plugincraft — schema and manifest validation is delegated to the official CLI validator."

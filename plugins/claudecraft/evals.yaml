@@ -1,0 +1,20 @@
+version: "1"
+min_pass_rate: 0.67
+repeats: 3
+timeout: 900
+max_budget_usd: 60.0
+
+# Plugin-level suite: each scenario names the claudecraft skill it exercises in
+# its prompt, so the routing under test is the skill's own guidance rather than
+# auto-trigger selection between sibling skills.
+scenarios:
+  base:
+    model: claude-sonnet-5
+    max_budget_usd: 5.0
+    project:
+      plugins:
+        - .
+      git_init: true
+    user:
+      oracle_model: claude-haiku-4-5
+      max_turns: 12

@@ -1,0 +1,29 @@
+prompt: |
+  Use skillcraft to create a new project-local skill called `changelog-writer`
+  at .claude/skills/changelog-writer/.
+
+  What it should do: when I ask for release notes or a changelog entry, read
+  `git log` since the last tag and write a Keep a Changelog style section
+  (Added / Changed / Fixed) into CHANGELOG.md.
+
+  Triggers: "write the changelog", "draft release notes", "what changed since
+  the last release". Good output groups commits under those three headings and
+  never invents commits that aren't in the log.
+
+# skill-creator ships in Anthropic's official marketplace; mounting it mirrors
+# an environment where it is available alongside claudecraft. Arrays replace
+# the base value, so the self-reference is restated.
+project:
+  plugins:
+    - .
+    - ~/.claude/plugins/marketplaces/claude-plugins-official/plugins/skill-creator
+
+user:
+  persona: |
+    You want this skill created with as little back-and-forth as possible.
+    Everything you know about it is in your first message. When asked a
+    question, answer briefly from that message; if it isn't covered, say
+    "use your judgment". Approve any plan or draft you are shown. If offered
+    a choice about evals or test cases, pick the option that adds them.
+    If asked to review outputs in a browser viewer, say you'll skip the viewer
+    and to continue.
