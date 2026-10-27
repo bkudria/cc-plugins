@@ -49,7 +49,7 @@ Create, audit, improve, and update Claude Code skills.
 | Mode | Trigger | Workflow |
 |------|---------|----------|
 | Lightweight | Auto-loaded during skill file editing | (inline below) |
-| Create | `/skillcraft` or `/skillcraft <name>`, or "create a skill" | See Create Quick Reference |
+| Create | `/skillcraft` or `/skillcraft <name>`, or "create a skill" | § Create (hands drafting to skill-creator) |
 | Improve | `/skillcraft --improve [path]`, or "audit/improve a skill" | `workflows/improve-standard.md` |
 | Bulk Audit | `/skillcraft --all`, or "audit all skills" | `workflows/improve-bulk.md` |
 | Update | `/skillcraft update`, or "update skillcraft", "sync from sources", "check upstream" | `workflows/update-from-sources.md` |
@@ -118,29 +118,20 @@ When loaded during editing of any file within a skill directory, apply only thes
 
 Report issues inline as suggestions. Do NOT run the full checklist or restructure the skill.
 
-## Create Quick Reference
+## Create
 
-| Phase | Purpose | User Interaction | Workflow |
-|-------|---------|-----------------|----------|
-| 1. Discovery | Requirements, success criteria | Interview | `workflows/create-phase1-discovery.md` |
-| 2. Implement | Scaffold, author skill + evals | Plan approval | `workflows/create-phase2-implement.md` |
-| 3. Validate | Structural quality check | Autonomous | `workflows/create-phase3-validate.md` |
-| 4. Refine | Lint, run evals, iterate | Autonomous | `workflows/create-phase4-refine.md` |
+Drafting a new skill belongs to Anthropic's official `skill-creator` skill (`skill-creator:skill-creator`, or `anthropic-skills:skill-creator` where it is built in). Skillcraft hands drafting to it, then adds the craboodle eval coverage the Iron Law requires.
 
-### How to Create
+1. **Draft with skill-creator.** Load it with the Skill tool and follow its intent-capture, interview, and drafting steps — plus its description optimization when the skill auto-triggers. Pass along what is already known (name, purpose, triggers, location, `$ARGUMENTS`) so it does not re-ask.
+2. **Skip skill-creator's eval loop — not evals.** Do not write `evals/evals.json`, run its test prompts, or open its review viewer: this toolchain does not run that format. Skipping that loop does not skip evaluation; step 4 replaces it.
+3. **Validate structure.** Run `${CLAUDE_SKILL_DIR}/scripts/quick-validate.sh <skill-directory>` and fix what it reports.
+4. **Bootstrap craboodle evals.** Run `workflows/bootstrap-evals.md` against the new skill through to a passing run.
 
-Read the workflow file for the current phase. Start at Phase 1 and proceed sequentially.
+Create is not finished when skill-creator's flow ends. Do not report the skill as created until step 4 has written its `evals/<id>/scenario.yaml` files and a craboodle run has completed; the final report includes that run's result.
 
-1. Read `workflows/create-phase1-discovery.md` — Gather requirements, success criteria, triggers
-2. Read `workflows/create-phase2-implement.md` — Plan, scaffold, author skill + evals together
-3. Read `workflows/create-phase3-validate.md` — Structural validation
-4. Read `workflows/create-phase4-refine.md` — Lint, run evals, iterate until passing
+If skill-creator is not available, say so and suggest `/plugin install skill-creator@claude-plugins-official`. Without it, draft the skill by hand against the [official skills docs](https://code.claude.com/docs/en/skills), then continue at step 3.
 
-If `$ARGUMENTS` is provided (and is not `update`, `--improve`, or `--all`), pre-fill the name/topic and start Phase 1 with that context.
-
-### Alternative: Domain Expertise Skills
-
-If the skill covers a broad domain (framework, platform, API, language ecosystem) and requires exhaustive research and multiple workflows, use `workflows/create-domain-expertise.md` instead of the standard 4-phase path.
+For a skill covering a broad domain (framework, platform, API), check the thresholds in `references/router-pattern.md` before drafting; a skill expected to cross them should start as a router.
 
 ## Improve Quick Reference
 
@@ -177,11 +168,6 @@ Consult `references/anti-patterns.md` for 15 common problems across 4 categories
 
 | File | Purpose |
 |------|---------|
-| `workflows/create-phase1-discovery.md` | Requirements, success criteria, triggers |
-| `workflows/create-phase2-implement.md` | Plan, scaffold, author skill + evals |
-| `workflows/create-phase3-validate.md` | Structural validation |
-| `workflows/create-phase4-refine.md` | Lint, run evals, iterate until passing |
-| `workflows/create-domain-expertise.md` | Domain expertise skill creation (research-intensive, router-pattern) |
 | `workflows/bootstrap-evals.md` | Add eval coverage to an existing skill |
 | `workflows/improve-standard.md` | Full audit of one skill (6-step workflow) |
 | `workflows/improve-bulk.md` | Audit every installed skill with summary table |
@@ -191,15 +177,13 @@ Consult `references/anti-patterns.md` for 15 common problems across 4 categories
 
 ## Reference Files
 
+The skill format itself — frontmatter fields, string substitutions, dynamic context, invocation control — is documented in the [official skills docs](https://code.claude.com/docs/en/skills). Fetch them rather than relying on memory; the files below cover what the docs do not.
+
 | File | Purpose |
 |------|---------|
-| `references/official-spec.md` | Official Anthropic skill specification |
-| `references/frontmatter-reference.md` | Complete catalog of all SKILL.md frontmatter fields |
-| `references/skill-templates.md` | Starter templates by skill type |
 | `references/writing-style.md` | Voice, tone, and formatting rules for skill content |
 | `references/interactive-tui.md` | Best practices for using interactive TUI tools in skills |
 | `references/resource-usage.md` | Guide for using scripts/, references/, workflows/, and assets/ directories (incl. background Workflow scripts) |
-| `references/dynamic-context.md` | Backtick-bang syntax, argument substitution, and string substitutions |
 | `references/naming-conventions.md` | Skill naming, description construction, trigger phrase design |
 | `references/dependencies.md` | Handling inter-skill and external tool dependencies |
 | `references/quality-checklist.md` | Complete 44-item validation checklist (8 categories) |
@@ -215,7 +199,6 @@ Consult `references/anti-patterns.md` for 15 common problems across 4 categories
 
 | Script | Purpose |
 |--------|---------|
-| `scripts/scaffold.sh` | Scaffold a new skill directory with SKILL.md, references, evals (optional), and provenance (optional) |
 | `scripts/quick-validate.sh` | Automated structural validation (fast pre-flight) |
 | `scripts/check-upstream.sh` | Check upstream sources for changes; optionally update provenance metadata |
 | `scripts/post-integration-check.sh` | Post-integration content quality validation |

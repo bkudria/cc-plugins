@@ -67,28 +67,17 @@ curation_decisions:
         gum/fzf/interactive-tmux were transitive through advanced-ask). Added
         claude-code-evals as a sibling-in-plugin dep and gh as a direct dep. Scripts
         Quick Pre-flight code block updated to use ${CLAUDE_SKILL_DIR} for self-references.
-  # ── Reference files ──────────────────────────────────────────────
-  references/official-spec.md:
-    - source: official-docs
-      sections: ["*"]
-      decision: simplified
-      rationale: >-
-        Kept all spec content. Trimmed visualization walkthrough example and troubleshooting section for brevity. Added --add-dir section, skill access restriction section, updated budget description (2026-02-24).
-        Added bundled skills section and ${CLAUDE_SKILL_DIR} substitution (2026-03-05).
-  references/frontmatter-reference.md:
-    - source: official-docs
-      sections: [frontmatter-reference, string-substitutions]
-      decision: kept
-      rationale: >-
-        Core field table and substitutions from official docs. Added user-invocable clarification (2026-02-24).
     - source: anthropic-skills
-      sections: [SKILL.md#progressive-disclosure]
-      decision: synthesized
-      rationale: Progressive disclosure strategy guidance.
-    - source: compound-engineering
-      sections: [references/official-spec.md, references/skill-structure.md]
-      decision: synthesized
-      rationale: Added trade-off notes and common field combinations.
+      sections: [skills/skill-creator/SKILL.md]
+      decision: altered
+      rationale: >-
+        2026-10-27: Create mode now hands drafting and description optimization to
+        skill-creator itself, skipping its evals.json loop, then bootstraps craboodle
+        evals. Removed the 4-phase create workflows, domain-expertise workflow,
+        scaffold.sh, and skill-templates.md. Removed the local copies of the official
+        docs (official-spec.md, frontmatter-reference.md, dynamic-context.md) in
+        favor of linking code.claude.com/docs/en/skills.
+  # ── Reference files ──────────────────────────────────────────────
   references/writing-style.md:
     - source: anthropic-skills
       sections: [SKILL.md#writing-guidelines]
@@ -135,16 +124,6 @@ curation_decisions:
         Added description trigger testing section with eval query design guidance from
         Anthropic's description optimization workflow. Kept query design principles,
         elided Python tooling (2026-03-05).
-  references/skill-templates.md:
-    - decision: original
-      rationale: >-
-        Templates are original. Inspired by compound-engineering templates but fully rewritten as generic skill-type starters (knowledge, workflow, tool, hybrid).
-    - source: pcvelz-superpowers
-      sections: [Skill-Types]
-      decision: synthesized
-      rationale: >-
-        Added Technique, Pattern, and Reference skill types from writing-skills
-        taxonomy. Added type comparison table. Original 4 types unchanged.
   references/interactive-tui.md:
     - decision: original
       rationale: >-
@@ -174,16 +153,6 @@ curation_decisions:
       sections: [SKILL.md#bundled-resources]
       decision: altered
       rationale: Restructured and expanded resource type guidance.
-  references/dynamic-context.md:
-    - source: official-docs
-      sections: [dynamic-context-injection, string-substitutions]
-      decision: synthesized
-      rationale: >-
-        Backtick-bang syntax and string substitutions from official docs. Corrected 2026-02-24: backtick-bang works in body text, not in a context frontmatter array. Removed incorrect context-array pattern.
-    - source: compound-engineering
-      sections: [SKILL.md#dynamic-features]
-      decision: synthesized
-      rationale: Use case patterns and best practices.
   references/anti-patterns.md:
     - source: compound-engineering
       sections: [SKILL.md#anti-patterns, references/best-practices.md]
@@ -257,27 +226,6 @@ curation_decisions:
         (discipline/technique/pattern/reference), and rationalization table. Original
         6 testing areas preserved intact.
   # ── Workflow files (all original) ────────────────────────────────
-  workflows/create-phase1-discovery.md:
-    - decision: original
-      rationale: Original interview-driven discovery process.
-    - decision: altered
-      rationale: >-
-        Packaged into claudecraft plugin (2026-05-19). Step 3 rewritten: replaced
-        the ask-form.sh four-field TUI form with conversational batched questions
-        for name/purpose/triggers plus an AskUserQuestion call for the binary
-        location field.
-  workflows/create-phase2-implement.md:
-    - decision: original
-      rationale: Phase 2 of the 4-phase Create workflow — authoring the skill (SKILL.md, references, scripts). Replaced earlier phase2-design and phase4-author when the create path was consolidated from 6 phases to 4.
-  workflows/create-phase3-validate.md:
-    - decision: original
-      rationale: Phase 3 of the 4-phase Create workflow — validating the skill via quality-checklist.md and quick-validate.sh. Replaced earlier phase3-scaffold and phase5-validate when the create path was consolidated from 6 phases to 4.
-  workflows/create-phase4-refine.md:
-    - decision: original
-      rationale: Phase 4 of the 4-phase Create workflow — iterating based on eval results and validation feedback. Replaced earlier phase6-eval when the create path was consolidated from 6 phases to 4.
-  workflows/create-domain-expertise.md:
-    - decision: original
-      rationale: Original alternative path for broad domain skills.
   workflows/improve-standard.md:
     - decision: original
       rationale: Original 6-step audit workflow.
@@ -318,14 +266,6 @@ curation_decisions:
         selection) rewritten from ask-file.sh to AskUserQuestion-with-top-candidates
         + conversational fallback. Step 7 validation bash block uses ${CLAUDE_SKILL_DIR}.
   # ── Scripts (all original) ──────────────────────────────────────
-  scripts/scaffold.sh:
-    - decision: original
-      rationale: Original scaffolding script.
-    - decision: altered
-      rationale: >-
-        2026-05-21: --evals delegates to `craboodle init` instead of writing
-        evals/craboodle.yaml + evals/base.yaml inline. Source of truth for the
-        evals.yaml template now lives in craboodle itself (src/commands/init.ts).
   scripts/quick-validate.sh:
     - decision: original
       rationale: Original structural validation script.

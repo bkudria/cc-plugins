@@ -99,8 +99,6 @@ When suggesting fixes, consult these references:
 
 | File | Use During Audit |
 |------|-----------------|
-| `references/official-spec.md` | Verify compliance against official Anthropic spec |
-| `references/frontmatter-reference.md` | Fix frontmatter issues (M1-M8) |
-| `references/skill-templates.md` | Suggest template-based restructuring |
+| [Official skills docs](https://code.claude.com/docs/en/skills) | Verify spec compliance and fix frontmatter issues (M1-M8) |
 | `references/writing-style.md` | Fix writing style issues (C1) |
 | `references/naming-conventions.md` | Fix naming issues (M1, M3) |

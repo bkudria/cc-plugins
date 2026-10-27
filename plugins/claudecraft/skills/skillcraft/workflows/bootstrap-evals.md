@@ -18,7 +18,7 @@ Check `~/.claude/skills/`, `~/.claude/plugins/*/skills/`, and `.claude/skills/` 
 
 Check the skill's `evals/` directory status:
 - **No `evals/` directory** — proceed to Step 2.
-- **`evals/` exists with TODO placeholders only** (from `scaffold.sh`) — proceed to Step 2; Step 5 will handle the existing stubs.
+- **`evals.yaml` exists with no scenarios yet** (from `craboodle init`) — proceed to Step 2; Step 5 will reuse the existing scaffold.
 - **`evals/` exists with real scenarios** (non-placeholder prompts and checks) — this workflow does not apply. Use Tier 1 or Tier 2 from `references/testing-guide.md` instead.
 
 ## Step 2: Read & Classify
@@ -92,9 +92,9 @@ This creates `evals.yaml` with `version: "1"`, commented pipeline knobs (`min_pa
 1. **Fill in `scenarios.base`** — under `scenarios.base` in `evals.yaml`, add model, tools, and inject the skill under test via `project.skills`. The `tools:` array must include both scuttlerun's defaults (run `scuttlerun --help` for the current list) **plus** every tool you noted in Step 2 — listing your additions alone replaces the defaults rather than extending them. Omitting a tool the skill mandates doesn't just fail at smoke-run — it produces misleading check failures attributed to the skill, so never trim the list to bound cost (see `claude-code-evals/references/config-type-patterns.md` § Skills). Run `scuttlerun --help` for the full schema. For how `scenarios.base`, `scenario.yaml`, CLI flags, and scuttlerun defaults compose (deep-merge for objects, replace for arrays, defaults applied last), see `claude-code-evals/references/config-precedence.md`.
 2. **Edit the pipeline knobs in `evals.yaml` (top level)** — uncomment `min_pass_rate` and set a reachable value. Reachable pass rates are `k/(checks × reps)`; e.g. with 3 checks × 1 rep the only reachable values are `{0, 0.33, 0.67, 1.0}`, so `0.8` would collapse to requiring a perfect `1.0`.
 
-### If `evals/` exists from scaffolding
+### If `evals.yaml` already exists from `craboodle init`
 
-The `scaffold.sh` script (when run with `--evals`) created `evals.yaml` (via `craboodle init`) with `version: "1"`, commented pipeline knobs, and a commented `scenarios.base` template. No scenario directories are scaffolded (scenarios are created fresh in Step 6 for exactly the behaviors you want to test). Use what's there:
+An earlier `craboodle init` created `evals.yaml` with `version: "1"`, commented pipeline knobs, and a commented `scenarios.base` template. No scenario directories are scaffolded (scenarios are created fresh in Step 6 for exactly the behaviors you want to test). Use what's there:
 
 1. **Review `scenarios.base` in `evals.yaml`** — verify (or fill in) model and tools, and inject the skill under test via `project.skills`. Adjust if needed.
 2. **Edit pipeline knobs at the top level of `evals.yaml`** — set `min_pass_rate` to a reachable value for your check count × rep count (rates are `k/(checks × reps)`; `0.8` at 3 checks × 1 rep is unreachable and acts as `1.0`).

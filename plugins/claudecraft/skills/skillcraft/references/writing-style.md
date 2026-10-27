@@ -129,9 +129,9 @@ See `references/naming-conventions.md` for token compression techniques and CSO 
 
 | File | Purpose |
 |------|---------|
-| `references/frontmatter-reference.md` | Complete catalog of all frontmatter fields |
+| `references/naming-conventions.md` | Skill naming and description construction |
 | `references/writing-style.md` | Voice, tone, and formatting rules |
-| `scripts/scaffold.sh` | Creates skill directory structure |
+| `scripts/quick-validate.sh` | Automated structural validation |
 ```
 
 ---
