@@ -17,6 +17,6 @@ scenarios:
       oracle_model: claude-haiku-5-5
       max_turns: 3
       persona: |
-        You asked the agent to change a skill's frontmatter. If it asks a
+        You asked the agent which frontmatter a skill should have. If it asks a
         clarifying question, answer briefly and consistently with your original
-        request. The task is done once the SKILL.md file has been edited.
+        request. The task is done once it replies with a frontmatter block.
