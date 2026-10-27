@@ -31,7 +31,7 @@ Replace `<name>` with a plugin name from the catalog below. See per-plugin secti
 Bundles three skills:
 
 - **skillcraft** — discipline and tooling for creating, auditing, improving, and updating skills
-- **claude-code-evals** — reference manual for the `scuttlerun` / `pincenez` / `craboodle` eval pipeline
+- **claude-code-evals** — reference manual for the `scuttlerun` / `pincenez` / `craboodle` eval pipeline, and when to use the official `claude plugin eval` instead
 - **plugincraft** — discipline and tooling for creating, auditing, and publishing whole Claude Code plugins; manages marketplace entries
 
 See [plugins/claudecraft/README.md](plugins/claudecraft/README.md) for the full breakdown of how the three skills relate.
