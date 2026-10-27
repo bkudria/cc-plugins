@@ -24,8 +24,11 @@ checks:
       note: "base/readme (file exists with a heading) passes and is absent from the table; readme-sections is a distinct standard that fails because the README has no Installation/Usage section"
   - count-line-format:
       check: "After the table and a blank line, a single count line of the form `X PASS, Y FAIL, Z SUGG` appears"
-  - plan-items-single-line-imperative:
-      check: "Each item in the remediation plan below the count line is a single-line imperative instruction (e.g. 'Add CLAUDE.md to the project root')"
+  - plan-items-one-action:
+      check: "Each item in the remediation plan below the count line asks for one action: a single fix to make, e.g. 'Add CLAUDE.md to the project root'. One verb applied to a list of things (e.g. 'Add static analysis, dependency auditing, and supply-chain scanning to CI') is one action; an item that strings together separate fixes with their own verbs (e.g. 'Add a gemspec, then document the release process') is not"
+      note: "Judge each item's wording, not display lines: the transcript wraps long text, so a long item may appear split across lines. plan-base-before-public requires the plan to exist, which gives this check items to constrain"
+  - plan-items-no-rationale:
+      check: "No item in the remediation plan below the count line includes a clause explaining why the fix matters (e.g. 'This is needed for coverage-run to pass' or 'so that X')"
   - plan-base-before-public:
       check: "In the remediation plan, all base/ fixes are listed before any public/ fix"
       note: "audit.md step 4 orders the plan by profile sequence, then intra-profile judgement"
