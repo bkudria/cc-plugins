@@ -32,7 +32,7 @@ max_budget_usd: 30.0
 # standards-knowledge overrides this down to a single shot.
 scenarios:
   base:
-    model: claude-sonnet-5
+    model: claude-sonnet-5-5
     additional_tools:
       - Workflow
     timeout: 600
@@ -43,7 +43,7 @@ scenarios:
       skills:
         - .
     user:
-      oracle_model: claude-haiku-4-5
+      oracle_model: claude-haiku-5-5
       max_turns: 20
       persona: |
         You asked the agent to audit this project's standards compliance. The
