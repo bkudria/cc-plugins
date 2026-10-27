@@ -11,7 +11,9 @@ The audit runs in **two collection rounds** plus render:
 
 Suggested standards are gated behind required-pass: round 2 only runs when every required standard from round 1 has status PASS. This saves haiku dispatches on failing audits and keeps the output focused on FAILs.
 
-**GATE — Read-only audit. The audit MUST NOT modify any file in the project under audit, including `project.yaml`. If the runner exits non-zero (schema validation failure, missing project.yaml, etc.), surface its stderr verbatim and halt. Do NOT edit, rewrite, or "migrate" `project.yaml` to make `--collect` succeed — a non-zero runner exit IS the audit result.**
+**GATE — Read-only audit.** Leave every file in the project under audit untouched, `project.yaml` included. An audit that edits its subject reports on a project the user never wrote, so its result means nothing. If the runner exits non-zero (schema validation failure, missing project.yaml, etc.), show its stderr verbatim and stop. A non-zero exit is the audit result, so don't edit, rewrite, or "migrate" `project.yaml` to get `--collect` through.
+
+Paths below are relative to `<skill-dir>`, the skill directory named in SKILL.md. Run each runner verb as its own Bash command that starts with the script's absolute path, so the skill's pre-approved commands match and don't prompt.
 
 ## Steps
 
@@ -20,13 +22,13 @@ Suggested standards are gated behind required-pass: round 2 only runs when every
 First, create a per-audit state directory:
 
 ```bash
-STATE_DIR=$(${CLAUDE_PLUGIN_ROOT}/skills/standards/scripts/run-audit.sh --init) && echo "$STATE_DIR"
+STATE_DIR=$(<skill-dir>/scripts/run-audit.sh --init) && echo "$STATE_DIR"
 ```
 
 Capture `$STATE_DIR` from stdout and use that literal path in every subsequent tool_use — shell variables don't persist across Bash tool_uses, only files do. Then collect the required-scope round:
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/skills/standards/scripts/run-audit.sh --collect <project-root> "$STATE_DIR" --scope required
+<skill-dir>/scripts/run-audit.sh --collect <project-root> "$STATE_DIR" --scope required
 ```
 
 The runner reads `<project-root>/project.yaml` (and exits with a descriptive error if missing — there's no need to pre-read or `cat` it yourself), validates its schema via `lint-project-yaml.sh` (any unknown top-level keys cause `--collect` to fail-fast with the linter's error output before any standards run), walks every YAML in each selected profile's directory, **filters to effective-required standards only** (intrinsic `required: true` OR id in project.yaml's `required:` overrides), executes deterministic `check.script` standards immediately, and writes `<state-dir>/collect-required.json` of the form:
@@ -47,31 +49,48 @@ The runner reads `<project-root>/project.yaml` (and exits with a descriptive err
 
 `suggested_total` is the count of would-have-been-suggested standards that round 1 *deliberately skipped* — render uses it to surface the skipped count if the gate later trips.
 
-**GATE — No prompt extraction. Do NOT write prompt content to bash output, `/tmp/...`, or any side file. The pending entries carry only file *paths* (`prompt_path`, `response_path`) plus `id`/`required`/`description` — never prompt text. That index is exactly what gets handed to the workflow. Do NOT `cat`, `for`-loop dump, or echo any `prompt_path` file through Bash — nor pull its contents into your own context with any file-reading tool (e.g. `Read`, `Grep`, `Glob`); the verifier agents inside the workflow Read those files themselves.**
+**GATE — No prompt extraction.** Keep prompt content out of the main conversation. Each verdict is only trustworthy if a fresh verifier formed it from that one standard's prompt, so the main agent never reads, prints, or copies a `prompt_path` file — not through Bash (`cat`, loops, `echo`), not with a file-reading tool (`Read`, `Grep`, `Glob`), and not into a side file. The pending entries carry only file *paths* (`prompt_path`, `response_path`) plus `id`/`required`/`description`, and that index is all the workflow needs; its verifiers read the prompt files themselves.
 
-Extract the pending index (paths and ids only — no prompt content) and hand it to the verification workflow. The workflow fans out one `model: 'haiku'` verifier per pending entry; each agent Reads its `prompt_path` file, obeys the embedded directive, and Writes `{"met": true|false, "detail": "<one-line>"}` to its `response_path`. The runner has already baked the description, prompt body, and that write-directive into each prompt file. The `parallel()` inside the script makes the fan-out mechanical — there is no per-entry dispatch to drive or count by hand.
+Extract the pending index (paths and ids only) and hand it to the verification workflow. The workflow runs one haiku verifier per pending entry; each reads its `prompt_path` file, follows the directive the runner baked into it, and writes `{"met": true|false, "detail": "<one-line>"}` to its `response_path`. The `parallel()` inside the script does the fan-out, so there is no per-entry dispatch to drive or count by hand.
 
 ```bash
 jq -c '.pending' "$STATE_DIR/collect-required.json"
 ```
 
-If that array is empty (every required standard was deterministic), skip the workflow and go straight to merge. Otherwise dispatch:
+If that array is empty (every required standard was deterministic), skip the workflow and go straight to merge. Otherwise dispatch the plugin's saved workflow by name:
 
 ```
 Workflow({
-  scriptPath: "${CLAUDE_PLUGIN_ROOT}/skills/standards/workflows/verify.js",
+  name: "projects:standards-verify",
   args: { scope: "required", pending: <the array printed by jq above> }
 })
 ```
 
-**The `Workflow` call is non-blocking.** It returns a task id immediately; the fan-out then runs in the background. After invoking it, stop and wait — do not verify any standard yourself, and do not read the prompt or response files. You are re-prompted when the genuine `<task-notification>` arrives with `status: completed`.
+If the tool reports that workflow name as not found (the plugin was loaded from a directory with `--plugin-dir`, which doesn't register plugin workflows), dispatch the same script by path instead, in this round and the next:
 
-**Reconcile the fan-out before merging.** The workflow result carries `requested` and `dispatched` counts (both scalar, so they survive notification truncation). If `dispatched == requested`, every verifier ran — proceed to merge. If `dispatched < requested`, at least `requested − dispatched` verifiers never ran: their `response_path` files are absent, and `--merge` records any missing response as FAIL — so an *undispatched* standard would surface as a false FAIL rather than a real verdict. Before merging, re-dispatch `verify.js` (same `scope`) for just the pending entries whose `response_path` file does not yet exist — test for the file's existence only; do not read its contents (the no-prompt-extraction GATE still holds). Merge once every pending standard has a response. If a standard is still unwritten after a re-dispatch (`dispatched == requested`, yet its response is missing), a verifier genuinely failed to write it — let it merge as a real FAIL per the rule below rather than retrying forever, and say which standard could not be verified.
+```
+Workflow({
+  scriptPath: "<skill-dir>/workflows/verify.js",
+  args: { scope: "required", pending: <the array printed by jq above> }
+})
+```
+
+**If the `Workflow` tool is unavailable, stop the audit here.** It is missing from the tool list (and `ToolSearch` can't load it) when Dynamic workflows are switched off, which is the default on Claude Pro. Don't verify the pending standards yourself or with `Agent` sub-agents: the audit's verdicts depend on one isolated verifier per standard, and an improvised fan-out can't promise that. Instead, tell the user:
+
+- how many prompt-based standards were not verified (the length of the pending array),
+- the deterministic results so far — counts by status from `.resolved` in `collect-required.json`, plus the id and detail of each FAIL,
+- that turning on **Dynamic workflows** in `/config` and re-running the audit will verify the rest.
+
+Skip merge, gate, and render; `--merge` would record every unverified standard as FAIL.
+
+**The `Workflow` call is non-blocking.** It returns a task id immediately and the fan-out runs in the background. After dispatching, wait without verifying any standard yourself and without reading the prompt or response files; you are re-prompted when the `<task-notification>` arrives with `status: completed`.
+
+**Check the fan-out before merging.** The workflow already retries any verifier that died once. Its result carries `requested` and `dispatched` counts plus `failed`, the ids still unverified after the retry. `--merge` records each of those as FAIL (failure to verify is itself a failure), so when `failed` is non-empty, name those standards alongside the rendered result so the user can tell an unverified FAIL from a real one.
 
 Then run merge:
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/skills/standards/scripts/run-audit.sh --merge "$STATE_DIR"
+<skill-dir>/scripts/run-audit.sh --merge "$STATE_DIR"
 ```
 
 The runner reads `collect-required.json` plus each pending entry's response file, validates `met` and `detail`, applies the status rule below, and treats missing files / parse failures / non-bool `met` as `FAIL` regardless of `required:`.
@@ -87,7 +106,7 @@ The runner reads `collect-required.json` plus each pending entry's response file
 Run the gate to decide whether round 2 should run:
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/skills/standards/scripts/run-audit.sh --gate "$STATE_DIR"
+<skill-dir>/scripts/run-audit.sh --gate "$STATE_DIR"
 ```
 
 Exit codes:
@@ -100,12 +119,12 @@ A required prompt-based standard whose sub-agent failed to write a response file
 ### 1c. Collect suggested (only after gate=0)
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/skills/standards/scripts/run-audit.sh --collect <project-root> "$STATE_DIR" --scope suggested
+<skill-dir>/scripts/run-audit.sh --collect <project-root> "$STATE_DIR" --scope suggested
 ```
 
 The runner walks the same profiles but **filters to effective-suggested standards only** (intrinsic `required: false` AND id NOT in project.yaml's `required:` overrides). Output is `<state-dir>/collect-suggested.json` with the same shape as round 1 (minus `suggested_total`).
 
-**GATE — No prompt extraction (round 2). Same rule as round 1: the pending entries carry only `prompt_path`/`response_path`, never prompt text. Do NOT `cat`, `for`-loop dump, or echo any prompt file through Bash — nor read it into your own context with any file-reading tool (e.g. `Read`, `Grep`, `Glob`); the workflow's verifier agents Read them.**
+**GATE — No prompt extraction (round 2).** The round 1 rule holds: the main agent never reads, prints, or copies a prompt file, by Bash or by any file-reading tool. The workflow's verifiers read them.
 
 Extract this round's pending index and hand it to the same workflow with `scope: "suggested"`:
 
@@ -113,19 +132,19 @@ Extract this round's pending index and hand it to the same workflow with `scope:
 jq -c '.pending' "$STATE_DIR/collect-suggested.json"
 ```
 
-If the array is empty, skip the workflow and run merge directly. Otherwise dispatch:
+If the array is empty, skip the workflow and run merge directly. Otherwise dispatch it the same way as round 1 — by name, or by `scriptPath` if round 1 needed the path:
 
 ```
 Workflow({
-  scriptPath: "${CLAUDE_PLUGIN_ROOT}/skills/standards/workflows/verify.js",
+  name: "projects:standards-verify",
   args: { scope: "suggested", pending: <the array printed by jq above> }
 })
 ```
 
-As in round 1 the call is non-blocking: dispatch, then stop and wait for the `<task-notification>`. When it completes, reconcile `dispatched` against `requested` exactly as in round 1 — re-dispatch any pending standard whose `response_path` is still absent before merging. Then run merge again:
+As in round 1 the call is non-blocking: dispatch, wait for the `<task-notification>`, and check `failed` before merging. Then run merge again:
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/skills/standards/scripts/run-audit.sh --merge "$STATE_DIR"
+<skill-dir>/scripts/run-audit.sh --merge "$STATE_DIR"
 ```
 
 The second merge reads BOTH `collect-required.json` and `collect-suggested.json`, unions their resolved/pending arrays, re-reads response files, and writes `merged.json` with `scopes_collected: ["required","suggested"]`.
@@ -133,7 +152,7 @@ The second merge reads BOTH `collect-required.json` and `collect-suggested.json`
 ### 3. Render
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/skills/standards/scripts/run-audit.sh --render "$STATE_DIR"
+<skill-dir>/scripts/run-audit.sh --render "$STATE_DIR"
 ```
 
 The runner emits, in order:
@@ -146,13 +165,13 @@ The runner emits, in order:
 
 The render step never invents `MANUAL`, `SKIP`, or `DISABLED` rows. Every row in the table is `FAIL` or `SUGG`. PASS rows and disabled standards are absent from the table; their existence is signaled only by the count line below the table.
 
-**GATE — Verbatim render. The render phase's stdout — the FAIL/SUGG table, the `X PASS, Y FAIL, Z SUGG` count line, the optional `N standards disabled` line, and the optional `N suggested standards skipped` line — IS the audit. Present it verbatim. Do NOT paraphrase detail cells, prepend headings, or edit the count line into prose. The prioritized fix plan in step 4 is an additional section appended below the runner's output, never a substitute for any of it.**
+**GATE — Verbatim render.** The render phase's stdout is the audit: the FAIL/SUGG table, the `X PASS, Y FAIL, Z SUGG` count line, the optional `N standards disabled` line, and the optional `N suggested standards skipped` line. Present it verbatim: it is the runner's deterministic record of each verdict, and a paraphrased detail cell, an added heading, or a count line rewritten as prose can drop or distort a verdict the user relies on. The prioritized fix plan in step 4 goes below the runner's output as an extra section and never replaces any of it.
 
 ### 4. Synthesize a prioritized fix plan
 
 Below the runner's output, write a **prioritized fix plan**: each item is one line of "do X" guidance, one per FAIL row in the table. Read `$STATE_DIR/merged.json` to look up each failing standard's `description` field — that one-line statement of what the standard verifies — and let it shape the plan item so the guidance addresses the standard's intent, not just the symptom in `detail`. The `description` is for orientation, not verbatim inclusion: the plan item itself is still imperative "do X" guidance.
 
-**GATE — Plan composition. List every FAIL (no upper bound), ordered by the profile sequence in `project.yaml` — e.g., with `profiles: [base, public]`, all `base` FAILs precede all `public` FAILs. Within each profile group, order by your judgement of which fix unlocks the most value (e.g., adding a license is more impactful than adding a code-of-conduct). SUGGs are excluded from the plan whenever any FAIL exists; if zero FAILs exist, list SUGGs using the same profile-then-judgement ordering. If zero FAIL and zero SUGG rows exist, omit the plan entirely.**
+**GATE — Plan composition.** List every FAIL (no upper bound), ordered by the profile sequence in `project.yaml` — e.g., with `profiles: [base, public]`, all `base` FAILs precede all `public` FAILs — so the plan follows the order the project declares its profiles in. Within each profile group, order by which fix unlocks the most value (e.g., adding a license matters more than adding a code-of-conduct). Leave SUGGs out of the plan whenever any FAIL exists, so the plan stays on what blocks the audit; with zero FAILs, list SUGGs using the same profile-then-value ordering. With zero FAIL and zero SUGG rows, omit the plan.
 
 ### 5. Pass/fail signal
 
@@ -161,7 +180,7 @@ The audit **passes** iff the rendered table contains zero `FAIL` rows. `SUGG` ro
 `--render` is a pure formatter and exits **0** on any successful render (including renders that contain `FAIL` rows). The pass/fail signal lives in `--check`:
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/skills/standards/scripts/run-audit.sh --check "$STATE_DIR"
+<skill-dir>/scripts/run-audit.sh --check "$STATE_DIR"
 ```
 
 `--check` exits **0** when the audit passes (no `FAIL` rows), **1** when ≥1 `FAIL` row is present, and **≥2** for operational errors (missing `merged.json`, malformed JSON, unresolved pending entries). CI pipelines use `--check`'s exit code directly without grepping stdout.
@@ -178,7 +197,7 @@ Re-auditing after fixes is a **fresh audit run**, not a resume of this one. Star
 
 ## Notes
 
-- The runner does not invoke sub-agents itself — it only walks YAML, executes scripts, and formats output. The per-standard verification in steps 1a and 1c is delegated to the `verify.js` Workflow, which fans out one verifier agent per pending entry; prompt content stays in the per-entry `prompt_path` files and is never dumped through Bash. The deterministic runner verbs (`--collect`/`--merge`/`--gate`/`--render`/`--check`) run directly and are CI-safe; the verification fan-out needs the Workflow runtime, so a bare-CI run resolves only the deterministic standards.
+- The runner does not invoke sub-agents itself — it only walks YAML, executes scripts, and formats output. The per-standard verification in steps 1a and 1c is delegated to the `projects:standards-verify` workflow (`workflows/verify.js`), which fans out one verifier agent per pending entry; prompt content stays in the per-entry `prompt_path` files and is never dumped through Bash. The deterministic runner verbs (`--collect`/`--merge`/`--gate`/`--render`/`--check`) run directly and are CI-safe; the verification fan-out needs the Workflow runtime, so a bare-CI run resolves only the deterministic standards.
 - Standards are activated by directory listing: every `.yaml` file under `profiles/<profile-name>/` is a standard. To skip a standard for a specific project, list it in the project's `disabled:` map with a non-empty reason — see `references/project-yaml-schema.md`.
 - A standard's *check* is fully described inside its YAML. The only severity knob `project.yaml` can turn is the `required:` list, which upgrades named standards from `SUGG` to `FAIL`. The check itself remains unparameterized. If you need a stricter check, add a separate standard YAML in a profile (e.g., `public/readme-sections.yaml` is a separate file from `base/readme.yaml`).
 - The two-pass flow is the only audit flow. There is no single-pass `--collect` (without `--scope`); it errors clearly. The state-dir holds `collect-required.json` (always written), `collect-suggested.json` (only after gate=0), and `merged.json` (rebuilt on each `--merge` from the union of present collect files).

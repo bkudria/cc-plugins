@@ -1,7 +1,12 @@
 ---
 name: standards
-description: "Manage project standards compliance — audit existing projects or scaffold new ones. Triggers: \"audit this project\", \"project audit\", \"check compliance\", \"new project\", \"scaffold project\", \"project setup\"."
+description: "Audit a project's standards compliance against its project.yaml profiles, or scaffold a new project that meets them."
+when_to_use: "Use when the user says \"audit this project\", \"project audit\", \"check compliance\", \"new project\", \"scaffold project\", or \"project setup\", or wants to create or update a project.yaml."
 argument-hint: "[audit|scaffold]"
+allowed-tools:
+  - Bash(${CLAUDE_SKILL_DIR}/scripts/run-audit.sh *)
+  - Bash(${CLAUDE_SKILL_DIR}/scripts/lint-project-yaml.sh *)
+  - Workflow(projects:standards-verify)
 ---
 
 # Standards
@@ -9,6 +14,8 @@ argument-hint: "[audit|scaffold]"
 Manage project standards compliance through `project.yaml` — a per-project configuration file that declares which **profiles** (directories under `profiles/`) apply, optionally which inherited standards are **disabled** (with a reason), and optionally which suggested standards are **required** (severity upgraded from `SUGG` to `FAIL`). Projects without `project.yaml` are not tracked.
 
 Each standard is a self-contained YAML file under `profiles/<profile>/`: it declares whether it's required, a one-line description, and exactly one of `check.script` (deterministic shell) or `check.prompt` (sub-agent verification). Standard identity in audits is `<profile>/<basename>`.
+
+Skill directory: `${CLAUDE_SKILL_DIR}`. The workflow files write paths as `<skill-dir>/…`; resolve them against this directory.
 
 ## When to Use
 
@@ -28,6 +35,7 @@ Each standard is a self-contained YAML file under `profiles/<profile>/`: it decl
 
 - **yq** — YAML processing for reading project.yaml and standard YAMLs (`brew install yq`)
 - **jq** — JSON processing for runner output (`brew install jq`)
+- **Dynamic workflows** — audits verify prompt-based standards through the plugin's `projects:standards-verify` workflow. On Claude Pro, workflows are off until **Dynamic workflows** is turned on in `/config`.
 
 ## Reference Files
 

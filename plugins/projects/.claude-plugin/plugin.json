@@ -6,6 +6,7 @@
   "repository": "https://github.com/bkudria/cc-plugins",
   "homepage": "https://github.com/bkudria/cc-plugins/tree/main/plugins/projects",
   "keywords": ["standards", "audit", "scaffold", "compliance", "project", "profiles"],
+  "workflows": "./skills/standards/workflows/verify.js",
   "author": {
     "name": "Benjamin Kudria"
   }

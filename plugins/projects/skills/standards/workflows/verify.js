@@ -3,7 +3,7 @@ export const meta = {
   description: 'Fan out one verifier sub-agent per pending standard: each reads its rendered prompt file, verifies the standard against the project, and writes a {met,detail} JSON verdict to its response file for run-audit.sh --merge to read.',
   whenToUse: 'Invoked by the standards audit (workflows/audit.md) after --collect has rendered the pending prompt files. Called once per scope — required, then (if the gate passes) suggested.',
   phases: [
-    { title: 'Verify', detail: 'one haiku agent per pending standard, in parallel; each writes its response file' },
+    { title: 'Verify', detail: 'one haiku agent per pending standard, in parallel, with one retry for any that die; each writes its response file' },
   ],
 }
 
@@ -50,7 +50,7 @@ const dispatchVerifier = (p) =>
     '3. The response file is the ONLY output that matters; your chat reply is ignored. ' +
     'Do not write the verdict anywhere else, and do not skip the Write.\n\n' +
     'Standard id: ' + p.id,
-    { label: 'verify:' + p.id, phase: 'Verify', model: 'haiku' }
+    verifierOptions(p.id)
   )
 
 /* test-seam:pure-fn:start */
@@ -65,13 +65,30 @@ const countDispatched = (results) => results.filter(ran).length
 // bare number. Pairs each result with its pending entry by position.
 const failedIds = (results, pending) =>
   pending.filter((_, i) => !ran(results[i])).map((p) => p.id)
+// Each check is narrow, so verifiers use the cheap tier. Effort is pinned to high
+// because at lower effort haiku more often takes a tool's exit code at face value, and
+// an unpinned agent inherits whatever effort the calling session runs at.
+const verifierOptions = (id) => ({ label: 'verify:' + id, phase: 'Verify', model: 'haiku', effort: 'high' })
+const diedIndices = (results) => results.flatMap((r, i) => (ran(r) ? [] : [i]))
+const mergeRetried = (results, indices, retried) => {
+  const merged = results.slice()
+  indices.forEach((idx, k) => { merged[idx] = retried[k] })
+  return merged
+}
 /* test-seam:pure-fn:end */
 
-const results = await parallel(pending.map((p) => () => dispatchVerifier(p)))
+const firstPass = await parallel(pending.map((p) => () => dispatchVerifier(p)))
+// One retry for verifiers that died (e.g. a transient API error), so they don't
+// surface at --merge as a false FAIL.
+const died = diedIndices(firstPass)
+if (died.length) log('Retrying ' + died.length + ' verifier(s) that did not complete.')
+const results = died.length
+  ? mergeRetried(firstPass, died, await parallel(died.map((i) => () => dispatchVerifier(pending[i]))))
+  : firstPass
 const dispatched = countDispatched(results)
 const failed = failedIds(results, pending)
 if (failed.length) {
-  log(failed.length + ' verifier(s) failed to dispatch (' + failed.join(', ') + '); ' +
+  log(failed.length + ' verifier(s) failed after a retry (' + failed.join(', ') + '); ' +
     '--merge treats any missing response file as FAIL (failure to verify is itself a failure).')
 }
 log('Dispatched ' + dispatched + '/' + pending.length + ' verifier(s) for scope "' + scope + '".')
