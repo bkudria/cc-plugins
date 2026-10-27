@@ -1,0 +1,47 @@
+prompt: |
+  Audit the two skills under skills/ (report-gen and deploy-helper) for
+  problems with their `allowed-tools` frontmatter. Don't edit anything; reply
+  with your findings for each skill.
+
+project:
+  git_init: true
+  files:
+    skills/report-gen/SKILL.md: |
+      ---
+      name: report-gen
+      description: Generate a weekly status report from the project's changelog. Use when writing the weekly status report.
+      allowed-tools: Bash(scripts/report.sh *)
+      ---
+
+      # Report Gen
+
+      ## When to Use
+
+      - Writing the weekly status report
+
+      ## Steps
+
+      1. Read CHANGELOG.md and note the entries from the past week.
+      2. Run `scripts/report.sh <date>` to collect open issues.
+      3. Edit reports/<date>.md to add the summary.
+    skills/report-gen/scripts/report.sh: |
+      #!/usr/bin/env bash
+      # Usage: report.sh <date> — prints open issues for the report
+      gh issue list --state open
+    skills/deploy-helper/SKILL.md: |
+      ---
+      name: deploy-helper
+      description: Deploy the staging environment. Use when deploying to staging.
+      allowed-tools: Bash, Write
+      ---
+
+      # Deploy Helper
+
+      ## When to Use
+
+      - Deploying to staging
+
+      ## Steps
+
+      1. Run `make deploy-staging`.
+      2. Write the deploy log to logs/deploy.log.
