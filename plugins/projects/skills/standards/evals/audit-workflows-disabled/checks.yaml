@@ -1,0 +1,24 @@
+context: |
+  The agent was asked to audit a TypeScript project (profiles: [base]) in a
+  session where the Workflow tool is unavailable, as it is on Claude Pro while
+  Dynamic workflows are switched off in /config. The deterministic
+  run-audit.sh verbs still run via Bash, but the prompt-based standards can only
+  be verified by the workflow's fan-out, which cannot start. The Agent tool is
+  available. The expected behavior is to stop after collecting and tell the user
+  how to enable workflows, without verifying prompt-based standards any other way.
+checks:
+  - collect-ran:
+      check: "A Bash call to scripts/run-audit.sh with the --collect verb appears in the transcript"
+      note: "Presence anchor: the deterministic round still runs, which gives no-agent-fanout and no-response-files-written something to constrain"
+  - no-agent-fanout:
+      check: "The transcript contains no Agent (sub-agent) tool call"
+      note: "Improvising a sub-agent fan-out when the Workflow tool is missing is the failure being guarded against; the audit has no sanctioned Agent-based path"
+  - no-response-files-written:
+      check: "No Write call and no Bash command writes a file under a responses/ directory of the audit state dir"
+      note: "Verdict files come only from the workflow's verifiers; the main agent writing them would be fabricating verdicts"
+  - no-prompt-file-read:
+      check: "No tool call reads a file under a prompts/ directory of the audit state dir (e.g. a Read whose path is under prompts/, or a Bash cat/head on a prompts/ path)"
+  - names-dynamic-workflows-setting:
+      check: "The agent's reply to the user names the Dynamic workflows setting in /config as the thing to turn on"
+  - says-prompt-standards-unverified:
+      check: "The agent's reply to the user states that the prompt-based (judgment) standards were not verified in this run"
