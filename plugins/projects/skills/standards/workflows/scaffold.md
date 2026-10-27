@@ -2,7 +2,7 @@
 
 > **References:** `references/project-yaml-schema.md` (full schema), `profiles/` (every standard YAML in each profile directory describes what that profile activates).
 
-**STOP. Do not create any files until the interview is complete and project.yaml is written.**
+**STOP — interview first.** Create no files until the interview is complete and `project.yaml` is written. The profiles the user picks decide which files the scaffold creates, so any file written before their answers is a guess that may not match them.
 
 Scaffold mode has a strict ordering. The first file written must be `project.yaml`. Every other file is created based on what `project.yaml`'s selected profiles activate.
 
@@ -42,7 +42,7 @@ disabled:
 
 Anything else (`name`, `description`, `language`, `status`, `visibility`, per-standard knobs like `tests.framework` or `license.spdx`) fails lint. The standards inspect the project directly to figure out what they need.
 
-After writing `project.yaml`, run `${CLAUDE_PLUGIN_ROOT}/skills/standards/scripts/lint-project-yaml.sh <project-root>/project.yaml`. Lint must exit 0 before continuing.
+After writing `project.yaml`, run `<skill-dir>/scripts/lint-project-yaml.sh <project-root>/project.yaml`. Lint must exit 0 before continuing.
 
 ## Step 3: Create standard files
 
