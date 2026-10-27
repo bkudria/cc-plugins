@@ -4,11 +4,23 @@ notes: |
   Runtime-verification standard. Executes the project's linter and reports
   the result. Distinct from `linter`, which only checks that a linter is
   configured.
+
+  The linter must be one the project itself declares, so the verdict does
+  not depend on what happens to be installed on the auditing machine. A run
+  that examines no files proves nothing about the code, so it is unmet.
 check:
   prompt: |
     Verify that the linter for the project at $PROJECT_ROOT runs and
-    passes. Determine the linter from manifest files and conventional
-    project-root configuration, then execute it without modifying the
-    working tree (no auto-fix). Report met (with the issue count, e.g.,
-    "0 issues") or unmet (with the issue count and a brief summary of
-    the most common categories).
+    passes. Use only a linter the project itself declares: one named in
+    its manifest (a dependency, dev-dependency group, or script) or
+    configured in a project-root config file, or a linter built into the
+    project's language toolchain (e.g. `go vet`, `cargo clippy`). A linter
+    that is merely installed on the machine does not count. Execute it
+    without modifying the working tree (no auto-fix).
+
+    Report met (with the linter, the number of files checked, and the
+    issue count, e.g. "ruff: 12 files, 0 issues") or unmet. Report unmet
+    when the project declares no linter (say so, e.g. "no linter declared
+    or configured"), when the run checks zero files (say so, e.g. "ruff
+    found no files to check"), or when issues are found (with the issue
+    count and a brief summary of the most common categories).
