@@ -1,0 +1,27 @@
+prompt: |
+  Update the frontmatter of skills/report-gen/SKILL.md so the skill:
+  1. runs at high effort,
+  2. only loads automatically when I'm working with files under src/,
+  3. can never call AskUserQuestion while it's active.
+  Keep everything else as is.
+
+project:
+  git_init: true
+  files:
+    skills/report-gen/SKILL.md: |
+      ---
+      name: report-gen
+      description: Generate a weekly status report from the project's changelog and open issues.
+      ---
+
+      # Report Gen
+
+      ## When to Use
+
+      - Writing the weekly status report
+
+      ## Steps
+
+      1. Read CHANGELOG.md and summarize entries from the past week.
+      2. Group open issues by label.
+      3. Write the report to reports/<date>.md.

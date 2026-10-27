@@ -1,0 +1,22 @@
+version: "1"
+min_pass_rate: 1.0
+repeats: 3
+max_budget_usd: 15.0
+
+scenarios:
+  base:
+    model: claude-sonnet-5-5
+    timeout: 600
+    max_budget_usd: 2.0
+    sandbox:
+      enabled: false
+    project:
+      skills:
+        - .
+    user:
+      oracle_model: claude-haiku-5-5
+      max_turns: 3
+      persona: |
+        You asked the agent to change a skill's frontmatter. If it asks a
+        clarifying question, answer briefly and consistently with your original
+        request. The task is done once the SKILL.md file has been edited.
