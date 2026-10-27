@@ -96,38 +96,39 @@ If the reference is stale: remove or fix it.
 
 ---
 
-## PX4: Command `allowed-tools` Matches Body Usage
+## PX4: Command `allowed-tools` Is No Broader Than Body Usage
+
+`allowed-tools` pre-approves tools: listed tools run without a permission prompt. It does not limit which tools the command can use, so a tool the body uses but the field omits still works, with a prompt. The coherence risk runs the other way: entries broader than what the body does.
 
 ### Detection
 
-For each `commands/*.md`, extract the `allowed-tools` value and the tools the body instructs:
+For each `commands/*.md`, compare the `allowed-tools` entries with the tools the body instructs:
 
 ```bash
 for cmd in commands/*.md; do
-  declared=$(awk '/^---$/,/^---$/' "$cmd" \
+  declared=$(awk 'NR==1 && /^---$/ {f=1; next} f && /^---$/ {exit} f' "$cmd" \
     | grep -E '^allowed-tools:' | sed 's/allowed-tools://' \
-    | tr -d '[],"' | tr ' ' '\n' | grep -v '^$' | sort -u)
+    | tr -d '[]"' | tr ',' '\n' | sed 's/^ *//; s/ *$//' | grep -v '^$')
   [ -z "$declared" ] && continue
   body=$(awk '/^---$/{c++; next} c>=2' "$cmd")
-  for tool in Read Write Edit Bash Glob Grep Skill Agent AskUserQuestion WebFetch WebSearch; do
-    if echo "$body" | grep -qE "\b${tool}\b"; then
-      echo "$declared" | grep -qx "$tool" || echo "$cmd uses $tool but allowed-tools excludes it"
-    fi
-  done
+  while IFS= read -r entry; do
+    tool=${entry%%(*}
+    [ "$entry" = "Bash" ] && echo "$cmd pre-approves bare Bash: any shell command runs without a prompt"
+    echo "$body" | grep -qE "\b${tool}\b" || echo "$cmd pre-approves $entry but the body never uses $tool"
+  done <<< "$declared"
 done
 ```
 
 ### False Positives
 
-- The body mentions a tool name in passing (e.g., "do NOT use the Bash tool here"). The check should treat negated uses gently — surface as a warning, not a fail.
-- The body shows an example transcript that uses a tool the command itself doesn't invoke.
+- The body runs a command without naming the `Bash` tool ("run `make test`"), so a scoped `Bash(make test)` entry looks unused. Check for the command itself before flagging.
+- A command that genuinely needs arbitrary shell access can justify bare `Bash`; surface it as a warning and let the author confirm.
 
 ### Fix Recipe
 
-If the body genuinely needs the tool: add it to `allowed-tools`.
-If the body mentions the tool only in passing or shows it in an unrelated example: leave `allowed-tools` alone; the warning is a false positive.
-If `allowed-tools` is unset, this check does not apply — the command has access to all tools.
-
+If an entry is broader than the body needs: narrow it to the command pattern the body runs (e.g. `Bash(scripts/check.sh *)`).
+If the body never uses an entry: remove it.
+If `allowed-tools` is unset, this check does not apply: every tool works under normal permission prompts.
 ---
 
 ## PX5: No Name Collisions Between Components

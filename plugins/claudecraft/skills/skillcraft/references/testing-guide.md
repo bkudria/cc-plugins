@@ -239,7 +239,7 @@ Edit SKILL.md --> test manually --> run /skillcraft --improve --> fix findings -
 | Trigger tuning | Edit `description` -> restart -> test phrases -> repeat |
 | Script debugging | Run in terminal -> fix -> test via skill -> repeat |
 | Reference extraction | Move to references/ -> link from SKILL.md -> `/skillcraft --improve` |
-| Tool restriction | Add `allowed-tools` -> invoke -> fix permission errors -> repeat |
+| Tool pre-approval | Add scoped `allowed-tools` -> invoke -> confirm only the expected calls skip the prompt -> repeat |
 
 ### Post-iteration validation
 
