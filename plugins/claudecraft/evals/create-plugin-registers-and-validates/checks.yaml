@@ -6,7 +6,7 @@ checks:
       check: "The transcript contains a Bash tool call that runs plugincraft's marketplace-generate.sh script (the command argument contains marketplace-generate.sh)"
       note: "skills/plugincraft — registers the new plugin by regenerating marketplace.json from plugin.json files instead of editing the marketplace by hand."
   - no-hand-edited-marketplace:
-      check: "No Edit, Write, or MultiEdit tool call targets .claude-plugin/marketplace.json"
+      check: "No tool call writes directly to .claude-plugin/marketplace.json (e.g. via Edit, Write, MultiEdit, or a Bash command such as a redirect or `sed -i`); the only change to that file comes from running marketplace-generate.sh"
       note: "Paired with writes-manifest. marketplace.json entries are derived from each plugin.json by the generator script."
   - runs-official-validate:
       check: "The transcript contains a Bash tool call whose command argument contains `claude plugin validate`"

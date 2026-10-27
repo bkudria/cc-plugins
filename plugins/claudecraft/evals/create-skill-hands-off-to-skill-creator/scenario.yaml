@@ -10,6 +10,10 @@ prompt: |
   the last release". Good output groups commits under those three headings and
   never invents commits that aren't in the log.
 
+# Drafting, validating, and bootstrapping a craboodle suite in one session
+# overran scuttlerun's 50-turn default.
+max_turns: 120
+
 # skill-creator ships in Anthropic's official marketplace; mounting it mirrors
 # an environment where it is available alongside claudecraft. Arrays replace
 # the base value, so the self-reference is restated.
