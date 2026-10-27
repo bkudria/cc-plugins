@@ -12,18 +12,19 @@
 #   PM1: plugin.json exists at .claude-plugin/
 #   PM2: Valid JSON
 #   PM3: Required name field
-#   PM4: Name is kebab-case
 #   PM5: Description length 10-1024
 #   PM6: Version is semver (if present)
 #   PS1: Standard component directories (only canonical names)
 #   PS2: Components at plugin root, NOT inside .claude-plugin/
 #   PS3: ${CLAUDE_PLUGIN_ROOT} in hooks.json/.mcp.json path references
 #   PS5: Component dirs/files use kebab-case
-#   PR1: README.md exists at plugin root
+#   PR1: README.md exists at plugin root (`claude plugin validate` checks this only
+#        under --profile directory)
 #
 # Optional (only when applicable):
 #   MK1: Plugin appears in parent marketplace.json's plugins[] (when parent marketplace exists)
 #
+# Left to `claude plugin validate --strict`: PM4 and component frontmatter/JSON.
 # Deferred to improve-standard.md (not in pre-flight): PC, PX, PR2-4, MK2-3, PB.
 
 set -euo pipefail
@@ -108,15 +109,6 @@ validate_plugin() {
     else
         fail "PM3" "name field missing or empty"
         name_value=""
-    fi
-
-    # PM4: name is kebab-case
-    if [[ -n "$name_value" ]]; then
-        if echo "$name_value" | grep -qE '^[a-z0-9]([a-z0-9-]*[a-z0-9])?$'; then
-            pass "PM4" "name is kebab-case"
-        else
-            fail "PM4" "name '$name_value' is not lowercase kebab-case"
-        fi
     fi
 
     # PM5: description length 10-1024

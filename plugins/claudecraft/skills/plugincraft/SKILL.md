@@ -22,18 +22,18 @@ Create, audit, ship, and maintain Claude Code plugins.
 | Mode | Trigger | Workflow |
 |------|---------|----------|
 | Lightweight | Auto-loaded during plugin file editing | (inline below) |
-| Create | `/plugincraft` or `/plugincraft <name>`, or "create a plugin" | (coming in PR 3 — falls back to inline guidance) |
+| Create | `/plugincraft` or `/plugincraft <name>`, or "create a plugin" | § Create below |
 | Improve | `/plugincraft --improve [path]`, or "audit/improve a plugin" | `workflows/improve-standard.md` |
 | Bulk Audit | `/plugincraft --all`, or "audit all my plugins" | `workflows/improve-bulk.md` |
 | Bootstrap Evals | "add evals", "add plugin evals", "bootstrap evals", "bootstrap plugin evals", "write evals for" | `workflows/bootstrap-evals.md` |
-| Marketplace Generate | `/plugincraft marketplace`, or "regenerate marketplace.json" | `scripts/marketplace-generate.sh` (interactive workflow doc coming later) |
-| Publish | `/plugincraft --publish [path]`, or "is this plugin ready to publish" | (coming in PR 4 — falls back to inline guidance) |
+| Marketplace Generate | `/plugincraft marketplace`, or "regenerate marketplace.json" | `scripts/marketplace-generate.sh` |
+| Publish | `/plugincraft --publish [path]`, or "is this plugin ready to publish" | § Publish Readiness below |
 
 **Mode selection**: If the request mentions "audit all", "bulk", "every plugin", or "check all plugins", use **Bulk Audit**. If it mentions auditing, reviewing, or improving a specific plugin (single name), use **Improve**. If the request asks to add, bootstrap, or write evals for a plugin (e.g. "add plugin evals", "bootstrap evals for this plugin"), use **Bootstrap Evals**. If it mentions regenerating the marketplace, syncing marketplace entries, or fixing marketplace drift, use **Marketplace Generate**. If it mentions publish-readiness, "ready to ship", or release prep, use **Publish**. If it specifies a concrete edit to make on a plugin file (e.g., "add a hook to my plugin"), use **Lightweight** mode — the edit is covered by the inline checks. Otherwise default to **Create**.
 
 ### Testing Discipline
 
-For skills contained inside a plugin, plugincraft delegates to `skillcraft` — every skill audit goes through skillcraft's `improve-standard` workflow and its Iron Law applies. For plugin-level (multi-component bundle) evaluation, see the Plugins entry in `claude-code-evals`' What Can Be Evaluated table. Plugincraft-the-skill itself does not yet ship its own evals; they will be bootstrapped via skillcraft once plugincraft's design stabilizes.
+For skills contained inside a plugin, plugincraft delegates to `skillcraft` — every skill audit goes through skillcraft's `improve-standard` workflow and its Iron Law applies. For plugin-level (multi-component bundle) evaluation, see `claude-code-evals` § Choosing a Runner and its What Can Be Evaluated table. Plugincraft's own routing (Create, Publish) is covered by claudecraft's plugin-level suite in `evals/` at the plugin root.
 
 ## Lightweight Mode (Auto-trigger)
 
@@ -48,6 +48,27 @@ When loaded during editing of any file within a plugin directory, apply only the
 
 Report issues inline as suggestions. Do NOT run the full checklist or restructure the plugin.
 
+## Create
+
+1. **Scaffold with the official tooling.** Pick the first that fits:
+   - plugin-dev is enabled → run `/plugin-dev:create-plugin <description>` and follow its flow.
+   - A personal plugin that should load in every session → `claude plugin init <name>` (scaffolds under `~/.claude/skills/<name>/`; `--with skills,hooks,...` adds component stubs).
+   - Otherwise (e.g. a plugin inside a marketplace repo) → create the directory by hand following the [official layout](https://code.claude.com/docs/en/plugins/create): `.claude-plugin/plugin.json` (`name`, `description`, `version`, `license`, `author`), components at the plugin root, a `README.md` with an install line.
+2. **Author skills through skillcraft.** For each skill the plugin ships, use skillcraft's Create mode.
+3. **Register in the marketplace.** If a parent `.claude-plugin/marketplace.json` exists, run `${CLAUDE_PLUGIN_ROOT}/skills/plugincraft/scripts/marketplace-generate.sh` from the marketplace root. Do not hand-edit `plugins[]` — entries are derived from each `plugin.json` (see `references/marketplace-spec.md` for the fields the generator preserves).
+4. **Validate.** Run `claude plugin validate --strict <plugin-dir>` and `${CLAUDE_PLUGIN_ROOT}/skills/plugincraft/scripts/quick-validate.sh <plugin-dir>`; fix what either reports. When a marketplace exists, also run `claude plugin validate --strict <marketplace-root>`.
+5. **Offer evals.** Ask whether to bootstrap eval coverage now (`workflows/bootstrap-evals.md`).
+
+## Publish Readiness
+
+1. **Run the official checks.** For Anthropic's plugin directory: `claude plugin validate --strict --profile directory <plugin-dir>`. For your own marketplace only: `claude plugin validate --strict <plugin-dir>` plus the marketplace root.
+2. **Run what the CLI skips.** `scripts/quick-validate.sh <plugin-dir>`, then checklist items PB1, PB3, PR2-PR4, and MK2-MK3 from `references/quality-checklist.md`.
+3. **Report.** List blockers first (anything the directory profile marks as refusing a submission), then warnings. End every readiness report with this line, so a clean CLI run is never read as approval:
+
+   > **Not checked locally:** Anthropic's directory also runs a safety scan and a policy review. Work through the official pre-submission checklist before submitting: https://claude.com/docs/plugins/pre-submission-checklist
+
+   For release mechanics (versioning, tags, updates), point to the [publish docs](https://code.claude.com/docs/en/plugins/publish).
+
 ## Improve Quick Reference
 
 | Mode | Scope | Workflow |
@@ -60,20 +81,21 @@ Report issues inline as suggestions. Do NOT run the full checklist or restructur
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/skills/plugincraft/scripts/quick-validate.sh <plugin-directory>
 ${CLAUDE_PLUGIN_ROOT}/skills/plugincraft/scripts/quick-validate.sh --all
+claude plugin validate --strict <plugin-directory>
 ```
 
 ## Delegation, Not Duplication
 
-Plugincraft complements rather than duplicates upstream tools. See `references/delegation-map.md` for the full mapping. Summary:
+Plugincraft complements rather than duplicates the official tooling. See `references/delegation-map.md` for the full mapping. Summary:
 
 | Concern | Delegated to |
 |---|---|
-| Manifest and component schema depth | `plugin-dev`'s `plugin-validator` agent |
-| Per-skill audit inside a plugin | `skillcraft`'s `improve-standard` workflow |
-| Component knowledge during Create | `plugin-dev`'s component skills (`plugin-structure`, `hook-development`, etc.) — PR 3 |
-| Agent generation during Create | `plugin-dev`'s `agent-creator` agent — PR 3 |
+| Manifest and component schema, README presence, license | `claude plugin validate --strict` |
+| Anthropic directory submission rules | `claude plugin validate --strict --profile directory` |
+| Scaffolding | `/plugin-dev:create-plugin` when enabled, `claude plugin init` for personal plugins, the official layout docs otherwise |
+| Per-skill creation and audit inside a plugin | `skillcraft` |
 
-Plugincraft owns the gaps: cross-component coherence (PX), marketplace coherence (MK), README quality (PR), publish readiness (PB), plugin-level anti-patterns, bulk audit, and marketplace generation.
+Plugincraft owns the gaps: structural pre-flight, cross-component coherence (PX), marketplace coherence and generation (MK), README depth (PR2-PR4), the publish-readiness items the CLI skips (PB1, PB3), plugin-level anti-patterns, and bulk audit.
 
 ## Anti-Pattern Detection
 
@@ -83,32 +105,33 @@ For skill-level anti-patterns inside a plugin, delegate to `skillcraft/reference
 
 ## Dependencies
 
-- **jq** — JSON processing (`brew install jq`). Required by `scripts/quick-validate.sh` and detection recipes in `references/component-coherence.md`.
+- **Claude Code CLI** — `claude plugin validate` (and `claude plugin init` when scaffolding a personal plugin).
+- **jq** — JSON processing (`brew install jq`). Required by `scripts/quick-validate.sh`, `scripts/marketplace-generate.sh`, and detection recipes in `references/component-coherence.md`.
 - **git** — used by `workflows/improve-standard.md` to surface recently-touched plugins as audit candidates.
-- **skillcraft** (sibling skill in this plugin) — hard dependency. Plugincraft's `improve-standard` workflow loads skillcraft for per-skill audits inside the plugin under review.
-- **plugin-dev** (Anthropic's official plugin) — soft dependency. Plugincraft's `improve-standard` invokes `plugin-dev`'s `plugin-validator` agent for manifest and component schema depth. When not installed, plugincraft warns once per workflow invocation and falls back to its own (shallower) PM/PC checks. Install with: `/plugin install plugin-dev@claude-plugins-official`.
+- **skillcraft** (sibling skill in this plugin) — hard dependency for every skill inside a plugin.
+- **plugin-dev** (Anthropic's official plugin) — optional. When enabled, Create uses `/plugin-dev:create-plugin` and its component skills; nothing requires it.
 
 ## Reference Files
 
 | File | Purpose |
 |------|---------|
-| `references/quality-checklist.md` | 33-item validation checklist across 8 categories (PM/PS/PC/PX/PR/MK/PB/PE) |
+| `references/quality-checklist.md` | 33-item validation checklist across 8 categories (PM/PS/PC/PX/PR/MK/PB/PE), marking which items `claude plugin validate` covers |
 | `references/anti-patterns.md` | 14 plugin-level anti-patterns across 4 categories |
 | `references/component-coherence.md` | Detection recipes and fix shapes for the PX category |
-| `references/delegation-map.md` | What plugincraft delegates to upstream tools and what it owns directly |
+| `references/delegation-map.md` | What plugincraft delegates to official tooling and what it owns directly |
 | `references/marketplace-spec.md` | `marketplace.json` schema and what `marketplace-generate.sh` preserves vs rewrites |
 
 ## Scripts
 
 | Script | Purpose |
 |--------|---------|
-| `scripts/quick-validate.sh` | Fast structural validation (PM, PS, PR1, MK1). Pre-flight before the full audit. |
+| `scripts/quick-validate.sh` | Fast structural checks `claude plugin validate --strict` does not run (PM5, PM6, PS, PR1, MK1). Pre-flight before the full audit. |
 | `scripts/marketplace-generate.sh` | Regenerate `.claude-plugin/marketplace.json` from constituent `plugin.json` files. Supports `--check` (dry-run, exit 1 on drift) and default-apply. |
 
 ## Workflows
 
 | File | Purpose |
 |------|---------|
-| `workflows/improve-standard.md` | 7-step audit of one plugin: pre-flight → plugin-validator → per-skill skillcraft → PX/PR/MK/PB/PE → anti-patterns → report → fix loop |
+| `workflows/improve-standard.md` | 7-step audit of one plugin: pre-flight → `claude plugin validate` → per-skill skillcraft → PX/PR/MK/PB/PE → anti-patterns → report → fix loop |
 | `workflows/improve-bulk.md` | Iterate every installed plugin, produce a summary table, optionally enter fix loops for selected plugins |
 | `workflows/bootstrap-evals.md` | 10-step guided bootstrap of plugin-level eval coverage: select → catalog components → delegate per-skill bootstrap to skillcraft → bundle scenarios → interview → pipeline config → scenarios → lint → run → iterate |

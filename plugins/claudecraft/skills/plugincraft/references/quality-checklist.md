@@ -4,31 +4,35 @@
 
 Apply all checks when running a full audit. For lightweight mode, apply only PM1, PM2, PS1, PS2, PR1, and (when a parent marketplace.json exists) MK1.
 
-Delegations: PC checks are intentionally light because Anthropic's `plugin-dev` plugin's `plugin-validator` agent covers component-level depth. The `improve-standard` workflow runs `plugin-validator` first and reports its findings under PC; this checklist treats PC as a smoke layer.
+Delegations: items marked **Covered by** are checked by `claude plugin validate --strict` (add `--profile directory` for Anthropic's directory rules). The `improve-standard` workflow runs it and reports its findings under those IDs; check them by hand only when the CLI is unavailable.
 
 ---
 
 ## Plugin Manifest (PM1-PM6)
 
 ### PM1: plugin.json Exists
+- **Covered by**: `claude plugin validate` (reports a missing manifest)
 - **Check**: Plugin directory contains `.claude-plugin/plugin.json`
 - **Pass**: File exists at `<plugin-dir>/.claude-plugin/plugin.json`
 - **Fail**: File missing, or located at plugin root instead of inside `.claude-plugin/`
 - **Fix**: Create `.claude-plugin/plugin.json` (the `.claude-plugin/` directory is required even for single-component plugins)
 
 ### PM2: Valid JSON
+- **Covered by**: `claude plugin validate` (reports JSON syntax errors)
 - **Check**: `plugin.json` parses as valid JSON
 - **Pass**: `jq . .claude-plugin/plugin.json` exits 0
 - **Fail**: Parse error, trailing commas, comments, or unquoted keys
 - **Fix**: Run through `jq` and fix the reported error
 
 ### PM3: Required Name Field
+- **Covered by**: `claude plugin validate` (reports a missing `name`)
 - **Check**: `plugin.json` has a `name` field that is a non-empty string
 - **Pass**: `"name": "my-plugin"` present
 - **Fail**: Missing, empty, or non-string
 - **Fix**: Add a `name` field matching the plugin directory name
 
 ### PM4: Name Is Kebab-Case
+- **Covered by**: `claude plugin validate --strict` (warns on non-kebab-case names)
 - **Check**: `name` is lowercase kebab-case, no spaces or underscores
 - **Pass**: `my-plugin`, `code-review-helper`
 - **Fail**: `MyPlugin`, `my_plugin`, `My Plugin`
@@ -84,7 +88,7 @@ Delegations: PC checks are intentionally light because Anthropic's `plugin-dev` 
 
 ## Plugin Components (PC1-PC4)
 
-These checks are deliberately shallow. The `improve-standard` workflow delegates component-level depth to `plugin-dev`'s `plugin-validator` agent. PC here is a smoke layer that catches things the workflow needs to know before deep checks can run.
+These checks are deliberately shallow; `claude plugin validate` covers component frontmatter and JSON parsing. PC1 is the one it does not run.
 
 ### PC1: Declared Skills Have SKILL.md
 - **Check**: Every directory under `skills/` contains a `SKILL.md` file
@@ -93,28 +97,31 @@ These checks are deliberately shallow. The `improve-standard` workflow delegates
 - **Fix**: Add the missing `SKILL.md`, or remove the empty directory
 
 ### PC2: Commands And Agents Have Frontmatter
+- **Covered by**: `claude plugin validate` (reports files with no frontmatter block)
 - **Check**: Every `commands/*.md` and `agents/*.md` starts with YAML frontmatter delimited by `---`
 - **Pass**: File begins `---\nname: ...\n---`
 - **Fail**: No frontmatter, malformed YAML, or unclosed delimiter
 - **Fix**: Add `---`-delimited YAML frontmatter with at least a `name` field
 
 ### PC3: `hooks.json` Parses
+- **Covered by**: `claude plugin validate` (reports `hooks/hooks.json` that does not parse)
 - **Check**: If `hooks.json` exists at plugin root, it parses as valid JSON
 - **Pass**: `jq . hooks.json` exits 0
 - **Fail**: Parse error
-- **Fix**: Run through `jq` and fix the reported error. Then run `plugin-validator` for schema validation.
+- **Fix**: Run through `jq` and fix the reported error, then re-run `claude plugin validate`.
 
 ### PC4: `.mcp.json` Parses
+- **Covered by**: `claude plugin validate` (reports `.mcp.json` that does not parse)
 - **Check**: If `.mcp.json` exists at plugin root, it parses as valid JSON
 - **Pass**: `jq . .mcp.json` exits 0
 - **Fail**: Parse error
-- **Fix**: Run through `jq` and fix the reported error. Then run `plugin-validator` for schema validation.
+- **Fix**: Run through `jq` and fix the reported error, then re-run `claude plugin validate`.
 
 ---
 
 ## Cross-Component Coherence (PX1-PX6)
 
-These checks look across components — what `plugin-validator` cannot easily see when validating each component in isolation. See `component-coherence.md` for detection recipes.
+These checks look across components — what `claude plugin validate` does not check when validating each component in isolation. See `component-coherence.md` for detection recipes.
 
 ### PX1: Agent References Existing Skills
 - **Check**: When an agent's description mentions invoking a skill, that skill exists in this plugin or is documented as an external dependency
@@ -157,6 +164,7 @@ These checks look across components — what `plugin-validator` cannot easily se
 ## Plugin README (PR1-PR4)
 
 ### PR1: README Exists At Plugin Root
+- **Covered by**: `claude plugin validate --profile directory` (refuses a missing README or one under 40 words)
 - **Check**: `README.md` exists at the plugin root (NOT inside `.claude-plugin/`)
 - **Pass**: `<plugin-dir>/README.md` present
 - **Fail**: Missing, or only inside `.claude-plugin/`
@@ -217,6 +225,7 @@ These checks gate the decision to publish a plugin to a shared marketplace or wi
 - **Fix**: Bump version to `0.1.0` once the plugin is usable end-to-end
 
 ### PB2: LICENSE File At Plugin Root
+- **Covered by**: `claude plugin validate --profile directory` (refuses a plugin with no LICENSE file and no `license` field)
 - **Check**: `LICENSE` (or `LICENSE.md`, `LICENSE.txt`) exists at the plugin root
 - **Pass**: A license file present
 - **Fail**: No license — users cannot legally redistribute or modify
@@ -229,6 +238,7 @@ These checks gate the decision to publish a plugin to a shared marketplace or wi
 - **Fix**: Add `CHANGELOG.md` with at least the current version. Keep-A-Changelog format is conventional.
 
 ### PB4: Install Instructions Explicit
+- **Covered by**: `claude plugin validate --strict <marketplace-root>` (warns when a plugin's README has no install line)
 - **Check**: README's Installation section gives copy-pasteable commands, not just "install this plugin"
 - **Pass**: Shows the exact `/plugin install` command or marketplace-add steps
 - **Fail**: Hand-wavy "add to your marketplace and install"
@@ -241,7 +251,7 @@ These checks gate the decision to publish a plugin to a shared marketplace or wi
 PE1 is a filesystem check; it does not require external tools. See `references/component-coherence.md` § PE1 for the detection recipe.
 
 ### PE1: Plugin Has Eval Suite
-- **Check**: Plugin has `evals.yaml` at the plugin root and at least one `evals/<id>/scenario.yaml`
-- **Pass**: Eval suite scaffolded with at least one real scenario
-- **Fail**: No `evals.yaml`, or no `evals/<id>/scenario.yaml` files (only the bare scaffold)
+- **Check**: Plugin ships an eval suite in either format: craboodle (`evals.yaml` at the plugin root plus at least one `evals/<id>/scenario.yaml`) or `claude plugin eval` (at least one `<eval dir>/<case>/prompt.md` or `case.yaml`)
+- **Pass**: At least one real case or scenario exists
+- **Fail**: Neither format has a real case (only a bare scaffold, or nothing)
 - **Fix**: Bootstrap evals via `workflows/bootstrap-evals.md` (delegate: `Skill tool: load plugincraft` then follow the 10-step bootstrap)

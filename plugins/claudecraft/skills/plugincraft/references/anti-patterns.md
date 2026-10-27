@@ -371,7 +371,7 @@ description: Audits code using deep-analyzer (install separately from acme/cc-pl
 }
 ```
 
-**Fix**: Cross-check matcher and command intent. Use `plugin-dev`'s `hook-development` skill for the canonical matcher list and the JSON shape each matcher delivers.
+**Fix**: Cross-check matcher and command intent. The [hooks reference](https://code.claude.com/docs/en/hooks) has the canonical matcher list and the JSON shape each event delivers.
 
 ---
 

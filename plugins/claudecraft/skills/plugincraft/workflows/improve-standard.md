@@ -1,6 +1,6 @@
 # Standard Plugin Audit
 
-Full audit of a single Claude Code plugin. Aggregates findings from delegated tools (`plugin-validator` agent, `skillcraft` per skill) with plugincraft's own cross-component, marketplace, README, and publish-readiness checks.
+Full audit of a single Claude Code plugin. Aggregates findings from delegated tools (`claude plugin validate`, `skillcraft` per skill) with plugincraft's own cross-component, marketplace, README, and publish-readiness checks.
 
 ## Quick Pre-flight (Optional)
 
@@ -11,7 +11,7 @@ ${CLAUDE_PLUGIN_ROOT}/skills/plugincraft/scripts/quick-validate.sh <plugin-direc
 ${CLAUDE_PLUGIN_ROOT}/skills/plugincraft/scripts/quick-validate.sh --all
 ```
 
-This catches PM/PS/PR1/MK1 issues without invoking delegated tools or doing deep coherence analysis. Use it before the full audit to fail fast on obvious structural problems.
+This catches PM5, PM6, PS, PR1, and MK1 issues without invoking delegated tools or doing deep coherence analysis. Use it before the full audit to fail fast on obvious structural problems.
 
 ## Step 1: Select Target Plugin
 
@@ -48,23 +48,16 @@ Run these in order. Each produces its own report that becomes part of the final 
 ${CLAUDE_PLUGIN_ROOT}/skills/plugincraft/scripts/quick-validate.sh <plugin-dir>
 ```
 
-Captures PM, PS, PR1, MK1. If it fails (exit 1), surface the failures up front in the final report — they likely explain other downstream issues.
+Captures PM5, PM6, PS, PR1, MK1. If it fails (exit 1), surface the failures up front in the final report — they likely explain other downstream issues.
 
-### 3b. `plugin-validator` agent (when plugin-dev is installed)
+### 3b. `claude plugin validate`
 
-Invoke via the Agent tool:
-
-```
-Agent({
-  subagent_type: "plugin-validator",
-  description: "Plugin schema and component validation",
-  prompt: "Validate the plugin at <absolute-path-to-plugin-dir>. Report any schema, manifest, or component issues. Return findings in a structured form (issue id, severity, location, suggested fix)."
-})
+```bash
+claude plugin validate --strict --profile directory <plugin-dir>
+claude plugin validate --strict <marketplace-root>   # only when a parent marketplace exists
 ```
 
-The `plugin-validator` agent covers manifest and component schema depth — see `references/delegation-map.md` for what it owns vs. what plugincraft adds.
-
-**Fallback when plugin-dev is not installed**: skip 3b. Warn once: `plugin-dev is not installed; running plugincraft-only checks. Install with: /plugin install plugin-dev@claude-plugins-official`. The PM/PC categories in plugincraft's own checklist provide partial coverage.
+Covers every checklist item marked **Covered by** in `references/quality-checklist.md` (manifest, component frontmatter and JSON, README, license, install line). Report its findings under those IDs. Drop `--profile directory` for a plugin that will never be submitted to Anthropic's directory, and say so in the report.
 
 ### 3c. `skillcraft` per contained skill
 
@@ -83,9 +76,9 @@ After delegations, run only the checklist categories not already covered. From `
 | Category | IDs | Focus | Coverage |
 |---|---|---|---|
 | Cross-Component Coherence | PX1-PX6 | Dangling refs, hook paths, MCP names, tool consistency, name collisions, trigger overlap | Plugincraft only — see `references/component-coherence.md` for detection recipes |
-| Plugin README | PR1-PR4 | Existence (covered by pre-flight), sections, env vars, component listing | PR1 from pre-flight; PR2-PR4 here |
+| Plugin README | PR1-PR4 | Existence, sections, env vars, component listing | PR1 from `claude plugin validate`; PR2-PR4 here |
 | Marketplace | MK1-MK3 | Listed in `plugins[]` (covered by pre-flight), description matches, source resolves | MK1 from pre-flight; MK2-MK3 here, only when parent marketplace exists |
-| Publish Readiness | PB1-PB4 | Version, license, changelog, install instructions | Plugincraft only |
+| Publish Readiness | PB1-PB4 | Version, license, changelog, install instructions | PB2, PB4 from `claude plugin validate`; PB1, PB3 here |
 | Plugin Evals | PE1 | Eval suite exists | Plugincraft only — see `references/component-coherence.md` § PE1 for the detection recipe |
 
 For PX, walk every check using the detection recipes in `references/component-coherence.md`. For MK2 specifically, compare the marketplace entry's `description` field byte-for-byte with `plugin.json`'s `description` field.
@@ -105,14 +98,14 @@ Structure the aggregated report as:
 ```
 ## Plugin Audit: <plugin-name>
 
-**Score: X/Y checks passed** (across plugincraft's 32 checks; delegated reports counted separately)
+**Score: X/Y checks passed** (across plugincraft's 33 checks; delegated reports counted separately)
 
 ### Strengths
 - (Things the plugin does well worth preserving)
 
 ### Passed
 - PM1, PM2, ... (one-line list of passed plugincraft check IDs)
-- plugin-validator: (one-line summary of plugin-validator's pass count, if it ran)
+- claude plugin validate: (one-line summary — passed, or error/warning counts)
 - skillcraft on skills/<name>: (one-line summary per skill audited)
 
 ### Issues
@@ -132,8 +125,8 @@ Structure the aggregated report as:
 
 ### Delegated Reports
 
-**plugin-validator** (only when 3b ran):
-<paste plugin-validator's report verbatim under a fenced block, or summarize key issues>
+**claude plugin validate**:
+<paste its output verbatim under a fenced block, or summarize key issues>
 
 **skillcraft on skills/<name>** (one block per skill):
 <paste each per-skill audit under a fenced block; if any skill failed critically, surface the worst at the top of Issues>
@@ -149,9 +142,9 @@ For each issue (critical first, then warnings, then suggestions), present the fi
 
 One `AskUserQuestion` call per issue. Process the user's choice before moving to the next finding.
 
-For issues from delegated reports (plugin-validator, skillcraft), route the fix back to the delegated tool's normal fix path:
+For issues from delegated reports (`claude plugin validate`, skillcraft), route the fix back to the delegated tool's normal fix path:
 
-- `plugin-validator` findings → fix directly per its suggestions, then re-run `plugin-validator` to confirm.
+- `claude plugin validate` findings → fix per its `Fix:` lines, then re-run it to confirm.
 - `skillcraft` findings → route into `skillcraft`'s own interactive fix loop (its `improve-standard.md` Step 5).
 
 ## Output
