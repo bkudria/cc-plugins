@@ -54,10 +54,10 @@ Report issues inline as suggestions. Do NOT run the full checklist or restructur
    - plugin-dev is enabled → run `/plugin-dev:create-plugin <description>` and follow its flow.
    - A personal plugin that should load in every session → `claude plugin init <name>` (scaffolds under `~/.claude/skills/<name>/`; `--with skills,hooks,...` adds component stubs).
    - Otherwise (e.g. a plugin inside a marketplace repo) → create the directory by hand following the [official layout](https://code.claude.com/docs/en/plugins/create): `.claude-plugin/plugin.json` (`name`, `description`, `version`, `license`, `author`), components at the plugin root, a `README.md` with an install line.
-2. **Author skills through skillcraft.** For each skill the plugin ships, use skillcraft's Create mode.
+2. **Author skills through skillcraft.** For each skill the plugin ships, run skillcraft's Create steps 1-3 (draft with skill-creator, skip its eval loop, validate structure). Do not bootstrap evals here — step 5 offers eval coverage for the whole plugin, its skills included.
 3. **Register in the marketplace.** If a parent `.claude-plugin/marketplace.json` exists, run `${CLAUDE_PLUGIN_ROOT}/skills/plugincraft/scripts/marketplace-generate.sh` from the marketplace root. Do not hand-edit `plugins[]` — entries are derived from each `plugin.json` (see `references/marketplace-spec.md` for the fields the generator preserves).
 4. **Validate.** Run `claude plugin validate --strict <plugin-dir>` and `${CLAUDE_PLUGIN_ROOT}/skills/plugincraft/scripts/quick-validate.sh <plugin-dir>`; fix what either reports. When a marketplace exists, also run `claude plugin validate --strict <marketplace-root>`.
-5. **Offer evals.** Ask whether to bootstrap eval coverage now (`workflows/bootstrap-evals.md`).
+5. **Offer evals.** Ask the user whether to add eval coverage now, before writing any eval file. On yes, run skillcraft's `workflows/bootstrap-evals.md` for each skill, then this skill's `workflows/bootstrap-evals.md` for bundle scenarios. On no, finish and list the skills that still lack evals.
 
 ## Publish Readiness
 

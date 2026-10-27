@@ -45,6 +45,8 @@ Claude Code ships its own eval runner, `claude plugin eval` ([docs](https://code
 
 The official runner also brings a built-in no-plugin baseline (Δ), MCP server mocks, a cost ceiling, and CI exit codes.
 
+**One exception: skillcraft's own eval steps.** When skillcraft's Create step 4 or its Behavioral Edit Testing gate is what calls for evals, use craboodle even for a skill inside a plugin — that gate snapshots `evals/*/scenario.yaml` suites with `craboodle run`. Every other request to eval a plugin, including one that targets a single skill in it, follows the table above.
+
 **Official case layout**: `evals/<case>/prompt.md` (frontmatter such as `max_turns`, `allowed_tools`; body is the prompt) plus one grader per file in `evals/<case>/graders/*.md` (frontmatter sets `type:`, that type's options, and an optional `weight:`; an `llm` grader's body is its PASS/FAIL rubric). `claude plugin eval init` runs an authoring interview and writes cases; `claude plugin eval init --bare <name>` writes a blank one. Run with `claude plugin eval .` from the plugin root. To assert a skill fired, use a `tool_used` grader with `tool: Skill` and an `input_match` regex on the skill name.
 
 **Both runners use `evals/` by default.** When a plugin already has a craboodle suite there, put official cases in a separate directory and pass `--eval-dir <dir>` to both `init` and the run.

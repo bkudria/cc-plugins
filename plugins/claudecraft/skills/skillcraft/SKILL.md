@@ -125,9 +125,9 @@ Drafting a new skill belongs to Anthropic's official `skill-creator` skill (`ski
 1. **Draft with skill-creator.** Load it with the Skill tool and follow its intent-capture, interview, and drafting steps — plus its description optimization when the skill auto-triggers. Pass along what is already known (name, purpose, triggers, location, `$ARGUMENTS`) so it does not re-ask.
 2. **Skip skill-creator's eval loop — not evals.** Do not write `evals/evals.json`, run its test prompts, or open its review viewer: this toolchain does not run that format. Skipping that loop does not skip evaluation; step 4 replaces it.
 3. **Validate structure.** Run `${CLAUDE_SKILL_DIR}/scripts/quick-validate.sh <skill-directory>` and fix what it reports.
-4. **Bootstrap craboodle evals.** Run `workflows/bootstrap-evals.md` against the new skill through to a passing run.
+4. **Bootstrap craboodle evals.** Run `workflows/bootstrap-evals.md` against the new skill through to a passing run. Use craboodle even for a skill that ships in a plugin: the Behavioral Edit Testing gate reads `evals/*/scenario.yaml` suites, so every later edit depends on one.
 
-Create is not finished when skill-creator's flow ends. Do not report the skill as created until step 4 has written its `evals/<id>/scenario.yaml` files and a craboodle run has completed; the final report includes that run's result.
+Create is not finished when skill-creator's flow ends. Do not report the skill as created until step 4 has written its `evals/<id>/scenario.yaml` files and a craboodle run has completed; the final report includes that run's result. The one exception is plugincraft's Create, which runs steps 1-3 per skill and offers evals for the whole plugin itself.
 
 If skill-creator is not available, say so and suggest `/plugin install skill-creator@claude-plugins-official`. Without it, draft the skill by hand against the [official skills docs](https://code.claude.com/docs/en/skills), then continue at step 3.
 
