@@ -1,0 +1,67 @@
+prompt: |
+  Audit this project against its standards. The project is the current working
+  directory; its project.yaml declares `profiles: [base]`. Run the audit and
+  show the results.
+
+project:
+  git_init: true
+  files:
+    project.yaml: |
+      profiles:
+        - base
+      disabled:
+        base/coverage-run: "No coverage plugin is installed in this fixture's environment."
+    pyproject.toml: |
+      [project]
+      name = "example-py"
+      version = "0.1.0"
+      requires-python = ">=3.11"
+
+      [dependency-groups]
+      dev = ["pytest>=8", "ruff>=0.6"]
+
+      [tool.ruff]
+      line-length = 100
+
+      [tool.ruff.lint]
+      select = ["E", "F"]
+
+      [tool.pytest.ini_options]
+      testpaths = ["tests"]
+      pythonpath = ["src"]
+    src/example_py/__init__.py: |
+      def add(a: int, b: int) -> int:
+          return a + b
+    tests/test_add.py: |
+      from example_py import add
+
+
+      def test_add() -> None:
+          assert add(2, 3) == 5
+    README.md: |
+      # example-py
+
+      A small Python project.
+    .gitignore: |
+      __pycache__/
+      *.pyc
+    LICENSE: |
+      MIT License
+
+      Copyright (c) 2026 Example Author
+
+      Permission is hereby granted, free of charge, to any person obtaining a
+      copy of this software and associated documentation files (the "Software"),
+      to deal in the Software without restriction.
+    CLAUDE.md: |
+      # example-py
+
+      Guidance for working in this repository.
+    GOALS.md: |
+      # Goals
+
+      Why this project exists.
+    SPEC.md: |
+      # Specification
+
+      What this project does.
