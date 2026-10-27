@@ -76,15 +76,15 @@ test('failedIds of an empty fan-out is empty', () => {
 })
 
 // Verifier agent options. Each standard's check is narrow, so verifiers run on the
-// cheap haiku tier; effort is pinned to medium because at low effort haiku is more
-// likely to stop early or skip a check in an agent loop, and an unpinned agent would
-// inherit whatever effort the calling session happens to run at.
+// cheap haiku tier. Effort is pinned to high: at lower effort haiku more often takes a
+// tool's exit code at face value (e.g. passing a lint run over a project with no source
+// files), and an unpinned agent would inherit whatever effort the calling session runs at.
 const { verifierOptions, diedIndices, mergeRetried } = helpers
 
-test('verifierOptions pins verifiers to haiku at medium effort', () => {
+test('verifierOptions pins verifiers to haiku at high effort', () => {
   const o = verifierOptions('base/lockfile')
   assert.equal(o.model, 'haiku')
-  assert.equal(o.effort, 'medium')
+  assert.equal(o.effort, 'high')
 })
 
 test('verifierOptions labels the agent by standard id under the Verify phase', () => {

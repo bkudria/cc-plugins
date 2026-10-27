@@ -65,10 +65,10 @@ const countDispatched = (results) => results.filter(ran).length
 // bare number. Pairs each result with its pending entry by position.
 const failedIds = (results, pending) =>
   pending.filter((_, i) => !ran(results[i])).map((p) => p.id)
-// Each check is narrow, so verifiers use the cheap tier. Effort is pinned because at
-// low effort haiku is more likely to stop early or skip a check, and an unpinned agent
-// inherits whatever effort the calling session runs at.
-const verifierOptions = (id) => ({ label: 'verify:' + id, phase: 'Verify', model: 'haiku', effort: 'medium' })
+// Each check is narrow, so verifiers use the cheap tier. Effort is pinned to high
+// because at lower effort haiku more often takes a tool's exit code at face value, and
+// an unpinned agent inherits whatever effort the calling session runs at.
+const verifierOptions = (id) => ({ label: 'verify:' + id, phase: 'Verify', model: 'haiku', effort: 'high' })
 const diedIndices = (results) => results.flatMap((r, i) => (ran(r) ? [] : [i]))
 const mergeRetried = (results, indices, retried) => {
   const merged = results.slice()
