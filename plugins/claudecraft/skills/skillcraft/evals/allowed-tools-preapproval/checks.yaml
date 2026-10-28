@@ -1,0 +1,20 @@
+context: |
+  The agent audited two fixture skills' `allowed-tools` frontmatter without
+  editing them. `allowed-tools` pre-approves the listed tools so they run
+  without a permission prompt during the invoking turn; tools not listed stay
+  available under normal permission rules. report-gen pre-approves only its own
+  script (`Bash(scripts/report.sh *)`); its Read and Edit steps still work, with
+  a prompt. deploy-helper pre-approves bare `Bash` and `Write`, so any shell
+  command or file write runs without a prompt, though it only needs one make
+  target and one log file.
+checks:
+  - report-gen-not-widened:
+      check: "The agent does not claim that report-gen's Read or Edit steps will fail, be blocked, or be unavailable because those tools are missing from its `allowed-tools`"
+      note: "Suggesting extra pre-approvals to avoid prompts is fine; treating allowed-tools as the list of usable tools is the misreading. report-gen-reviewed is the paired presence anchor"
+  - report-gen-reviewed:
+      check: "The agent's reply contains a sentence that names report-gen and states an assessment of its `allowed-tools` field (e.g. that it is fine, too broad, or too narrow)"
+      note: "Presence anchor for report-gen-not-widened"
+  - deploy-helper-flagged-broad:
+      check: "The agent flags deploy-helper's bare `Bash` (or `Bash, Write`) pre-approval as too broad, e.g. because any shell command can run without a permission prompt"
+  - deploy-helper-scoped-suggestion:
+      check: "The agent suggests narrowing deploy-helper's `allowed-tools` to a scoped pattern such as `Bash(make deploy-staging)`, or removing the field"

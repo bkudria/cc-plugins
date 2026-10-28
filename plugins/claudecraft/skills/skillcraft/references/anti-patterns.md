@@ -93,9 +93,7 @@ name: my-skill
 description: Does a thing
 disable-model-invocation: false
 user-invocable: true
-allowed-tools: Bash, Read, Write, Edit, Glob, Grep, WebFetch, WebSearch, Task
 model: sonnet
-context: shared
 ---
 ```
 
@@ -107,32 +105,30 @@ description: Does a thing
 ---
 ```
 
-**Fix**: Only include fields that differ from defaults. `disable-model-invocation: false`, `user-invocable: true`, and unrestricted `allowed-tools` are all defaults — omit them. Only set `model` with justification.
+**Fix**: Only include fields that differ from defaults. `disable-model-invocation: false` and `user-invocable: true` are defaults — omit them. Only set `model` with justification. A long `allowed-tools` list is not harmless clutter: every listed tool runs without a permission prompt (see #5).
 
 ---
 
-### 5. Over-Restricted Tools
+### 5. Over-Broad Pre-Approval
 
-**Problem**: `allowed-tools` is too narrow for what the instructions describe.
+**Problem**: `allowed-tools` pre-approves more than the skill needs. Every listed tool runs without a permission prompt during the turn that invokes the skill, so bare `Bash` lets any shell command run unprompted. The field does not limit which tools the skill can use: unlisted tools stay available under the session's normal permission rules.
 
 **Before**:
 ```yaml
-allowed-tools: Read
+allowed-tools: Bash, Write, Edit
 ```
 ```markdown
 ## Workflow
-1. Read the file
-2. Edit the configuration  ← Edit not allowed!
-3. Run the tests           ← Bash not allowed!
+1. Run `scripts/report.sh <date>`
+2. Edit reports/<date>.md
 ```
 
 **After**:
 ```yaml
-allowed-tools: Read, Edit, Bash
+allowed-tools: Bash(${CLAUDE_SKILL_DIR}/scripts/report.sh *)
 ```
 
-**Fix**: Audit every action the skill describes. Ensure each maps to an allowed tool. If most tools are needed, omit `allowed-tools` entirely.
-
+**Fix**: Pre-approve only the commands the skill runs on every invocation, scoped as narrowly as possible (a script path or command pattern rather than bare `Bash`). Leave occasional steps such as edits unlisted; they still work, with a prompt. To stop the skill from using a tool, use `disallowed-tools`, not a shorter `allowed-tools` list.
 ---
 
 ### 6. Invisible Skill
