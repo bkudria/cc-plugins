@@ -5,12 +5,24 @@ notes: |
   measured percentage and whether the configured threshold (ratchet)
   was met. Distinct from `coverage`, which only checks that a threshold
   is configured.
+
+  The coverage tool must be one the project itself declares, so the
+  verdict does not depend on what happens to be installed on the auditing
+  machine. A run that measures no code proves nothing, so it is unmet.
 check:
   prompt: |
     Verify that coverage for the project at $PROJECT_ROOT runs and meets
-    its configured threshold. Determine the coverage tool and threshold
-    from manifest files and conventional project-root configuration, then
-    execute coverage without modifying the working tree. Report met (with
-    the measured percentage and the threshold) or unmet (with the
-    measured percentage, the threshold, and a brief summary of the
-    largest uncovered areas).
+    its configured threshold. Use only a coverage tool and threshold the
+    project itself declares: named in its manifest (a dependency,
+    dev-dependency group, or script) or configured in a project-root
+    config file, or coverage built into the project's language toolchain
+    (e.g. `go test -cover`). A tool that is merely installed on the
+    machine does not count. Execute coverage without modifying the
+    working tree.
+
+    Report met (with the measured percentage and the threshold) or unmet.
+    Report unmet when the project declares no coverage tool or threshold
+    (say which is missing), when the run measures no code (say so, e.g.
+    "coverage measured 0 statements"), or when the measured percentage is
+    below the threshold (with the measured percentage, the threshold, and
+    a brief summary of the largest uncovered areas).

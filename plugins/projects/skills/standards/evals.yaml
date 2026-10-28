@@ -2,7 +2,7 @@ version: "1"
 min_pass_rate: 1.0
 repeats: 1
 # The scaffold scenario carries a $10 per-session cap (see its scenario.yaml);
-# the other ten scenarios cost ~$12-14 together on claude-sonnet-5. A $20 suite
+# the other scenarios cost ~$9-10 together on claude-sonnet-5-5. A $20 suite
 # cap would abort the run (exit 5) the moment scaffold actually uses its
 # headroom instead of crashing early.
 max_budget_usd: 30.0
