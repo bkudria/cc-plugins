@@ -1,0 +1,28 @@
+prompt: |
+  I want skills/report-gen/SKILL.md to:
+  1. run at high effort,
+  2. only load automatically when I'm working with files under src/,
+  3. never be able to call AskUserQuestion while it's active.
+  Which frontmatter should it have? Don't edit the file; just reply with the
+  complete frontmatter block I should use.
+
+project:
+  git_init: true
+  files:
+    skills/report-gen/SKILL.md: |
+      ---
+      name: report-gen
+      description: Generate a weekly status report from the project's changelog and open issues.
+      ---
+
+      # Report Gen
+
+      ## When to Use
+
+      - Writing the weekly status report
+
+      ## Steps
+
+      1. Read CHANGELOG.md and summarize entries from the past week.
+      2. Group open issues by label.
+      3. Write the report to reports/<date>.md.

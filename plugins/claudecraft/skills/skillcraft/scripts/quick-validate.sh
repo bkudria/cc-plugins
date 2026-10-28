@@ -44,7 +44,7 @@ pass() { echo -e "  ${GREEN}PASS${NC} $1: $2"; PASS=$((PASS + 1)); }
 fail() { echo -e "  ${RED}FAIL${NC} $1: $2"; FAIL=$((FAIL + 1)); }
 warn() { echo -e "  ${YELLOW}WARN${NC} $1: $2"; WARN=$((WARN + 1)); }
 
-VALID_FIELDS="name description disable-model-invocation user-invocable allowed-tools model context agent argument-hint hooks"
+VALID_FIELDS="name description when_to_use argument-hint arguments disable-model-invocation user-invocable allowed-tools disallowed-tools model effort context agent background hooks paths shell metadata license compatibility"
 
 validate_skill() {
     local skill_dir="$1"
@@ -112,7 +112,7 @@ validate_skill() {
         local unknown_fields=""
         while IFS= read -r line; do
             local field
-            field=$(echo "$line" | grep -oE '^[a-z][a-z-]*' || true)
+            field=$(echo "$line" | grep -oE '^[a-z][a-z_-]*' || true)
             if [[ -n "$field" ]]; then
                 local valid=false
                 for vf in $VALID_FIELDS; do

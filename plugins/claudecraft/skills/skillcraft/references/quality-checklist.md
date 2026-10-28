@@ -28,7 +28,7 @@ Apply all checks when running a full audit. For lightweight mode, apply only S1,
 
 ### S4: Only Valid Frontmatter Fields
 - **Check**: All frontmatter fields are recognized Claude Code skill fields
-- **Pass**: Only uses: `name`, `description`, `disable-model-invocation`, `user-invocable`, `allowed-tools`, `model`, `context`, `agent`, `argument-hint`, `hooks`
+- **Pass**: Only uses fields from `references/frontmatter-reference.md`: `name`, `description`, `when_to_use`, `argument-hint`, `arguments`, `disable-model-invocation`, `user-invocable`, `allowed-tools`, `disallowed-tools`, `model`, `effort`, `context`, `agent`, `background`, `hooks`, `paths`, `shell`, `metadata`, `license`, `compatibility`
 - **Fail**: Contains unknown fields (typos, invented fields)
 - **Fix**: Remove or correct invalid fields
 

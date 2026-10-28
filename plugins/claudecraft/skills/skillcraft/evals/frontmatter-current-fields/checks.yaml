@@ -1,0 +1,18 @@
+context: |
+  The agent was asked which frontmatter the fixture skill at
+  skills/report-gen/SKILL.md should have so that it runs at high effort,
+  auto-loads only for files under src/, and can never call AskUserQuestion,
+  and to reply with the complete block without editing the file. Claude
+  Code's documented frontmatter fields for these are `effort`, `paths`, and
+  `disallowed-tools`. `allowed-tools` pre-approves tools without a permission
+  prompt; it does not restrict which tools are available.
+checks:
+  - effort-high:
+      check: "The frontmatter block in the agent's final reply contains `effort: high`"
+  - paths-src:
+      check: "The frontmatter block in the agent's final reply contains a `paths` field whose value matches files under src/ (e.g. `src/**`)"
+  - disallowed-ask:
+      check: "The frontmatter block in the agent's final reply contains a `disallowed-tools` field that lists AskUserQuestion"
+  - no-allowed-tools-for-restriction:
+      check: "The frontmatter block in the agent's final reply does not contain an `allowed-tools` field"
+      note: "Listing every tool except AskUserQuestion under allowed-tools is the misreading the reference fix targets; nothing in the request calls for pre-approving tools"
