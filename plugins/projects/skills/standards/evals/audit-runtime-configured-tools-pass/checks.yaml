@@ -1,0 +1,17 @@
+context: |
+  The agent audited a Python project (profiles: [base]) that declares ruff and
+  pytest as dev dependencies, configures both in pyproject.toml, and has one
+  source module plus one passing test under tests/. Both tools are installed in
+  the environment. No coverage threshold is configured, so base/coverage fails;
+  base/coverage-run is disabled. The runner's --render output lists only FAIL
+  and SUGG rows, so a standard that passes is absent from the table.
+checks:
+  - coverage-fails:
+      check: "base/coverage appears as a FAIL row in the rendered table"
+      note: "Presence anchor: proves the rendered table was produced, which gives the two absence checks below something to constrain"
+  - linter-run-not-failed:
+      check: "base/linter-run does not appear as a FAIL row in the rendered table"
+      note: "Regression guard: ruff is declared and configured by the project and finds real source files, so requiring a project-declared tool must not turn this into a failure"
+  - tests-run-not-failed:
+      check: "base/tests-run does not appear as a FAIL row in the rendered table"
+      note: "Regression guard: pytest is declared and configured by the project and collects one passing test"

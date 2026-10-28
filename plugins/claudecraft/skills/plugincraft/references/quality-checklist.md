@@ -141,11 +141,11 @@ These checks look across components — what `claude plugin validate` does not c
 - **Fail**: Skill mentions `mcp__github__*` but `.mcp.json` has no `github` server (or no `.mcp.json` exists)
 - **Fix**: Add the server to `.mcp.json`, or remove the dangling reference
 
-### PX4: Command `allowed-tools` Matches Body Usage
-- **Check**: For each `commands/*.md`, if `allowed-tools` is set in frontmatter, it includes every tool the body instructs Claude to use
-- **Pass**: Body says "use Read and Edit" and frontmatter has `allowed-tools: [Read, Edit]`
-- **Fail**: Body says "run the script" but `allowed-tools` excludes `Bash`
-- **Fix**: Add missing tools to `allowed-tools`, or remove the restriction entirely
+### PX4: Command `allowed-tools` Is No Broader Than Body Usage
+- **Check**: For each `commands/*.md`, if `allowed-tools` is set in frontmatter, every entry is a tool the body instructs Claude to use, scoped as narrowly as practical. `allowed-tools` pre-approves tools (they run without a permission prompt); it does not limit which tools the command can use
+- **Pass**: Body says "run `scripts/check.sh`" and frontmatter has `allowed-tools: Bash(scripts/check.sh *)`
+- **Fail**: Frontmatter pre-approves bare `Bash`, or a tool the body never uses
+- **Fix**: Narrow each entry to the command pattern the body runs, or remove entries the body doesn't use. A tool the body uses but `allowed-tools` omits still works with a prompt, so it is not a failure
 
 ### PX5: No Name Collisions Between Components
 - **Check**: No two components share a name across categories (a `commands/foo.md` and a `skills/foo/` cause confusion in `/help`)

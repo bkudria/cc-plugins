@@ -28,7 +28,7 @@ Apply all checks when running a full audit. For lightweight mode, apply only S1,
 
 ### S4: Only Valid Frontmatter Fields
 - **Check**: All frontmatter fields are recognized Claude Code skill fields
-- **Pass**: Only uses: `name`, `description`, `disable-model-invocation`, `user-invocable`, `allowed-tools`, `model`, `context`, `agent`, `argument-hint`, `hooks`
+- **Pass**: Only uses fields from the [official frontmatter reference](https://code.claude.com/docs/en/skills): `name`, `description`, `when_to_use`, `argument-hint`, `arguments`, `disable-model-invocation`, `user-invocable`, `allowed-tools`, `disallowed-tools`, `model`, `effort`, `context`, `agent`, `background`, `hooks`, `paths`, `shell`, `metadata`, `license`, `compatibility`
 - **Fail**: Contains unknown fields (typos, invented fields)
 - **Fix**: Remove or correct invalid fields
 
@@ -84,11 +84,11 @@ Apply all checks when running a full audit. For lightweight mode, apply only S1,
 - **Fail**: Body uses `$ARGUMENTS` but no hint provided
 - **Fix**: Add `argument-hint: "[description of expected argument]"`
 
-### M6: Minimal Allowed Tools
-- **Check**: If `allowed-tools` is set, it includes all tools the skill's instructions require
-- **Pass**: Allowed tools sufficient for described operations, or field omitted (all tools)
-- **Fail**: Instructions say "read the file" but `allowed-tools` doesn't include Read
-- **Fix**: Add missing tools or remove the restriction if most tools are needed
+### M6: Scoped Allowed Tools
+- **Check**: If `allowed-tools` is set, each entry pre-approves only what the skill's instructions run, scoped as narrowly as practical
+- **Pass**: Field omitted, or entries like `Bash(${CLAUDE_SKILL_DIR}/scripts/run.sh *)` that match commands the skill runs
+- **Fail**: Bare `Bash`, or tools the instructions never use, which then run without a permission prompt
+- **Fix**: Narrow each entry to the command pattern the skill uses, or remove the field. A tool missing from `allowed-tools` still works with a prompt, so missing entries are not a failure
 
 ### M7: Invocation Settings Coherent
 - **Check**: `disable-model-invocation` and `user-invocable` settings make sense together

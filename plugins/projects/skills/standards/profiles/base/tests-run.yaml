@@ -1,14 +1,26 @@
 required: true
 description: The project's test suite passes when run.
 notes: |
-  This is a runtime-verification standard. Determine the test runner from
-  the project's manifest and conventional configuration files, run the
-  suite, and report whether tests pass. Distinct from `tests` (which only
-  checks that a test directory exists).
+  Runtime-verification standard. Runs the project's test suite and reports
+  whether tests pass. Distinct from `tests`, which only checks that a test
+  directory exists.
+
+  The test runner must be one the project itself declares, so the verdict
+  does not depend on what happens to be installed on the auditing machine.
+  A run that collects no tests proves nothing about the code, so it is
+  unmet.
 check:
   prompt: |
     Verify that the test suite for the project at $PROJECT_ROOT runs and
-    passes. Determine the project's test runner from manifest files and
-    conventional configuration in the project root, then execute the suite
-    in a way that does not modify the working tree. Report met (with
-    pass/fail counts) or unmet (with the failure reason).
+    passes. Use only a test runner the project itself declares: one named
+    in its manifest (a dependency, dev-dependency group, or test script)
+    or configured in a project-root config file, or a runner built into
+    the project's language toolchain (e.g. `go test`, `cargo test`). A
+    runner that is merely installed on the machine does not count.
+    Execute the suite in a way that does not modify the working tree.
+
+    Report met (with the runner and pass/fail counts) or unmet. Report
+    unmet when the project declares no test runner (say so, e.g. "no test
+    runner declared or configured"), when the run collects zero tests
+    (say so, e.g. "pytest collected 0 tests"), or when tests fail (with
+    the failure reason).
