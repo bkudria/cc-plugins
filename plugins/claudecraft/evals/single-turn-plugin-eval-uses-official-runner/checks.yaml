@@ -1,0 +1,10 @@
+checks:
+  - writes-official-case:
+      check: "The transcript contains a file-writing tool call whose target is a `claude plugin eval` case file: evals/<case>/prompt.md or evals/<case>/case.yaml"
+      note: "skills/claude-code-evals — a single-turn plugin case goes to the official runner, whose cases live in evals/<case>/ as prompt.md (or case.yaml) plus graders/. Presence anchor for no-craboodle-scenario."
+  - writes-official-grader:
+      check: "The transcript contains a file-writing tool call whose target is a file under evals/<case>/graders/"
+      note: "skills/claude-code-evals — official cases grade through graders/*.md files (e.g. a tool_used grader for the skill firing, a regex or llm grader for the headings)."
+  - no-craboodle-scenario:
+      check: "No file-writing tool call in the transcript targets a scenario.yaml or checks.yaml file"
+      note: "Paired with writes-official-case. scenario.yaml/checks.yaml is the craboodle format, which the rule reserves for multi-turn or non-plugin config."

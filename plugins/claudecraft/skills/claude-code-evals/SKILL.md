@@ -1,6 +1,6 @@
 ---
 name: claude-code-evals
-description: "MANDATORY load before writing or editing any eval scenario (scenario.yaml), check (checks.yaml), or evals.yaml — wherever the eval suite lives. Evaluate Claude Code configurations (skills, CLAUDE.md, hooks, MCP servers, settings, sub-agents) using the scuttlerun/pincenez/craboodle eval pipeline. TRIGGER when: authoring or modifying scenario.yaml or checks.yaml files; designing checks; interpreting eval results; benchmarking configurations; testing CLAUDE.md effectiveness; verifying hooks work; regression testing configs; building or extending an eval suite. DO NOT skip because 'I'll consult check-design.md directly' or 'one quick check edit' — load first, the schema and anti-pattern rules are cheap to surface."
+description: "MANDATORY load before writing or editing any eval scenario (scenario.yaml), check (checks.yaml), or evals.yaml — wherever the eval suite lives. Evaluate Claude Code configurations (skills, CLAUDE.md, hooks, MCP servers, settings, sub-agents) using the scuttlerun/pincenez/craboodle eval pipeline, and choose between it and the official `claude plugin eval` runner. TRIGGER when: choosing how to eval a plugin; authoring or modifying scenario.yaml or checks.yaml files; designing checks; interpreting eval results; benchmarking configurations; testing CLAUDE.md effectiveness; verifying hooks work; regression testing configs; building or extending an eval suite. DO NOT skip because 'I'll consult check-design.md directly' or 'one quick check edit' — load first, the schema and anti-pattern rules are cheap to surface."
 ---
 
 # Claude Code Evals
@@ -32,6 +32,26 @@ Evaluation replaces intuition with behavioral evidence. Instead of reading your 
 - During initial exploratory drafting — write first, evaluate when the config stabilizes
 
 **Evaluation is probabilistic.** LLM behavior is non-deterministic. Evals run multiple repetitions and report pass *rates*, not binary pass/fail. A pass rate of 0.8 means the configuration works reliably, not that it works every time. Lint is non-deterministic too: each check is a single un-seeded LLM judgment, so re-running `craboodle lint` may add or drop individual findings (see `pincenez lint --help`). Treat lint findings as advisory — judge each on its merits rather than expecting an identical issue count on every run.
+
+## Choosing a Runner
+
+Claude Code ships its own eval runner, `claude plugin eval` ([docs](https://code.claude.com/docs/en/plugin-evals)). Prefer it whenever it can express the case; use craboodle for what it can't. Use `claude plugin eval` when every condition in the left column holds; use craboodle when any condition in the right column does.
+
+| `claude plugin eval` | craboodle |
+|---|---|
+| The configuration under test ships in a plugin | The configuration is CLAUDE.md, settings, or hooks outside a plugin — official runs load only the plugin, never user or project config |
+| The case is one prompt with no replies (resuming a recorded transcript via `context.history_file` still counts) | The case needs a simulated user who answers `AskUserQuestion` or reacts mid-session — scuttlerun's synthetic user has no official equivalent |
+| Free deterministic graders fit (`regex`, `tool_used`, `tool_order`, `file_exists`), optionally with an `llm` rubric | Checks should be linted for anti-patterns before paying for runs (`pincenez lint`) |
+
+The official runner also brings a built-in no-plugin baseline (Δ), MCP server mocks, a cost ceiling, and CI exit codes.
+
+**One exception: skillcraft's own eval steps.** When skillcraft's Create step 4 or its Behavioral Edit Testing gate is what calls for evals, use craboodle even for a skill inside a plugin — that gate snapshots `evals/*/scenario.yaml` suites with `craboodle run`. Every other request to eval a plugin, including one that targets a single skill in it, follows the table above.
+
+**Official case layout**: `evals/<case>/prompt.md` (frontmatter such as `max_turns`, `allowed_tools`; body is the prompt) plus one grader per file in `evals/<case>/graders/*.md` (frontmatter sets `type:`, that type's options, and an optional `weight:`; an `llm` grader's body is its PASS/FAIL rubric). `claude plugin eval init` runs an authoring interview and writes cases; `claude plugin eval init --bare <name>` writes a blank one. Run with `claude plugin eval .` from the plugin root. To assert a skill fired, use a `tool_used` grader with `tool: Skill` and an `input_match` regex on the skill name.
+
+**Both runners use `evals/` by default.** When a plugin already has a craboodle suite there, put official cases in a separate directory and pass `--eval-dir <dir>` to both `init` and the run.
+
+The rest of this skill covers craboodle.
 
 ## The Three Tools
 

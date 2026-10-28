@@ -2,7 +2,7 @@
 
 Companion to the PX category in `quality-checklist.md`. For each PX check: detection recipe, false-positive cases, and concrete fix shapes.
 
-These checks look across components — what `plugin-dev`'s `plugin-validator` cannot see when validating each component in isolation.
+These checks look across components — what `claude plugin validate` does not check when validating each component in isolation.
 
 ---
 
@@ -197,11 +197,15 @@ Filesystem check; no external tool required.
 ### Detection
 
 ```bash
+# craboodle suite
 [[ -f "$plugin_dir/evals.yaml" ]] && \
   ls "$plugin_dir"/evals/*/scenario.yaml 2>/dev/null | head -1
+# claude plugin eval suite (eval dir is evals/ unless plugin.json sets experimental.evals)
+eval_dir=$(jq -r '.experimental.evals // "evals"' "$plugin_dir/.claude-plugin/plugin.json")
+find "$plugin_dir/$eval_dir" \( -name prompt.md -o -name case.yaml \) 2>/dev/null | head -1
 ```
 
-Empty output means no real scenarios (either `evals.yaml` is absent or no scenario directories exist). A printed path means the suite exists.
+Empty output from both means no real cases. A printed path from either means a suite exists.
 
 ### False Positives
 
@@ -210,4 +214,4 @@ Empty output means no real scenarios (either `evals.yaml` is absent or no scenar
 
 ### Fix Recipe
 
-Bootstrap evals via plugincraft's `workflows/bootstrap-evals.md`. The workflow's Step 6 calls `craboodle init <plugin-root>`, which scaffolds `evals.yaml` with sensible defaults; Steps 7-9 then write scenarios, lint them, and run them.
+Choose a runner with `claude-code-evals` § Choosing a Runner. For single-prompt plugin cases, `claude plugin eval init` writes the suite. For craboodle, bootstrap via plugincraft's `workflows/bootstrap-evals.md`. The workflow's Step 6 calls `craboodle init <plugin-root>`, which scaffolds `evals.yaml` with sensible defaults; Steps 7-9 then write scenarios, lint them, and run them.

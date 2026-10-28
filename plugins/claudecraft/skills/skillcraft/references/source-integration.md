@@ -41,9 +41,8 @@ Use these heuristics to decide where integrated content belongs:
 | New validation check | Add to `references/quality-checklist.md` |
 | New anti-pattern | Add to `references/anti-patterns.md` |
 | New writing guidance | Add to `references/writing-style.md` |
-| New frontmatter field documentation | Add to `references/frontmatter-reference.md` |
+| New frontmatter field or skill-format detail | Don't copy — the [official skills docs](https://code.claude.com/docs/en/skills) are the reference |
 | New naming/description guidance | Add to `references/naming-conventions.md` |
-| New template or skill type | Add to `references/skill-templates.md` |
 
 When in doubt, prefer merging into an existing file over creating a new one. New files add navigation overhead.
 

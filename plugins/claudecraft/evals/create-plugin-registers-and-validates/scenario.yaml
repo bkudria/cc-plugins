@@ -1,0 +1,46 @@
+prompt: |
+  Use plugincraft to create a new plugin called `pr-helper` in this
+  marketplace repo. It needs one skill, `pr-describe`, that drafts a pull
+  request description from the current branch's diff against main.
+
+project:
+  files:
+    .claude-plugin/marketplace.json: |
+      {
+        "name": "acme-plugins",
+        "owner": { "name": "Acme Tools" },
+        "plugins": [
+          {
+            "name": "notes-helper",
+            "description": "Keep a running notes file for the current project.",
+            "source": "./plugins/notes-helper"
+          }
+        ]
+      }
+    plugins/notes-helper/.claude-plugin/plugin.json: |
+      {
+        "name": "notes-helper",
+        "description": "Keep a running notes file for the current project.",
+        "version": "1.0.0",
+        "license": "MIT"
+      }
+    plugins/notes-helper/README.md: |
+      # notes-helper
+
+      Keep a running notes file for the current project. Install with
+      `/plugin install notes-helper@acme-plugins`.
+    plugins/notes-helper/skills/notes/SKILL.md: |
+      ---
+      name: notes
+      description: Append a dated entry to NOTES.md when the user asks to note something down.
+      ---
+
+      # Notes
+
+      Append the user's note to NOTES.md under today's date heading.
+
+user:
+  persona: |
+    You maintain this marketplace repo. Answer questions briefly: the author
+    is "Acme Tools", license MIT, version 0.1.0. Approve any plan you are
+    shown. If asked whether to add evals now, say not yet.

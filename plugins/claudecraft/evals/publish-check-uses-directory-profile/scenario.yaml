@@ -1,0 +1,49 @@
+prompt: |
+  Use plugincraft to check whether plugins/standup is ready to submit to
+  Anthropic's plugin directory. Tell me what's blocking, if anything. Don't
+  change any files yet.
+
+project:
+  files:
+    .claude-plugin/marketplace.json: |
+      {
+        "name": "acme-plugins",
+        "owner": { "name": "Acme Tools" },
+        "plugins": [
+          {
+            "name": "standup",
+            "description": "Draft a daily standup update from yesterday's commits and today's calendar.",
+            "source": "./plugins/standup"
+          }
+        ]
+      }
+    plugins/standup/.claude-plugin/plugin.json: |
+      {
+        "name": "standup",
+        "description": "Draft a daily standup update from yesterday's commits and today's calendar.",
+        "version": "0.3.0",
+        "author": { "name": "Acme Tools" }
+      }
+    plugins/standup/README.md: |
+      # standup
+
+      Drafts a daily standup update. It reads yesterday's commits from git log
+      and lists them under Yesterday, asks what you plan to do under Today,
+      and collects anything in your way under Blockers. Install it with
+      `/plugin install standup@acme-plugins` and ask Claude to write your
+      standup.
+    plugins/standup/skills/standup/SKILL.md: |
+      ---
+      name: standup
+      description: Draft a standup update with Yesterday, Today, and Blockers sections when the user asks for their standup.
+      ---
+
+      # Standup
+
+      Read `git log --since=yesterday`, summarize it under **Yesterday**, ask
+      the user for **Today** and **Blockers**, and print the update.
+
+user:
+  persona: |
+    You want a readiness verdict. If asked a question, say to just run the
+    checks and report.

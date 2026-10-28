@@ -1,0 +1,10 @@
+checks:
+  - writes-craboodle-scenario:
+      check: "The transcript contains a file-writing tool call whose target is an evals/<id>/scenario.yaml file"
+      note: "Regression baseline — a case that needs a simulated user replying mid-session stays on craboodle (scuttlerun's synthetic user), which `claude plugin eval` cannot provide. Presence anchor for no-official-case."
+  - writes-craboodle-checks:
+      check: "The transcript contains a file-writing tool call whose target is an evals/<id>/checks.yaml file"
+      note: "Regression baseline — the craboodle case is graded by a pincenez checks file."
+  - no-official-case:
+      check: "No file-writing tool call in the transcript targets an evals/<case>/prompt.md file or a file under an evals/<case>/graders/ directory"
+      note: "Paired with writes-craboodle-scenario. Guards against the which-runner rule over-applying to multi-turn cases."

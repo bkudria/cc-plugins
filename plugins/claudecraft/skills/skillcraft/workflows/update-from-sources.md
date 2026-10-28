@@ -32,7 +32,7 @@ This checks all GitHub sources via `gh api compare` and flags web sources for ma
 
 For any web sources flagged as `MANUAL`:
 1. WebFetch the URL shown in the output
-2. Read the corresponding curated file (e.g., `references/official-spec.md`)
+2. Read the corresponding curated file (e.g., `references/naming-conventions.md`)
 3. Compare the fetched content against the curated content
 4. Identify: new sections, removed content, changed guidance, new fields, updated examples
 5. Ignore: formatting-only changes, minor rewording with same meaning
@@ -69,16 +69,15 @@ Label each change with its category from Step 3 (Relevant, Elided, New, Original
 For each affected curated file, present a summary:
 
 ```
-### references/frontmatter-reference.md
+### references/naming-conventions.md
 
 **Upstream change** (official-docs):
-  New field added: `plan-mode-required` — boolean, default false.
-  Allows skills to require plan approval before execution.
+  Name length limit raised from 64 to 80 characters.
 
 **Current curation decision**: kept
-**Rationale**: "Core field table and substitutions from official docs."
+**Rationale**: "Name format rules (hyphen-case, 64 char max) from official spec."
 
-**Recommendation**: Add to the frontmatter field catalog.
+**Recommendation**: Update the length rule in the naming section.
 
 [Incorporate] [Skip] [Discuss]
 ```

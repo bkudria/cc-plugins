@@ -28,7 +28,7 @@ Apply all checks when running a full audit. For lightweight mode, apply only S1,
 
 ### S4: Only Valid Frontmatter Fields
 - **Check**: All frontmatter fields are recognized Claude Code skill fields
-- **Pass**: Only uses fields from `references/frontmatter-reference.md`: `name`, `description`, `when_to_use`, `argument-hint`, `arguments`, `disable-model-invocation`, `user-invocable`, `allowed-tools`, `disallowed-tools`, `model`, `effort`, `context`, `agent`, `background`, `hooks`, `paths`, `shell`, `metadata`, `license`, `compatibility`
+- **Pass**: Only uses fields from the [official frontmatter reference](https://code.claude.com/docs/en/skills): `name`, `description`, `when_to_use`, `argument-hint`, `arguments`, `disable-model-invocation`, `user-invocable`, `allowed-tools`, `disallowed-tools`, `model`, `effort`, `context`, `agent`, `background`, `hooks`, `paths`, `shell`, `metadata`, `license`, `compatibility`
 - **Fail**: Contains unknown fields (typos, invented fields)
 - **Fix**: Remove or correct invalid fields
 
@@ -293,7 +293,7 @@ Apply all checks when running a full audit. For lightweight mode, apply only S1,
 - **Check**: At least one full eval cycle completed (run → grade → review)
 - **Pass**: Eval results reviewed, with pass rates for all scenarios
 - **Fail**: Eval started but not reviewed, or never run
-- **Fix**: Complete the Phase 4 workflow (`workflows/create-phase4-refine.md`)
+- **Fix**: Complete Steps 8-9 of `workflows/bootstrap-evals.md` (full run, then iterate)
 
 ### E4: Production Readiness
 - **Check**: Pass rate meets minimum threshold
