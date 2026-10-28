@@ -5,6 +5,7 @@ prompt: |
 
 project:
   git_init: true
+  git_commit: true
   files:
     project.yaml: |
       profiles:
