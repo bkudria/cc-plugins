@@ -6,6 +6,7 @@
   "repository": "https://github.com/bkudria/cc-plugins",
   "homepage": "https://github.com/bkudria/cc-plugins/tree/main/plugins/triage",
   "keywords": ["assess", "iterate", "audit", "findings", "workflow", "review"],
+  "workflows": "./skills/assess/workflows/investigate.js",
   "author": {
     "name": "Benjamin Kudria"
   }

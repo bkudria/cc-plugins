@@ -2,6 +2,8 @@
 name: assess
 description: "Investigate a scope for problems and opportunities. Use when investigating a codebase, reviewing a feature, auditing configuration, assessing for problems, or exploring and reporting findings."
 argument-hint: "[scope to investigate, e.g. 'this codebase' or 'the auth module']"
+allowed-tools:
+  - Workflow(triage:assess-investigate)
 ---
 
 # Assess
@@ -23,7 +25,7 @@ The investigation itself — planning areas, investigating each in parallel, che
 | Tool | Purpose |
 |------|---------|
 | `AskUserQuestion` | Phase 1 scope interview |
-| `Workflow` | Run the investigation (`workflows/investigate.js`) |
+| `Workflow` | Run the investigation — the plugin's saved workflow `triage:assess-investigate` (`workflows/investigate.js`) |
 | `Read` | Present the full assessment by reading the file the workflow wrote (`outPath`) |
 
 The investigation's read-only tools (`Read`, `Grep`, `Glob`, `Bash`), the planning/verifying/synthesizing sub-agents (`Agent`), and the file write (`Write`) all run *inside* the workflow — they are not invoked directly by this skill.
@@ -60,11 +62,11 @@ If the scope is broad (entire codebase, "everything"), ask for priority areas or
 
 Once the scope is resolved, run the investigation workflow. It plans the areas, reads the source once to share an orientation map with the investigating, verifying, and grounding agents, investigates each area in parallel (observation-only), checks coverage for gaps with targeted re-investigation, cross-verifies overlapping claims, synthesizes the numbered assessment and writes it to disk, then grounds each finding's citations against source.
 
-Invoke:
+Invoke the plugin's saved workflow by name:
 
 ```
 Workflow({
-  scriptPath: "${CLAUDE_PLUGIN_ROOT}/skills/assess/workflows/investigate.js",
+  name: "triage:assess-investigate",
   args: {
     scope: "<resolved scope>",
     focus: "<focus from Phase 1, or the focus directive split out of combined $ARGUMENTS; omit only when scope-only and no interview ran>",
@@ -79,6 +81,17 @@ Workflow({
 - `effort` comes from Phase 1 when the interview ran. When the scope came straight from `$ARGUMENTS`, omit `effort` so the planner allocates it adaptively.
 - `effort` is an OPTIONAL ceiling: when the interview produced one, map quick scan → `low`, standard review → `medium`, comprehensive analysis → `high`. Omit it entirely to let the planner judge complexity and allocate effort (and how many areas) itself. Remember `low` disables the completeness, adversarial-verification, grounding, and plan-critique stages (see Phase 1), so reserve it for genuinely quick scans.
 - Always pass `sessionId: "${CLAUDE_SESSION_ID}"` so the assessment is written to `/tmp/assessment-${CLAUDE_SESSION_ID}.md`.
+
+If the tool reports that workflow name as not found — the skill was loaded outside a plugin install (e.g. `--plugin-dir`, or as a standalone skill), so no plugin workflow is registered — dispatch the same script by path instead, with the same `args`:
+
+```
+Workflow({
+  scriptPath: "${CLAUDE_SKILL_DIR}/workflows/investigate.js",
+  args: { …same as above… }
+})
+```
+
+Prefer the name: `Workflow` refuses a `scriptPath` outside the session's working and added directories, so the path form only works when the skill's directory is one of them.
 
 **The `Workflow` call is non-blocking.** It returns immediately with a task id; the investigation then runs in the background — usually several minutes, though a high-effort run over a broad scope can take considerably longer (tens of minutes). The real result — `{ findingsCount, areas, outPath, markdown, status, coverage, effort }` (`status` is `ok` / `degraded` / `failed`; `coverage` is `{ planned, completed, dropped }`; `effort` is the run's overall effort — the ceiling you passed, or, when you omitted it, the median effort across the areas the planner chose, so an `effort` you did not set reflects a planner decision rather than your input) — arrives later as a `<task-notification>` carrying that task id, *not* as the return value of the `Workflow` call.
 
