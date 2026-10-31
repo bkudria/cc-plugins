@@ -1,0 +1,269 @@
+#!/bin/bash
+
+cc_real_path() {
+  local path=$1 dir link
+  while [ -L "$path" ]; do
+    dir=$(cd -P "$(dirname "$path")" && pwd)
+    link=$(readlink "$path")
+    case $link in
+      /*) path=$link ;;
+      *) path=$dir/$link ;;
+    esac
+  done
+  dir=$(cd -P "$(dirname "$path")" && pwd)
+  printf '%s/%s\n' "$dir" "$(basename "$path")"
+}
+
+CC_SESSIONS_SELF=$(cc_real_path "$0")
+CC_SESSIONS_ROOT=${CC_SESSIONS_SELF%/bin/*}
+
+cc_plugin_version() {
+  local line
+  while IFS= read -r line; do
+    if [[ $line =~ \"version\"[[:space:]]*:[[:space:]]*\"([^\"]*)\" ]]; then
+      printf '%s\n' "${BASH_REMATCH[1]}"
+      return 0
+    fi
+  done < "$CC_SESSIONS_ROOT/.claude-plugin/plugin.json"
+  printf 'unknown\n'
+}
+
+cc_path_warning() {
+  local on_path
+  on_path=$(command -v cc-sessions 2>/dev/null)
+  if [ -z "$on_path" ]; then
+    printf 'warning: cc-sessions is not on PATH; call %s\n' "$CC_SESSIONS_SELF"
+  elif [ "$(cc_real_path "$on_path")" != "$CC_SESSIONS_SELF" ]; then
+    printf 'warning: cc-sessions on PATH is %s, not this program; call %s\n' "$on_path" "$CC_SESSIONS_SELF"
+  fi
+}
+
+cc_commands() {
+  local path
+  for path in "$CC_SESSIONS_ROOT"/libexec/*; do
+    [ -f "$path" ] && [ -x "$path" ] && printf '%s\n' "${path##*/}"
+  done
+}
+
+cc_synopsis() {
+  local name=$1 line
+  line=$("$CC_SESSIONS_ROOT/libexec/$name" --synopsis 2> /dev/null < /dev/null)
+  line=${line%%$'\n'*}
+  case $line in
+    "$name "*) printf '  %s\n' "$line" ;;
+    *) printf '  %s  (its --synopsis is missing)\n' "$name" ;;
+  esac
+}
+
+cc_index() {
+  local name
+  cat << 'EOF'
+cc-sessions: investigate Claude Code session transcripts
+
+Usage: cc-sessions <command> [<option>...] [--] [<operand>...]
+       cc-sessions <command> --help  |  cc-sessions --help  |  cc-sessions --version
+
+Commands:
+EOF
+  for name in $(cc_commands); do
+    cc_synopsis "$name"
+  done
+  cat << 'EOF'
+
+<session> (an operand naming a transcript):
+  current          the session in CLAUDE_CODE_SESSION_ID (inside a sub-agent, its parent session)
+  <path>           a .jsonl file, a session directory, or a file under tool-results/ (~/ expanded)
+  wf_<run-id>      the session that ran that workflow
+  <id>, <prefix>   a session or agent id, or a prefix of 4+ characters from [A-Za-z0-9_-];
+                   an unknown or ambiguous reference exits 2 and lists candidates
+
+Options for every command:
+  --limit N        stop after N records (default: none, unless the command's --help names one; 0: none)
+  --max-chars N    stop stdout at a record boundary after N characters (default 20000; 0: no limit)
+  --               end of options: later arguments are operands even when they start with -
+  -h, --help       the command's help; help never reads transcripts
+
+Output: one record per line, fields separated by TAB; TAB, newline and backslash inside a field are
+written \t, \n and \\; an empty field is "-"; no header (each command's --help names its fields).
+Per-session records start with a handle L<line> into the file named by the record's source field.
+--since and --until take a handle, a timestamp or an age (30m, 2h, 7d). Timestamps are UTC,
+YYYY-MM-DDTHH:MM:SSZ. When output stops early, a notice on stderr says how many records were left
+out and how to continue. Notices and errors go to stderr, prefixed "cc-sessions:".
+
+Exit status: 0 answered (an empty answer too, with a notice); 1 could not answer (unreadable file,
+missing dependency); 2 usage error (unknown command or option, bad value, unknown or ambiguous
+<session>). cc-sessions jq exits with jq's status.
+
+Environment: CLAUDE_CONFIG_DIR (transcripts are in $CLAUDE_CONFIG_DIR/projects; default ~/.claude),
+CLAUDE_CODE_SESSION_ID (the session called current).
+
+EOF
+  cc_path_warning
+  printf 'deps: %s, %s\n' "$(cc_jq_status)" "$(cc_rg_status)"
+}
+
+cc_wants_help() {
+  local arg
+  for arg in "$@"; do
+    case $arg in
+      --) return 1 ;;
+      -h | --help) return 0 ;;
+    esac
+  done
+  return 1
+}
+
+cc_closest_command() {
+  local wanted=$1 name
+  for name in $(cc_commands); do
+    case $name in "$wanted"* | "${wanted:0:2}"*) printf '%s\n' "$name" && return 0 ;; esac
+    case $wanted in "$name"*) printf '%s\n' "$name" && return 0 ;; esac
+  done
+  return 1
+}
+
+cc_unknown_command() {
+  local wanted=$1 list closest
+  list=$(cc_commands | paste -s -d , - | sed 's/,/, /g')
+  if [ ${#wanted} -ge 2 ] && closest=$(cc_closest_command "$wanted"); then
+    cc_usage_error "unknown command \"$wanted\"" "did you mean \"$closest\"? Commands: $list"
+  fi
+  cc_usage_error "unknown command \"$wanted\"" "use one of: $list"
+}
+
+# shellcheck source=../lib/common.sh
+. "$CC_SESSIONS_ROOT/lib/common.sh"
+
+limit='' max_chars=20000
+
+cc_set_budget() {
+  local count
+  count=$(cc_count "$1" "$2") || exit
+  case $1 in
+    --limit) limit=$count ;;
+    --max-chars) max_chars=$count ;;
+  esac
+}
+
+cc_need_budget_value() {
+  [ "$1" -ge 2 ] || cc_usage_error "$2 needs a value" "pass, for example, $2 20"
+}
+
+# Copies stdin to stdout up to the budget, then counts what is left and says on stderr how to continue.
+# Handle-first records (L<line>TAB...) continue with --since only while their handles run forward.
+# When stdout goes away, the rest is drained unread so the command never meets a broken pipe.
+cc_budget() {
+  local limit=$1 max=$2 line size handle used=0 shown=0 last=-1 forward=1 reason='' next_size=0 next_handle=-1 left
+  local notice since handle_pattern=$'^L([0-9]+)\t'
+  while IFS= read -r line || [ -n "$line" ]; do
+    size=$((${#line} + 1))
+    handle=-1
+    [[ $line =~ $handle_pattern ]] && handle=$((10#${BASH_REMATCH[1]}))
+    if [ "$limit" -gt 0 ] && [ "$shown" -ge "$limit" ]; then
+      reason="--limit $limit"
+    elif [ "$max" -gt 0 ] && [ $((used + size)) -gt "$max" ]; then
+      reason="--max-chars $max"
+    fi
+    if [ -n "$reason" ]; then
+      next_size=$size next_handle=$handle
+      break
+    fi
+    [ "$handle" -lt "$last" ] && forward=0
+    last=$handle
+    if ! printf '%s\n' "$line" 2> /dev/null; then
+      cat > /dev/null
+      return 0
+    fi
+    used=$((used + size)) shown=$((shown + 1))
+  done
+  [ -n "$reason" ] || return 0
+  left=$(($(wc -l | tr -d ' ') + 1))
+  notice="output stopped at $reason after $shown record"
+  [ "$shown" -eq 1 ] || notice+=s
+  notice+="; $left more left out"
+  since=''
+  [ $forward -eq 1 ] && [ "$next_handle" -ge 0 ] && [ "$next_handle" -ge "$last" ] && since="--since L$next_handle"
+  if [ "$shown" -eq 0 ] && [ "${reason%% *}" = --max-chars ]; then
+    notice+="; the next record is $next_size characters; continue with --max-chars $next_size${since:+ $since}"
+  elif [ -n "$since" ]; then
+    notice+="; continue with $since"
+  else
+    notice+="; continue with a larger ${reason%% *} (0 removes the limit)"
+  fi
+  cc_notice "$notice"
+}
+
+while [ $# -gt 0 ]; do
+  case $1 in
+    --limit | --max-chars)
+      cc_need_budget_value $# "$1"
+      cc_set_budget "$1" "$2"
+      shift 2
+      continue
+      ;;
+    --limit=* | --max-chars=*)
+      cc_set_budget "${1%%=*}" "${1#*=}"
+      shift
+      ;;
+    -h | --help)
+      cc_index
+      exit 0
+      ;;
+    --version)
+      printf 'cc-sessions %s (sessions plugin)\n' "$(cc_plugin_version)"
+      exit 0
+      ;;
+    --)
+      shift
+      break
+      ;;
+    -*)
+      cc_usage_error "unknown option \"$1\"" "put options after the command name, as in cc-sessions <command> [<option>...]"
+      ;;
+    *) break ;;
+  esac
+done
+
+if [ $# -eq 0 ]; then
+  cc_index
+  exit 0
+fi
+
+command_name=$1
+shift
+command_path=$CC_SESSIONS_ROOT/libexec/$command_name
+if ! [[ $command_name =~ ^[a-z][a-z0-9-]*$ ]] || ! [ -f "$command_path" ] || ! [ -x "$command_path" ]; then
+  cc_unknown_command "$command_name"
+fi
+export CC_SESSIONS_COMMAND=$command_name
+
+if cc_wants_help "$@"; then
+  exec "$command_path" --help < /dev/null
+fi
+
+command_args=()
+while [ $# -gt 0 ]; do
+  case $1 in
+    --)
+      command_args+=("$@")
+      break
+      ;;
+    --limit | --max-chars)
+      cc_need_budget_value $# "$1"
+      cc_set_budget "$1" "$2"
+      shift 2
+      continue
+      ;;
+    --limit=* | --max-chars=*) cc_set_budget "${1%%=*}" "${1#*=}" ;;
+    *) command_args+=("$1") ;;
+  esac
+  shift
+done
+export CC_SESSIONS_LIMIT=$limit CC_SESSIONS_MAX_CHARS=$max_chars
+cc_need jq
+
+if [ "${limit:-0}" -eq 0 ] && [ "$max_chars" -eq 0 ]; then
+  exec "$command_path" ${command_args[@]+"${command_args[@]}"}
+fi
+"$command_path" ${command_args[@]+"${command_args[@]}"} | cc_budget "${limit:-0}" "$max_chars"
+exit "${PIPESTATUS[0]}"

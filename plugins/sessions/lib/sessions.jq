@@ -1,0 +1,716 @@
+def _dash: if . == "-" or . == "" then null else . end;
+
+def _context_lines:
+  ($ARGS.named.__ctx // "") | split("\n") | map(select(length > 0) | split("\t"));
+
+def _sizes:
+  ($ARGS.named.__sizes // "") | split("\n")
+  | map(select(length > 0) | split("\t") | {key: (.[1:] | join("\t")), value: (.[0] | tonumber)})
+  | from_entries;
+
+def _raw_lines($var):
+  if $var == "-" then [inputs]
+  else ($ARGS.named[$var] // "") | split("\n") | if length > 0 and .[-1] == "" then .[:-1] else . end
+  end;
+
+def _handles_text:
+  (.[:5] | map("L\(.)") | join(", ")) + (if length > 5 then " and \(length - 5) more" else "" end);
+
+def _skipped_notice:
+  if (.skipped | length) > 0 then
+    ("cc-sessions: skipped \(.skipped | length) unparseable line\(if (.skipped | length) == 1 then "" else "s" end)"
+      + " in \(.file): \(.skipped | _handles_text)\n") | stderr | empty
+  else empty end;
+
+#: One transcript object per operand, in operand order: {file, kind, session, agent, run, session_dir, project_dir, meta, bytes, mtime, lines, rows: [{l, e}], skipped: [line...], sizes}.
+def transcripts:
+  _sizes as $sizes
+  | _context_lines[] as $c
+  | _raw_lines($c[0]) as $lines
+  | (reduce range(0; $lines | length) as $i ({rows: [], skipped: []};
+      (try ($lines[$i] | fromjson) catch null) as $e
+      | if ($e | type) == "object" then .rows += [{l: ($i + 1), e: $e}]
+        elif ($lines[$i] | test("\\S")) then .skipped += [$i + 1]
+        else . end)) as $parsed
+  | {
+      file: $c[1],
+      kind: $c[2],
+      session: ($c[3] // "-" | _dash),
+      agent: ($c[4] // "-" | _dash),
+      run: ($c[5] // "-" | _dash),
+      session_dir: ($c[6] // "-" | _dash),
+      project_dir: ($c[7] // "-" | _dash),
+      bytes: ($c[8] // "-" | _dash | if . then tonumber else null end),
+      mtime: ($c[9] // "-" | _dash | if . then tonumber else null end),
+      meta: ($c[10] // "-" | _dash | if . then (try fromjson catch null) else null end),
+      lines: ($lines | length),
+      rows: $parsed.rows,
+      skipped: $parsed.skipped,
+      sizes: $sizes
+    }
+  | _skipped_notice, .;
+
+def _dedupe:
+  reduce .rows[] as $r ({seen: {}, out: [], t: null};
+    ($r.e.uuid // null) as $u
+    | if ($u | type) == "string" and .seen[$u] then .
+      else
+        (if ($u | type) == "string" then .seen[$u] = true else . end)
+        | (if ($r.e.timestamp | type) == "string" then .t = $r.e.timestamp else . end)
+        | .out += [$r + {t: .t}]
+      end)
+  | .out;
+
+#: The rows with the first row of each uuid kept, in file order, as an array of {l, e, t}; t is the entry's timestamp or the nearest earlier one (null before any).
+def entries: if ._entries then ._entries else _dedupe end;
+
+# Functions that read the rows several times run on a copy carrying them, computed once.
+def _memo: if ._entries then . else ._entries = _dedupe end;
+
+#: Rows that s::entries drops because they repeat an earlier uuid: {l, uuid, first}, first being the line kept.
+def duplicates:
+  reduce .rows[] as $r ({first: {}, out: []};
+    ($r.e.uuid // null) as $u
+    | if ($u | type) != "string" then .
+      elif .first[$u] then .out += [{l: $r.l, uuid: $u, first: .first[$u]}]
+      else .first[$u] = $r.l end)
+  | .out[];
+
+#: One TSV field: "-" for null or "", otherwise the string (other values as JSON) with backslash, TAB and newline written \\, \t and \n.
+def field:
+  if . == null or . == "" then "-"
+  else (if type == "string" then . else tojson end) | gsub("\\\\"; "\\\\") | gsub("\t"; "\\t") | gsub("\n"; "\\n")
+  end;
+
+#: An array of values as one TSV record (each through s::field).
+def tsv: map(field) | join("\t");
+
+#: The string cut to at most $n characters, ending with "…" when cut; $n of 0 (or less) keeps it whole; non-strings pass through.
+def trunc($n): if type == "string" and $n > 0 and length > $n then .[:($n - 1)] + "…" else . end;
+
+#: A timestamp as YYYY-MM-DDTHH:MM:SSZ (UTC, milliseconds dropped); takes an ISO string or epoch seconds or milliseconds; null stays null.
+def ts:
+  if type == "number" then (if . > 100000000000 then . / 1000 else . end) | floor | todate
+  elif type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}") then .[0:19] + "Z"
+  elif type == "string" then .
+  else null end;
+
+#: The handle "L<line>" of a row or record.
+def handle: "L\(.l)";
+
+#: The line number in a handle "L<line>", or null.
+def line_of: if type == "string" and test("^L[0-9]+$") then .[1:] | tonumber else null end;
+
+def _epoch: sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601;
+
+def _bound_error($spec):
+  error("--since/--until takes a handle (L120), a timestamp (2026-10-30T10:00:04Z, 2026-10-30T10:00Z, 2026-10-30) or an age (90s, 30m, 2h, 7d, 1w), got \($spec | tojson)");
+
+#: A --since/--until value as {line} for a handle, or {from, to} epoch seconds spanning a timestamp's precision or the instant an age before $now; anything else is an error.
+def bound($spec; $now):
+  if ($spec | type) != "string" then _bound_error($spec)
+  elif $spec | test("^L[0-9]+$") then {line: ($spec[1:] | tonumber)}
+  elif $spec | test("^[0-9]+[smhdw]$") then
+    ($spec[:-1] | tonumber) * ({s: 1, m: 60, h: 3600, d: 86400, w: 604800}[$spec[-1:]]) as $age
+    | ($now - $age | floor) as $at | {from: $at, to: $at}
+  else
+    (try (
+      if $spec | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$") then ($spec + "T00:00:00Z" | fromdateiso8601) as $f | {from: $f, to: ($f + 86399)}
+      elif $spec | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}Z$") then ($spec[:16] + ":00Z" | fromdateiso8601) as $f | {from: $f, to: ($f + 59)}
+      elif $spec | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$") then ($spec | _epoch | floor) as $f | {from: $f, to: $f}
+      else null end
+    ) catch null) as $b
+    | if $b then $b else _bound_error($spec) end
+  end;
+
+#: s::bound($spec; now).
+def bound($spec): bound($spec; now);
+
+def _time_of:
+  (.t // .ts // .e.timestamp // null)
+  | if type == "string" then (try (_epoch | floor) catch null) else null end;
+
+#: True when a row or record (.l, and .t, .ts or .e.timestamp) lies inside both bounds from s::bound (null for none), inclusive; time is compared to the second.
+def within($since; $until):
+  .l as $l | _time_of as $t
+  | ($since == null or (if $since | has("line") then $l >= $since.line else $t != null and $t >= $since.from end))
+    and ($until == null or (if $until | has("line") then $l <= $until.line else $t != null and $t <= $until.to end));
+
+def _uniq: reduce .[] as $x ([]; if any(.[]; . == $x) then . else . + [$x] end);
+
+def _text:
+  if type == "string" then .
+  elif type == "array" then map(if .type == "text" then .text elif .type == "image" then "[image]" else empty end) | join("\n")
+  else "" end;
+
+#: A raw message.usage object as {input, cache_creation, cache_read, output}; absent counts are 0. Input: a usage object.
+def usage:
+  {input: (.input_tokens // 0), cache_creation: (.cache_creation_input_tokens // 0),
+   cache_read: (.cache_read_input_tokens // 0), output: (.output_tokens // 0)};
+
+#: API messages in order of first appearance, entries sharing message.id merged across the file: {id, model, synthetic, l, lines, ts, blocks: [{l, block}], usage (the last entry's), context, stop_reason}.
+def messages:
+  reduce (entries[] | select(.e.type == "assistant")) as $r ({order: [], by: {}};
+    ($r.e.message.id // $r.e.uuid // "L\($r.l)") as $id
+    | (if .by[$id] then . else .order += [$id] | .by[$id] = {id: $id, model: null, l: $r.l, lines: [], ts: $r.t, blocks: []} end)
+    | .by[$id].model //= $r.e.message.model
+    | .by[$id].lines += [$r.l]
+    | .by[$id].blocks += [$r.e.message.content // [] | if type == "array" then .[] else {type: "text", text: .} end | {l: $r.l, block: .}]
+    | .by[$id].last = $r.e.message)
+  | .by as $by
+  | .order[] | $by[.]
+  | (.last.usage // {} | usage) as $u
+  | {id, model, synthetic: (.model == "<synthetic>"), l, lines, ts, blocks, usage: $u,
+     context: ($u.input + $u.cache_creation + $u.cache_read), stop_reason: .last.stop_reason};
+
+#: Token totals of the transcript's messages: {messages, synthetic, input, cache_creation, cache_read, output, peak_context, peak_l}.
+def totals:
+  reduce messages as $m ({messages: 0, synthetic: 0, input: 0, cache_creation: 0, cache_read: 0, output: 0, peak_context: 0, peak_l: null};
+    .messages += 1
+    | .synthetic += (if $m.synthetic then 1 else 0 end)
+    | .input += $m.usage.input | .cache_creation += $m.usage.cache_creation
+    | .cache_read += $m.usage.cache_read | .output += $m.usage.output
+    | if $m.context > .peak_context then .peak_context = $m.context | .peak_l = $m.l else . end);
+
+#: The models of the transcript's messages in first-use order, without <synthetic>.
+def models: [messages | select(.synthetic | not) | .model | select(. != null)] | _uniq;
+
+#: True for an internal agent id (acompact-…, aprompt_suggestion-…). Input: an agent id string.
+def internal_agent_id: type == "string" and (startswith("acompact-") or startswith("aprompt_suggestion-"));
+
+#: Why an agent transcript is internal: compaction, prompt-suggestion, warmup (first prompt "Warmup") or transcripts-fork (first prompt carries [cc-sessions:transcripts-fork]); null otherwise and for main transcripts.
+def internal_reason:
+  if .kind == "main" then null
+  elif (.agent // "") | startswith("acompact-") then "compaction"
+  elif (.agent // "") | startswith("aprompt_suggestion-") then "prompt-suggestion"
+  else
+    (first(.rows[] | select(.e.type == "user") | .e.message.content | _text) // "") as $first
+    | if $first == "Warmup" then "warmup"
+      elif $first | contains("[cc-sessions:transcripts-fork]") then "transcripts-fork"
+      else null end
+  end;
+
+#: True when s::internal_reason is not null.
+def is_internal: internal_reason != null;
+
+#: Token totals over an array of transcripts, internal ones skipped and each message.id counted once: {agents, messages, input, cache_creation, cache_read, output}. Input: an array of transcript objects.
+def rollup:
+  map(select(is_internal | not)) as $kept
+  | reduce ($kept[] | messages) as $m ({seen: {}, agents: ($kept | length), messages: 0, input: 0, cache_creation: 0, cache_read: 0, output: 0};
+      if .seen[$m.id] then .
+      else .seen[$m.id] = true | .messages += 1 | .input += $m.usage.input | .cache_creation += $m.usage.cache_creation
+        | .cache_read += $m.usage.cache_read | .output += $m.usage.output end)
+  | del(.seen);
+
+#: Text of message content: a string as is; text blocks joined by newlines, each image as [image]. Input: message.content.
+def content_text: _text;
+
+def _starts_any($prefixes): . as $text | any($prefixes[]; . as $p | $text | startswith($p));
+
+def _tool_results_only:
+  (.message.content | type) == "array" and (.message.content | length) > 0 and all(.message.content[]; .type == "tool_result");
+
+def _user_class($agent; $first):
+  .e as $e
+  | ($e.message.content | _text) as $text
+  | ($e.origin.kind // null) as $origin
+  | if $e.isCompactSummary then "summary"
+    elif $e | _tool_results_only then "tool-result"
+    elif $agent and $first then "from-parent"
+    elif $origin == "task-notification" or ($text | _starts_any(["<task-notification>", "<bash-notification>", "<agent-notification>"])) then "notification"
+    elif $origin == "peer" or ($text | _starts_any(["Another Claude session sent a message", "<teammate-message", "<agent-message"])) then
+      (if $agent and ($text | startswith("<teammate-message")) then "from-parent" else "peer" end)
+    elif $text | startswith("[Request interrupted by user") then "interrupt"
+    elif $text | _starts_any(["<local-command-stdout>", "<local-command-stderr>", "<bash-stdout>", "<bash-stderr>"]) then "output"
+    elif $e.isMeta or $e.isVisibleInTranscriptOnly then "injected"
+    elif $origin != null and $origin != "human" then "injected"
+    elif $text | _starts_any(["[Usage limit", "<local-command-caveat>", "Caveat:"]) then "injected"
+    elif ($text | test("<command-name>")) and ($text | test("<command-name>/") | not) then "injected"
+    elif $agent then "from-parent"
+    else "human" end;
+
+def _human_kind:
+  (.e.message.content | _text) as $text
+  | if $text | test("<command-name>/") then "slash"
+    elif $text | startswith("<bash-input>") then "bash"
+    elif .e.promptSource == "sdk" or .e.promptSource == "system" then "sdk"
+    else "prompt" end;
+
+def _user_rows:
+  (.kind == "subagent" or .kind == "workflow-agent" or .kind == "flat") as $agent
+  | [entries[] | select(.e.type == "user")]
+  | to_entries[]
+  | .key as $i | .value
+  | _user_class($agent; $i == 0) as $class
+  | . + {class: $class, kind: (if $class == "human" then _human_kind else null end), text: (.e.message.content | _text)};
+
+#: Every user entry after de-duplication with its class: human (with kind prompt, slash, bash or sdk), tool-result, injected, summary, notification, peer, from-parent, interrupt or output: {l, t, e, class, kind, text}.
+def user_entries: if ._users then ._users[] else _user_rows end;
+
+def _memo_users: _memo | if ._users then . else ._users = [_user_rows] end;
+
+def _slash_name: [capture("<command-name>(?<n>[^<]*)</command-name>")][0].n // null;
+
+def _slash_text:
+  _slash_name as $name
+  | ([capture("<command-args>(?<a>[\\s\\S]*?)</command-args>")][0].a // "") as $args
+  | ($name | if startswith("/") then . else "/" + . end) + (if ($args | length) > 0 then " " + $args else "" end);
+
+def _strip_ansi: gsub("\u001b\\[[0-9;?]*[A-Za-z]"; "");
+
+def _output_text:
+  [scan("<(?:local-command|bash)-std(?:out|err)>([\\s\\S]*?)</(?:local-command|bash)-std(?:out|err)>") | .[0] | select(length > 0)]
+  | join("\n") | _strip_ansi;
+
+def _record($r; $kind; $text):
+  {l: $r.l, kind: $kind, text: $text, ts: $r.t, uuid: ($r.e.uuid // null), also: [], output: null, tool: null, tool_use_id: null, decision: null};
+
+def _tool_uses:
+  reduce (entries[] | select(.e.type == "assistant") | {l, t} as $at | .e.message.content | arrays | .[] | select(.type == "tool_use") | . + $at) as $u
+    ({}; .[$u.id] = $u);
+
+def _result_text: .content | _text;
+
+def _rejected: (_result_text | startswith("The user doesn't want to proceed with this tool use"));
+
+def _feedback: (_result_text | [capture("the user said:\n(?<f>[\\s\\S]*)$")][0].f // "") | sub("\\s+$"; "");
+
+def _answer_text($result):
+  if ($result | type) == "object" and ($result.answers | type) == "object" then
+    $result.answers | to_entries | map("\(.key) → \(.value | if type == "array" then join(", ") else tostring end)") | join("\n")
+  else
+    [_result_text | scan("\"([^\"]+)\"=\"([^\"]*)\"") | "\(.[0]) → \(.[1])"] | join("\n")
+  end;
+
+def _tool_decisions:
+  _tool_uses as $uses
+  | entries[] | select(.e.type == "user" and (.e | _tool_results_only)) | . as $r
+  | .e.message.content[] | select(.type == "tool_result") | . as $block
+  | $uses[$block.tool_use_id] as $use
+  | select($use != null)
+  | if $use.name == "ExitPlanMode" then
+      (if $block | _rejected then "rejected" elif ($block | _result_text | startswith("User has approved your plan")) then "approved" else "rejected" end) as $decision
+      | ($use.input.plan // $r.e.toolUseResult.plan? // "") as $plan
+      | ($block | _feedback) as $feedback
+      | _record($r; "plan"; (if $decision == "approved" then "approved: \($plan)" elif $feedback != "" then "rejected: \($feedback)" else "rejected" end))
+        + {tool: $use.name, tool_use_id: $use.id, decision: $decision}
+    elif $block | _rejected then
+      _record($r; "denied"; ($block | _feedback)) + {tool: $use.name, tool_use_id: $use.id}
+    elif $use.name == "AskUserQuestion" and ($block.is_error | not) then
+      _record($r; "answer"; ($block | _answer_text($r.e.toolUseResult))) + {tool: $use.name, tool_use_id: $use.id}
+    else empty end;
+
+def _attach_outputs($outputs):
+  reduce $outputs[] as $o (.;
+    (map(select((.kind == "slash" or .kind == "bash") and .l < $o.l)) | last | .l) as $owner
+    | if $owner == null then . else map(if .l == $owner and .output == null then .output = {l: $o.l, text: $o.text} else . end) end);
+
+#: Output events of slash and ! commands: {l, kind: "output", text, ts, of}, of being the line of the command it belongs to (null if none).
+def outputs:
+  _memo_users
+  | [user_entries] as $users
+  | [ $users[] | select(.class == "human" and (.kind == "slash" or .kind == "bash")) | .l ]
+    + [ entries[] | select(.e.type == "system" and .e.subtype == "local_command" and ((.e.content // "") | type == "string" and test("<command-name>"))) | .l ]
+  | sort as $commands
+  | $users[] | select(.class == "output")
+  | . as $o
+  | {l, kind: "output", text: (.text | _output_text), ts: .t, of: ($commands | map(select(. < $o.l)) | last)};
+
+#: Human input in file order: {l, kind, text, ts, uuid, also, output, tool, tool_use_id, decision}; kind is prompt, slash, bash, sdk, queued, answer, denied or plan; also lists merged duplicate lines; output is {l, text} of a command's output.
+def human_inputs:
+  _memo_users
+  | . as $t
+  | [user_entries] as $users
+  | ([$users[] | .text]) as $user_texts
+  | ($users | map(select(.class == "human"))) as $human
+  | ($users | map(select((.e.isMeta or .e.isCompactSummary or .e.isVisibleInTranscriptOnly) | not))) as $visible
+  | [
+      ( $human[] | . as $u
+        | if .kind == "slash" then _record($u; "slash"; (.text | _slash_text))
+            + {also: [$visible | map(select(.l < $u.l)) | last | select(. != null and .kind == "prompt" and (.text | test("^/")) and ((.text | capture("^/(?<n>[^\\s]+)").n) == ($u.text | _slash_name | ltrimstr("/")))) | .l]}
+          elif .kind == "bash" then _record($u; "bash"; ([.text | capture("<bash-input>(?<c>[\\s\\S]*?)</bash-input>")][0].c // .text))
+          else _record($u; .kind; .text) end ),
+      ( $t | entries[] | select(.e.type == "system" and .e.subtype == "local_command" and ((.e.content // "") | type == "string" and test("<command-name>")))
+        | _record(.; "slash"; (.e.content | _slash_text)) ),
+      ( $t | entries[] | select(.e.type == "attachment" and .e.attachment.type == "queued_command" and .e.attachment.commandMode == "prompt"
+            and ((.e.attachment.origin.kind // "human") == "human"))
+        | (.e.attachment.prompt | _text) as $text
+        | select(($text | startswith("<agent-message") | not) and ($user_texts | index([$text]) | not))
+        | _record(.; "queued"; $text) ),
+      ( $t | ([entries[] | select(.e.type == "attachment" and .e.attachment.type == "queued_command") | .e.attachment.prompt | _text]) as $queued
+        | entries[] | select(.e.type == "queue-operation" and .e.operation == "enqueue" and (.e.content | type) == "string")
+        | .e.content as $text
+        | select(($text | test("\\S")) and ($text | startswith("<") | not) and ((try ($text | fromjson | type) catch "text") | IN("object", "array") | not)
+            and ($user_texts | index([$text]) | not) and ($queued | index([$text]) | not))
+        | _record(.; "queued"; $text) ),
+      ( $t | _tool_decisions )
+    ]
+  | (map(.also[]) ) as $merged
+  | map(select(.l as $l | $merged | index([$l]) | not))
+  | sort_by(.l)
+  | _attach_outputs([$t | outputs])
+  | .[];
+
+#: Interrupt events ([Request interrupted by user…]): {l, kind: "interrupt", text, ts, uuid, interrupted}, interrupted being the interrupted message id when recorded.
+def interrupts:
+  _memo_users | user_entries | select(.class == "interrupt")
+  | {l, kind: "interrupt", text, ts: .t, uuid: (.e.uuid // null), interrupted: (.e.interruptedMessageId // null)};
+
+#: s::human_inputs and s::interrupts together in file order.
+def human_events: _memo_users | [human_inputs, interrupts] | sort_by(.l) | .[];
+
+def _tool_results:
+  reduce (entries[] | select(.e.type == "user" and (.e | _tool_results_only)) | . as $r
+      | .e.message.content[] | select(.type == "tool_result") | {id: .tool_use_id, l: $r.l, block: ., result: ($r.e.toolUseResult // null)}) as $x
+    ({}; .[$x.id] = {l: $x.l, block: $x.block, result: $x.result});
+
+def _skill_dir_name: [capture("^Base directory for this skill: (?<d>[^\n]*)")][0].d // "" | sub("/+$"; "") | split("/") | last;
+
+def _skill_event($r; $event; $name; $how): {l: $r.l, event: $event, name: $name, how: $how, ts: $r.t, tool_use_id: null, result_l: null, body_l: null};
+
+#: Skill events in file order: {l, event, name, how, ts, tool_use_id, result_l, body_l}; event is load, failed, re-invoked or restore; how is tool, skill, bundled or orphan (null for restores).
+def skill_events:
+  _memo_users
+  | . as $t
+  | [user_entries] as $users
+  | _tool_uses as $uses
+  | _tool_results as $results
+  | ([$uses[] | select(.name == "Skill") | .id]) as $skill_calls
+  | ($users | map(select(.e.isMeta and (.e.sourceToolUseID | type) == "string")) | INDEX(.e.sourceToolUseID)) as $tool_bodies
+  | [ range(0; $users | length) as $i | $users[$i] as $u
+      | select((($u.class == "human" and $u.kind == "slash") or ($u.text | test("<command-name>[^/<][^<]*</command-name>[\\s\\S]*<skill-format>"))))
+      | $users[$i + 1] as $next
+      | select($next != null and $next.e.isMeta and (($next.e.sourceToolUseID // null) == null)
+          and ($next.text | startswith("<local-command-caveat>") | not))
+      | {trigger: $u, body: $next} ] as $slash
+  | ([$slash[].body.l] + [$skill_calls[] as $id | $tool_bodies[$id].l // empty]) as $claimed
+  | [
+      ( $uses[] | select(.name == "Skill") | . as $use
+        | $results[$use.id] as $res
+        | $tool_bodies[$use.id] as $body
+        | _skill_event($use; "load"; ($use.input.skill // $use.input.command // null); "tool")
+          + {tool_use_id: $use.id, result_l: ($res.l // null), body_l: ($body.l // null)}
+        | if $res == null or $res.block.is_error == true or ($res.block | _result_text | startswith("Launching skill:") | not) then
+            .event = "failed" | .body_l = null
+          elif $body != null and ($body.text | test("^Skill /\\S+ was loaded earlier")) then .event = "re-invoked"
+          else . end ),
+      ( $slash[] | _skill_event(.trigger; "load"; (.trigger.text | _slash_name | ltrimstr("/"));
+            (if .body.text | startswith("Base directory for this skill:") then "skill" else "bundled" end))
+          + {body_l: .body.l} ),
+      ( $users[] | select(.e.isMeta and (.text | startswith("Base directory for this skill:")) and (.l as $l | $claimed | index([$l]) | not))
+        | _skill_event(.; "load"; (.text | _skill_dir_name); "orphan") + {body_l: .l} ),
+      ( $t | entries[] | select(.e.type == "attachment" and .e.attachment.type == "invoked_skills") | . as $r
+        | .e.attachment.skills[]? | _skill_event($r; "restore"; .name; null) )
+    ]
+  | sort_by(.l) | .[];
+
+#: The skill load events of s::skill_events.
+def skill_loads: skill_events | select(.event == "load");
+
+#: Assistant entries carrying attributionSkill, the skill active while they were written (never a load): {l, skill}.
+def attributions: entries[] | select(.e.type == "assistant" and (.e.attributionSkill | type) == "string") | {l, skill: .e.attributionSkill};
+
+#: True when the input skill name and $q name the same skill: bare and namespaced names match by their last segment. Input: a skill name.
+def skill_match($q): (tostring | split(":") | last) == ($q | tostring | split(":") | last);
+
+#: The persisted-output marker of a tool result, parsed only when the text starts with it: {stated_size, stated_path, preview_size}, else null. Input: a result text.
+def persisted_marker:
+  if type == "string" and startswith("<persisted-output>\nOutput too large (") then
+    [capture("^<persisted-output>\nOutput too large \\((?<size>[0-9.]+(?:B|KB|MB))\\)\\. Full output saved to: (?<path>[^\n]+)\n\nPreview \\(first (?<preview>[0-9.]+(?:B|KB|MB))\\):\n")][0]
+    | if . then {stated_size: .size, stated_path: .path, preview_size: .preview} else null end
+  else null end;
+
+def _persisted($t):
+  persisted_marker as $m
+  | if $m == null then null
+    else
+      (if $t.session_dir then "\($t.session_dir)/tool-results/\($m.stated_path | split("/") | last)" else null end) as $fallback
+      | (if $t.sizes[$m.stated_path] != null then $m.stated_path
+         elif $fallback != null and $t.sizes[$fallback] != null then $fallback
+         else null end) as $path
+      | $m + {path: $path, bytes: (if $path then $t.sizes[$path] else null end)}
+    end;
+
+#: Tool calls paired with their results, in file order: {l, id, name, input, wire_input, message_id, ts, result_l, text, chars, is_error, status (ok, error, denied, none), feedback, persisted, result}; persisted is {stated_size, stated_path, preview_size, path, bytes}, path and bytes from the saved file (null when it is missing); result is toolUseResult.
+def tool_calls:
+  _memo
+  | . as $t
+  | _tool_results as $results
+  | entries[] | select(.e.type == "assistant") | . as $r
+  | .e.message.content | arrays | .[] | select(.type == "tool_use") | . as $use
+  | $results[$use.id] as $res
+  | (if $res then $res.block | _result_text else null end) as $text
+  | ($res != null and ($res.block | _rejected)) as $rejected
+  | {
+      l: $r.l, id: $use.id, name: $use.name, input: $use.input,
+      wire_input: ($r.e.wireToolInputs[$use.id]? // null), message_id: ($r.e.message.id // null), ts: $r.t,
+      result_l: ($res.l // null), text: $text, chars: (if $text then $text | length else null end),
+      is_error: (if $res and ($res.block | has("is_error")) then $res.block.is_error else null end),
+      status: (if $res == null then "none" elif $rejected then "denied" elif $res.block.is_error == true then "error" else "ok" end),
+      feedback: (if $rejected then ($res.block | _feedback | if . == "" then null else . end) else null end),
+      persisted: (if $text then $text | _persisted($t) else null end),
+      result: ($res.result // null)
+    };
+
+#: Every content kind search can match, default kinds first.
+def content_kinds:
+  ["prompt", "assistant", "tool-input", "tool-result", "from-parent", "agent-result", "plan", "file", "hook", "recap",
+   "thinking", "injected", "summary", "notification", "peer"];
+
+#: The content kinds searched by default.
+def default_kinds: content_kinds[:10];
+
+def _strings: [.. | strings];
+
+def _attachment_content:
+  (.type // "") as $type
+  | if $type == "structured_output" then {kind: "agent-result", text: (.data | if type == "string" then . else tojson end)}
+    elif $type == "plan_file_reference" then {kind: "plan", text: (.planContent // "")}
+    elif $type == "file" then {kind: "file", text: ([.content.file.content?, (.content | strings)] | map(strings) | join("\n"))}
+    elif $type == "edited_text_file" then {kind: "file", text: ([.snippet, .content] | map(strings) | join("\n"))}
+    elif ($type | startswith("hook_")) or $type == "async_hook_response" then
+      {kind: "hook", text: ([.stdout, .content, .stderr] | map(strings | select(length > 0)) | _uniq | join("\n"))}
+    else empty end;
+
+#: Searchable content in file order, one record per piece: {l, kind, text, ts}; kinds as in s::content_kinds. Everything else (api-request*, progress, queue-operation, titles, state markers, other attachments) is never content.
+def content:
+  _memo_users
+  | . as $t
+  | [
+      (human_inputs | {l, kind: "prompt", text, ts}),
+      (user_entries | select(.class | IN("from-parent", "injected", "summary", "notification", "peer")) | {l, kind: .class, text, ts: .t}),
+      (user_entries | select(.class == "tool-result") | . as $u
+        | .e.message.content[] | select(.type == "tool_result") | {l: $u.l, kind: "tool-result", text: _result_text, ts: $u.t}),
+      (entries[] | select(.e.type == "assistant") | . as $r | .e.message.content | arrays | .[]
+        | if .type == "text" and ((.text // "") | length) > 0 then {l: $r.l, kind: "assistant", text, ts: $r.t}
+          elif .type == "thinking" and ((.thinking // "") | length) > 0 then {l: $r.l, kind: "thinking", text: .thinking, ts: $r.t}
+          elif .type == "tool_use" then
+            {l: $r.l, kind: "tool-input", ts: $r.t,
+             text: ((.input | _strings) + ($r.e.wireToolInputs[.id]? // null | _strings) | _uniq | join("\n"))}
+          else empty end),
+      (entries[] | select(.e.type == "attachment") | . as $r
+        | .e.attachment | _attachment_content | select(.text != "") | {l: $r.l, kind, text, ts: $r.t}),
+      (entries[] | select(.e.type == "system" and .e.subtype == "away_summary") | {l, kind: "recap", text: (.e.content // ""), ts: .t}),
+      (if $t.kind == "journal" then
+         entries[] | select(.e.type == "result") | {l, kind: "agent-result", text: (.e.result | if type == "string" then . else tojson end), ts: .t}
+       else empty end)
+    ]
+  | sort_by(.l) | .[];
+
+#: s::content restricted to the kinds in the array $kinds.
+def content($kinds): content | select(.kind as $k | $kinds | any(.[]; . == $k));
+
+#: Entry types that are content or known state (titles, mode markers, request copies, journal records, ...).
+def known_entry_types:
+  ["user", "assistant", "attachment", "system", "summary", "ai-title", "custom-title", "agent-name", "last-prompt",
+   "permission-mode", "mode", "atis-latch", "api-request", "api-request-blob", "api-request-shape", "cost-state",
+   "queue-operation", "progress", "relocated", "fork-context-ref", "pr-link", "tools-used", "file-history-snapshot",
+   "file-history-delta", "worktree-state", "agent-setting", "bridge-session", "launched", "started", "result"];
+
+#: Attachment types that are content or known state; any hook_* type is also known (as content).
+def known_attachment_types:
+  ["queued_command", "structured_output", "plan_file_reference", "file", "edited_text_file", "async_hook_response",
+   "skill_listing", "invoked_skills", "instructions", "nested_memory", "deferred_tools_delta", "deferred_tools_record",
+   "agent_listing_delta", "mcp_instructions_delta", "command_permissions", "budget_usd", "total_tokens_reminder",
+   "task_reminder", "batching_reminder_sent", "bash_output_audience_note", "silent_turn_reminder", "date", "date_change",
+   "model", "environment", "session_context", "auto_mode", "auto_mode_exit", "plan_mode", "plan_mode_exit",
+   "plan_mode_reentry", "ultra_effort_enter", "ultra_effort_exit", "credential_org", "remote_session_change",
+   "workflow_keyword_request", "compact_file_reference", "read_truncation_notice", "thinking_drop", "output_style",
+   "max_turns_reached", "team_context", "agent_mention", "diagnostics", "prompt_snapshot"];
+
+#: System subtypes that are content or known state; any model_*_fallback subtype is also known.
+def known_system_subtypes:
+  ["compact_boundary", "microcompact_boundary", "local_command", "informational", "away_summary", "stop_hook_summary",
+   "turn_duration", "api_error", "scheduled_task_fire", "agents_killed"];
+
+#: An entry's type label: its type, or attachment:<type> / system:<subtype>. Input: an entry.
+def entry_type:
+  (.type // "?") as $type
+  | if $type == "attachment" then "attachment:\(.attachment.type // "?")"
+    elif $type == "system" then "system:\(.subtype // "?")"
+    else $type end;
+
+#: True when a type label from s::entry_type is in the content or state lists. Input: a label.
+def is_known_type:
+  . as $label
+  | if startswith("attachment:") then .[11:] as $a | ($a | startswith("hook_")) or any(known_attachment_types[]; . == $a)
+    elif startswith("system:") then .[7:] as $s | ($s | test("^model_.*_fallback$")) or any(known_system_subtypes[]; . == $s)
+    else any(known_entry_types[]; . == $label) end;
+
+#: Type labels in the transcript that no rule knows: {type, l (first line), count}.
+def unknown_types:
+  [entries[] | {l, type: (.e | entry_type)} | select(.type | is_known_type | not)]
+  | group_by(.type) | map({type: .[0].type, l: (map(.l) | min), count: length}) | sort_by(.l) | .[];
+
+def _tag($name): [capture("<\($name)>(?<v>[\\s\\S]*?)</\($name)>")][0].v // null;
+
+def _object: if type == "object" then . else {} end;
+
+def _notification_for($notes; $call_id; $task_id):
+  first($notes[] | select(.tool_use_id == $call_id))
+  // (if $task_id then first($notes[] | select(.tool_use_id == null and .task_id == $task_id)) else null end)
+  // null;
+
+#: Background completions (<task-notification> user entries): {l, tool_use_id, task_id, status, summary, result, output_file, ts}; output_file paths are ephemeral and never followed.
+def notifications:
+  _memo_users | user_entries | select(.class == "notification") | .text as $x
+  | {l, tool_use_id: ($x | _tag("tool-use-id")), task_id: ($x | _tag("task-id")), status: ($x | _tag("status")),
+     summary: ($x | _tag("summary")), result: ($x | _tag("result")), output_file: ($x | _tag("output-file")), ts: .t};
+
+#: Agent and Task calls: {l, id, tool, description, subagent_type, name, prompt, background, agent_id, status, result_l, ts, notification}; agent_id comes from toolUseResult.agentId or agent_id, else the result text; notification is the s::notifications record linked by tool-use id, else by task id.
+def agent_calls:
+  _memo_users
+  | [notifications] as $notes
+  | tool_calls | select(.name == "Agent" or .name == "Task")
+  | (.result | _object) as $r
+  | ($r.agentId // $r.agent_id // ([(.text // "") | capture("agent_?[iI]d: (?<id>[A-Za-z0-9_-]+)")][0].id) // null) as $agent
+  | {l, id, tool: .name, description: .input.description, subagent_type: .input.subagent_type, name: .input.name,
+     prompt: .input.prompt, background: (.input.run_in_background == true), agent_id: $agent,
+     status: ($r.status // .status), result_l, ts, notification: _notification_for($notes; .id; $agent)};
+
+#: Workflow calls: {l, id, name, run_id, task_id, transcript_dir, script_path, status, result_l, ts, notification}; stored paths are hints (find the run with cc_run_dir).
+def workflow_calls:
+  _memo_users
+  | [notifications] as $notes
+  | tool_calls | select(.name == "Workflow")
+  | (.result | _object) as $r
+  | (.text // "") as $text
+  | ($r.runId // ([$text | capture("Run ID: (?<v>wf_[A-Za-z0-9_-]+)")][0].v) // null) as $run
+  | ($r.taskId // ([$text | capture("Task ID: (?<v>[A-Za-z0-9_-]+)")][0].v) // null) as $task
+  | {l, id, name: ($r.workflowName // .input.name // null), run_id: $run, task_id: $task,
+     transcript_dir: ($r.transcriptDir // ([$text | capture("Transcript dir: (?<v>[^\n]+)")][0].v) // null),
+     script_path: ($r.scriptPath // ([$text | capture("Script file: (?<v>[^\n]+)")][0].v) // null),
+     status: ($r.status // .status), result_l, ts, notification: _notification_for($notes; .id; $task)};
+
+#: Fork agents launched from this transcript (system entries with launchedAgentId): {l, agent_id}.
+def fork_launches: entries[] | select(.e.type == "system" and (.e.launchedAgentId | type) == "string") | {l, agent_id: .e.launchedAgentId};
+
+#: A fork agent's fork-context-ref line: {l, parent_session, parent_last_uuid}, else null.
+def fork_ref:
+  first(.rows[] | select(.e.type == "fork-context-ref") | {l, parent_session: .e.parentSessionId, parent_last_uuid: .e.parentLastUuid}) // null;
+
+#: Each agent of a workflow run's journal.jsonl: {agent_id, key, label, phase, started_l, result_l, result}. Input: the journal's transcript object.
+def journal:
+  [entries[] | select(.e.type == "started" or .e.type == "result")] as $rows
+  | ($rows | map(.e.agentId | strings) | _uniq)[] as $agent
+  | (first($rows[] | select(.e.agentId == $agent and .e.type == "started")) // null) as $s
+  | ([$rows[] | select(.e.agentId == $agent and .e.type == "result")] | last) as $r
+  | {agent_id: $agent, key: ($s.e.key // $r.e.key // null), label: ($s.e.label // null), phase: ($s.e.phase // null),
+     started_l: ($s.l // null), result_l: ($r.l // null), result: ($r.e.result // null)};
+
+#: An agent transcript's delegation prompt (its first from-parent entry): {l, text, ts}, else null.
+def delegation: first(user_entries | select(.class == "from-parent") | {l, text, ts: .t}) // null;
+
+#: An agent transcript's result: the last structured_output (data, and text as JSON), else the last assistant text: {l, text, data, ts}, else null.
+def agent_result:
+  ([entries[] | select(.e.type == "attachment" and .e.attachment.type == "structured_output")] | last) as $so
+  | if $so then {l: $so.l, text: ($so.e.attachment.data | if type == "string" then . else tojson end), data: $so.e.attachment.data, ts: $so.t}
+    else [entries[] | select(.e.type == "assistant") | . as $r | .e.message.content | arrays | .[]
+          | select(.type == "text" and ((.text // "") | length) > 0) | {l: $r.l, text, data: null, ts: $r.t}] | last
+    end;
+
+#: The record in $calls (from s::agent_calls) that started this agent transcript: by agent id, by the meta's toolUseId, else by delegation prompt text; null if none.
+def matching_call($calls):
+  . as $t
+  | (delegation.text // null) as $prompt
+  | first(
+      ($calls[] | select($t.agent != null and .agent_id == $t.agent)),
+      ($calls[] | select(($t.meta.toolUseId? // null) != null and .id == $t.meta.toolUseId)),
+      ($calls[] | select($prompt != null and .prompt == $prompt))
+    ) // null;
+
+def _last_entry(f): [entries[] | select(f)] | last;
+
+#: An agent transcript's label: {text, source, l}: its meta description or name (source meta), else $journal_label (journal), else its delegation prompt (prompt); null if none.
+def agent_label($journal_label):
+  _memo_users
+  | if (.meta.description? // "") != "" then {text: .meta.description, source: "meta", l: null}
+  elif (.meta.name? // "") != "" then {text: .meta.name, source: "meta", l: null}
+  elif ($journal_label // "") != "" then {text: $journal_label, source: "journal", l: null}
+  else delegation | if . then {text, source: "prompt", l} else null end
+  end;
+
+#: The label {text, source, l}: for a session the last custom-title, else the last ai-title containing a space, else agent-name, else a legacy summary, else the first human input (source prompt; untruncated); for an agent s::agent_label(null).
+def label_of:
+  _memo_users
+  | if .kind == "subagent" or .kind == "workflow-agent" or .kind == "flat" then agent_label(null)
+  else
+    _last_entry(.e.type == "custom-title" and ((.e.customTitle // "") | length) > 0) as $custom
+    | _last_entry(.e.type == "ai-title" and ((.e.aiTitle // "") | test(" "))) as $ai
+    | _last_entry(.e.type == "agent-name" and ((.e.agentName // "") | length) > 0) as $name
+    | _last_entry(.e.type == "summary" and ((.e.summary // "") | length) > 0) as $summary
+    | if $custom then {text: $custom.e.customTitle, source: "custom-title", l: $custom.l}
+      elif $ai then {text: $ai.e.aiTitle, source: "ai-title", l: $ai.l}
+      elif $name then {text: $name.e.agentName, source: "agent-name", l: $name.l}
+      elif $summary then {text: $summary.e.summary, source: "summary", l: $summary.l}
+      else first(human_inputs | {text, source: "prompt", l}) // null
+      end
+  end;
+
+#: Where the session came from: sdk when an entrypoint starts with sdk or a prompt's promptSource is sdk, else the first entrypoint, else cli.
+def origin:
+  [entries[] | .e.entrypoint | strings] as $entrypoints
+  | if any($entrypoints[]; startswith("sdk")) or any(entries[]; .e.type == "user" and .e.promptSource == "sdk") then "sdk"
+    elif ($entrypoints | length) > 0 then $entrypoints[0]
+    else "cli" end;
+
+#: True when the transcript has no user or assistant entry (listings leave stubs out).
+def is_stub: any(entries[]; .e.type == "user" or .e.type == "assistant") | not;
+
+#: The distinct cwd values in first-use order.
+def cwds: [entries[] | .e.cwd | strings] | _uniq;
+
+#: The first cwd value in file order (line 1 often has none), else null.
+def first_cwd: first(entries[] | .e.cwd | strings) // null;
+
+#: The distinct sessionId values in first-use order (a resumed copy holds two).
+def session_ids: [entries[] | .e.sessionId | strings] | _uniq;
+
+#: The distinct Claude Code versions in first-use order.
+def versions: [entries[] | .e.version | strings] | _uniq;
+
+#: The earliest and latest timestamps, whatever the file order: {first, last}.
+def span: [entries[] | .e.timestamp | strings] | {first: min, last: max};
+
+#: Compact boundaries: {l, trigger, pre_tokens, post_tokens, dropped, duration_ms, summary_l, logical_parent, ts}; summary_l is the compaction summary entry that follows.
+def compactions:
+  [entries[]] as $rows
+  | range(0; $rows | length) as $i
+  | $rows[$i] | select(.e.type == "system" and .e.subtype == "compact_boundary")
+  | (first($rows[($i + 1):][] | select((.e.type == "system" and .e.subtype == "compact_boundary") or (.e.type == "user" and .e.isCompactSummary)))
+     | select(.e.type == "user")) as $summary
+  | .e.compactMetadata as $m
+  | {l, trigger: $m.trigger, pre_tokens: $m.preTokens, post_tokens: $m.postTokens, dropped: $m.cumulativeDroppedTokens,
+     duration_ms: $m.durationMs, summary_l: ($summary.l // null), logical_parent: (.e.logicalParentUuid // null), ts: .t};
+
+#: Rows matching $ref: a handle L<line> (any line, repeats included), a uuid, a toolu_… id (the call and its result) or a message id.
+def lookup($ref):
+  if $ref | test("^L[0-9]+$") then ($ref | line_of) as $n | .rows[] | select(.l == $n)
+  elif $ref | startswith("toolu_") then
+    entries[] | select(any(.e.message.content? | arrays | .[]; (.type == "tool_use" and .id == $ref) or (.type == "tool_result" and .tool_use_id == $ref)))
+  else entries[] | select(.e.uuid == $ref or .e.message.id? == $ref) end;
+
+#: The rows above $row, nearest first, following parentUuid (or logicalParentUuid where parentUuid is null, as after a compaction).
+def ancestors($row):
+  (reduce entries[] as $r ({}; if ($r.e.uuid | type) == "string" then .[$r.e.uuid] = $r else . end)) as $by
+  | [limit(100000; $row | recurse((.e.parentUuid // .e.logicalParentUuid // null) as $p | if $p then $by[$p] // empty else empty end))]
+  | .[1:][];
+
+#: The rows whose parentUuid is $uuid.
+def children($uuid): entries[] | select(.e.parentUuid == $uuid);
+
+#: API errors: assistant entries marked isApiErrorMessage and system api_error entries: {l, status, text, ts}.
+def api_errors:
+  entries[]
+  | select((.e.type == "assistant" and .e.isApiErrorMessage == true) or (.e.type == "system" and .e.subtype == "api_error"))
+  | {l, status: (.e.apiErrorStatus // .e.error.status? // null),
+     text: (if .e.type == "assistant" then .e.message.content | _text else (.e.content // .e.error // "" | if type == "string" then . else tojson end) end),
+     ts: .t};
+
+#: The JSON object of a one-line JSON file, such as a workflow run record (workflows/<run-id>.json) or an agent's .meta.json; null otherwise.
+def document: if (.rows | length) == 1 then .rows[0].e else null end;
+
+#: cost-state entries, each covering one process run: {l, total_cost_usd, models (modelUsage by model), duration_ms, start_time}.
+def cost_states:
+  entries[] | select(.e.type == "cost-state")
+  | {l, total_cost_usd: (.e.totalCostUSD // null), models: (.e.modelUsage // {}), duration_ms: (.e.totalDuration // null), start_time: (.e.startTime // null)};

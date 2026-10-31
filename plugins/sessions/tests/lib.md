@@ -1,0 +1,919 @@
+---
+prepend: [setup.md]
+---
+
+# lib/sessions.jq through cc-sessions jq
+
+Values come from `fixtures/FACTS.md`.
+
+## The function list
+
+`cc-sessions jq --help` lists every public `s::` function, each with its arguments and a description.
+
+```scrut
+$ cc-sessions jq --help | awk '/^  s::/ { sig = $1; n = 0; if (sig ~ /\(/) { n = gsub(/;/, ";", sig) + 1 }; sub(/\(.*/, "", sig); print substr(sig, 4) "/" n }' | sort > documented.txt
+> jq -n -r -L "$CC_TEST_ROOT/lib" '"sessions" | modulemeta | .defs[] | select(startswith("_") | not)' | sort > defined.txt
+> diff defined.txt documented.txt && echo same; [ -s defined.txt ] && echo nonempty
+same
+nonempty
+```
+
+```scrut
+$ cc-sessions jq --help | awk '/^  s::/ && NF < 3 { print "undocumented: " $0 }'; echo checked
+checked
+```
+
+## Transcript objects
+
+```scrut
+$ cc-sessions jq '[.kind, .session, .agent, .run, .lines, (.rows | length), (.skipped | length), (.mtime | todate)] | map(. // "-") | @tsv' a7c3e9f a9e8 -- -r
+main\ta7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e\t-\t-\t83\t83\t0\t2026-10-30T11:30:00Z (escaped)
+workflow-agent\ta7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e\ta9e8d7c6b5a4f3e21\twf_5d1c9a7e-3b2\t5\t5\t0\t2026-10-30T10:24:00Z (escaped)
+```
+
+Paths are absolute, `bytes` is the file size, and an agent's `meta` is its `.meta.json`.
+
+```scrut
+$ cc-sessions jq '.session_dir, .project_dir, .file' 7c3e9b -- -r | cc_test_rel
+> cc-sessions jq '[.bytes, .meta.description, .meta.toolUseId] | @tsv' 7c3e9b -- -r; wc -c < "$ALPHA/subagents/agent-a7c3e9b2d4f6a8c01.jsonl" | tr -d ' '
+<root>/projects/-tmp-sessions-fixture-alpha/a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e
+<root>/projects/-tmp-sessions-fixture-alpha
+<root>/projects/-tmp-sessions-fixture-alpha/a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e/subagents/agent-a7c3e9b2d4f6a8c01.jsonl
+\d+\tSurvey tokenizer tests\ttoolu_01FxAlpha000000000000011 (regex)
+\d+ (regex)
+```
+
+```scrut
+$ [ "$(cc-sessions jq '.bytes' 7c3e9b)" = "$(wc -c < "$ALPHA/subagents/agent-a7c3e9b2d4f6a8c01.jsonl" | tr -d ' ')" ] && echo same-size
+same-size
+```
+
+`sizes` maps every file under the owning session's `tool-results/` to its size on disk.
+
+```scrut
+$ cc-sessions jq '.sizes | to_entries[] | "\(.value) \(.key)"' a7c3e9f a0f1 -- -r | cc_test_rel
+3402 <root>/projects/-tmp-sessions-fixture-alpha/a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e/tool-results/b4k7m2q9x.txt
+3402 <root>/projects/-tmp-sessions-fixture-alpha/a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e/tool-results/b4k7m2q9x.txt
+```
+
+## Entries and de-duplication
+
+`s::entries` keeps the first row of each `uuid`, in file order; BETA has 22 lines, 1 corrupt and 6 re-appended.
+
+```scrut
+$ cc-sessions jq '[s::entries | length, (map(.l) | .[-3:])]' b2d4 2>/dev/null
+[15,[13,21,22]]
+```
+
+`s::duplicates` lists the dropped rows with the line of the row they repeat.
+
+```scrut
+$ cc-sessions jq '[s::duplicates | "L\(.l)=L\(.first)"] | join(" ")' b2d4 -- -r 2>/dev/null
+L14=L2 L15=L3 L16=L4 L17=L5 L18=L6 L19=L7
+```
+
+Each entry row carries `t`, its own timestamp or the nearest earlier one; entries before any timestamp have none.
+
+```scrut
+$ cc-sessions jq '[s::entries[] | select(.l == 1 or .l == 3 or .l == 9) | .t]' a7c3e9f
+[null,"2026-10-30T10:00:01.950Z","2026-10-30T10:00:07.350Z"]
+```
+
+## Fields, records and times
+
+`s::field` writes one TSV field: `-` for null or empty, and TAB, newline and backslash escaped.
+
+```scrut
+$ cc-sessions jq '[null, "", "a\tb\nc\\d", 12, true, {"k": "v"}] | map(s::field) | join(" ")' -- -n -r
+- - a\tb\nc\\d 12 true {"k":"v"}
+```
+
+`s::tsv` joins fields into one record.
+
+```scrut
+$ cc-sessions jq '["L4", null, "two\nlines"] | s::tsv' -- -n -r
+L4\t-\ttwo\\nlines (escaped)
+```
+
+`s::trunc(n)` cuts text to at most n characters, ending with `…`; 0 keeps it whole.
+
+```scrut
+$ cc-sessions jq '[("abcdefghij" | s::trunc(5), s::trunc(10), s::trunc(0)), (null | s::trunc(3))]' -- -n -c
+["abcd…","abcdefghij","abcdefghij",null]
+```
+
+`s::ts` prints a timestamp as `YYYY-MM-DDTHH:MM:SSZ`, dropping milliseconds; it also takes epoch milliseconds or seconds.
+
+```scrut
+$ cc-sessions jq '["2026-10-30T10:00:04.781Z", "2026-10-30T10:00:04Z", 1793354400000, 1793354400, null] | map(s::ts)' -- -n -c
+["2026-10-30T10:00:04Z","2026-10-30T10:00:04Z","2026-10-30T10:00:00Z","2026-10-30T10:00:00Z",null]
+```
+
+`s::handle` is `L<line>`, and `s::line_of` reads one back.
+
+```scrut
+$ cc-sessions jq '({l: 12} | s::handle), ("L57" | s::line_of), ("57" | s::line_of)' -- -n -c
+"L12"
+57
+null
+```
+
+## --since and --until
+
+`s::bound` reads a handle, a timestamp at any precision, or an age before `$now`; a time bound spans its precision.
+
+```scrut
+$ cc-sessions jq '"L12", "2026-10-30", "2026-10-30T10:00Z", "2026-10-30T10:00:04.781Z", "2h" | s::bound(.; 1793354400) | if .line then "line \(.line)" else "\(.from | todate) \(.to | todate)" end' -- -n -r
+line 12
+2026-10-30T00:00:00Z 2026-10-30T23:59:59Z
+2026-10-30T10:00:00Z 2026-10-30T10:00:59Z
+2026-10-30T10:00:04Z 2026-10-30T10:00:04Z
+2026-10-30T08:00:00Z 2026-10-30T08:00:00Z
+```
+
+Ages take s, m, h, d and w.
+
+```scrut
+$ cc-sessions jq '"90s", "30m", "7d", "1w" | s::bound(.; 1793354400) | 1793354400 - .from' -- -n -c
+90
+1800
+604800
+604800
+```
+
+Anything else is an error that names the accepted forms.
+
+```scrut
+$ cc-sessions jq '"yesterday" | s::bound(.)' -- -n 2>&1
+jq: error (at <unknown>): --since/--until takes a handle (L120), a timestamp (2026-10-30T10:00:04Z, 2026-10-30T10:00Z, 2026-10-30) or an age (90s, 30m, 2h, 7d, 1w), got "yesterday"
+[5]
+```
+
+`s::within(since; until)` keeps rows or records inside both bounds (null for none), inclusive; time is compared to the second, and rows with no timestamp at or before them never match a time bound.
+
+```scrut
+$ cc-sessions jq '[s::entries[] | select(s::within(s::bound("L80"); null)) | .l], [s::entries[] | select(s::within(null; s::bound("2026-10-30T10:00:04Z"))) | .l], [s::entries[] | select(s::within(s::bound("2026-10-30T10:32:03Z"); s::bound("L81"))) | .l]' a7c3e9f -- -c
+[80,81,82,83]
+[3,4]
+[80,81]
+```
+
+`cc_bound` in `lib/common.sh` checks a flag value the same way and prints the bound as JSON for `--argjson`; a bad value exits 2.
+
+```scrut
+$ (. "$CC_TEST_ROOT/lib/common.sh"; cc_bound --since L5; cc_bound --until 2026-10-30)
+{"line":5}
+{"from":1793318400,"to":1793404799}
+```
+
+```scrut {output_stream: stderr}
+$ (. "$CC_TEST_ROOT/lib/common.sh"; CC_SESSIONS_COMMAND=prompts; cc_bound --since yesterday; echo unreachable)
+cc-sessions: --since takes a handle (L120), a timestamp (2026-10-30T10:00:04Z, 2026-10-30T10:00Z, 2026-10-30) or an age (90s, 30m, 2h, 7d, 1w), got "yesterday"; pass one of those forms; see cc-sessions prompts --help
+[2]
+```
+
+## API messages and tokens
+
+`s::messages` groups assistant entries by `message.id` across the whole file: blocks in file order, the usage of the last entry, and the context size (input + cache creation + cache read).
+
+```scrut
+$ cc-sessions jq 's::messages | [.l, .id[-3:], (.lines | map(tostring) | join(",")), (.blocks | map(.block.type) | join(",")), .usage.input, .usage.cache_creation, .usage.cache_read, .usage.output, .context, .synthetic] | @tsv' a7c3e9f -- -r | head -n 3
+10\t001\t10,11,12\tthinking,text,tool_use\t3\t5200\t12000\t180\t17203\tfalse (escaped)
+14\t002\t14,15,17\ttext,tool_use,tool_use\t1\t900\t17200\t240\t18101\tfalse (escaped)
+19\t003\t19\ttext\t1\t1200\t18100\t60\t19301\tfalse (escaped)
+```
+
+ALPHA has 17 API messages from 24 assistant entries; the one at L56 is `<synthetic>` with zero usage.
+
+```scrut
+$ cc-sessions jq '[s::messages] | [length, (map(select(.synthetic)) | map([.l, .model, .context]))]' a7c3e9f -- -c
+[17,[[56,"<synthetic>",0]]]
+```
+
+Before 2.1.300 the earlier split entries carry partial output tokens; the last entry's usage counts.
+
+```scrut
+$ cc-sessions jq 's::messages | [.l, (.lines | map(tostring) | join(",")), .usage.output] | @tsv' b2d4 -- -r 2>/dev/null
+3\t3,4,5\t1100 (escaped)
+7\t7\t45 (escaped)
+10\t10,11\t80 (escaped)
+13\t13\t30 (escaped)
+22\t22\t12 (escaped)
+```
+
+`s::totals` sums the messages of one transcript and names its peak context.
+
+```scrut
+$ for s in a7c3e9f b2d4 b9e1 c4e6 d1f3 e5a7; do cc-sessions jq 's::totals | [.messages, .synthetic, .input, .cache_creation, .cache_read, .output, .peak_context, .peak_l] | @tsv' "$s" -- -r 2>/dev/null; done
+17\t1\t22\t22930\t257200\t1487\t21731\t34 (escaped)
+5\t0\t9\t4050\t59400\t1267\t13351\t22 (escaped)
+3\t0\t6\t4700\t34200\t135\t13201\t5 (escaped)
+2\t0\t4\t4300\t20000\t66\t12301\t8 (escaped)
+1\t0\t3\t6000\t0\t20\t6003\t5 (escaped)
+3\t0\t5\t6200\t10900\t82\t6201\t8 (escaped)
+```
+
+`s::usage` normalises a raw `message.usage` object, absent counts as 0.
+
+```scrut
+$ cc-sessions jq '{input_tokens: 2, output_tokens: 5, cache_read_input_tokens: 7} | s::usage' -- -n -c
+{"input":2,"cache_creation":0,"cache_read":7,"output":5}
+```
+
+`s::models` lists models in first-use order, without `<synthetic>`.
+
+```scrut
+$ cc-sessions jq 's::models' a7c3e9f c4e6 5f6a7b8c a7c3e9b2 -- -c
+["claude-opus-5-5"]
+["claude-sonnet-4-5-20250929"]
+["claude-haiku-4-5-20251001"]
+["claude-haiku-5-5"]
+```
+
+Each sub-agent's totals.
+
+```scrut
+$ for a in a7c3e9b2 aplanner adoes a0f1 a9e8 a3d1 acompact aprompt_suggestion a4c6e8f0; do cc-sessions jq 's::totals | [.messages, .input, .cache_creation, .cache_read, .output] | @tsv' "$a" -- -r; done
+2\t7\t3060\t2950\t52 (escaped)
+1\t4\t2000\t0\t40 (escaped)
+1\t3\t900\t15000\t18 (escaped)
+2\t6\t2540\t2500\t40 (escaped)
+1\t5\t2400\t0\t70 (escaped)
+1\t3\t700\t0\t9 (escaped)
+1\t3\t0\t21500\t300 (escaped)
+1\t2\t0\t16000\t6 (escaped)
+2\t4\t3090\t3400\t86 (escaped)
+```
+
+## Internal agents
+
+`s::internal_reason` names why a transcript is internal (compaction, prompt suggestion, a flat Warmup agent, a transcripts-skill fork), else null; `s::is_internal` is true when it has one.
+
+```scrut
+$ cc-sessions jq '[.agent // .session, (s::internal_reason // "-"), s::is_internal] | @tsv' a7c3e9f acompact aprompt_suggestion a3d1 9a0b1c2d 5f6a7b8c a7c3e9b2 aplanner adoes a0f1 -- -r
+a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e\t-\tfalse (escaped)
+acompact-3f9a1c\tcompaction\ttrue (escaped)
+aprompt_suggestion-8d2e4b\tprompt-suggestion\ttrue (escaped)
+a3d1e5f7a9b0c2d4e\ttranscripts-fork\ttrue (escaped)
+9a0b1c2d\twarmup\ttrue (escaped)
+5f6a7b8c\t-\tfalse (escaped)
+a7c3e9b2d4f6a8c01\t-\tfalse (escaped)
+aplanner-5e1f0a2b3c4d5e6f\t-\tfalse (escaped)
+adoes-the-lexer-0a1b2c3d4e5f6a7b\t-\tfalse (escaped)
+a0f1e2d3c4b5a6978\t-\tfalse (escaped)
+```
+
+`s::internal_agent_id` tells from an id alone.
+
+```scrut
+$ cc-sessions jq '["acompact-3f9a1c", "aprompt_suggestion-8d2e4b", "a7c3e9b2d4f6a8c01"] | map(s::internal_agent_id)' -- -n -c
+[true,true,false]
+```
+
+`s::rollup` totals an array of transcripts, skipping internal ones and counting each `message.id` once.
+
+```scrut
+$ cc-sessions jq 's::rollup' a7c3e9b2 aplanner adoes a0f1 a9e8 a3d1 acompact aprompt_suggestion a7c3e9b2 -- -s -c
+{"agents":5,"messages":7,"input":25,"cache_creation":10900,"cache_read":20450,"output":220}
+```
+
+A message repeated in another transcript (a resumed copy) counts once.
+
+```scrut
+$ cc-sessions jq 's::rollup | [.messages, .output]' b2d4 b9e1 -- -s -c 2>/dev/null
+[6,1292]
+```
+
+## Human input
+
+`s::content_text` reads message content: a string as is, text blocks joined by newlines, each image as `[image]`.
+
+```scrut
+$ cc-sessions jq '"plain", [{"type": "text", "text": "a"}, {"type": "image"}, {"type": "tool_reference"}, {"type": "text", "text": "b"}] | s::content_text' -- -n -c
+"plain"
+"a\n[image]\nb"
+```
+
+`s::user_entries` classifies every user entry; ALPHA's 37 fall into these classes.
+
+```scrut
+$ cc-sessions jq '[s::user_entries | .class] | group_by(.) | map("\(.[0]) \(length)") | .[]' a7c3e9f -- -r
+human 10
+injected 6
+interrupt 1
+notification 2
+output 3
+peer 1
+summary 1
+tool-result 13
+```
+
+```scrut
+$ cc-sessions jq '[s::user_entries | select(.class != "tool-result") | "\(.l):\(.class)\(if .kind then "/" + .kind else "" end)"] | join(" ")' a7c3e9f -- -r
+4:human/prompt 20:injected 21:human/slash 22:output 23:human/slash 24:injected 35:human/prompt 37:summary 38:injected 39:human/slash 40:output 44:human/prompt 47:injected 50:injected 55:interrupt 57:human/bash 58:output 59:human/prompt 66:peer 67:notification 68:notification 73:human/slash 74:injected 80:human/prompt
+```
+
+In an agent transcript the delegation prompt and later deliveries are `from-parent`, never human input; a teammate's `<teammate-message>` delivery too.
+
+```scrut
+$ cc-sessions jq '[.agent, ([s::user_entries | "\(.l):\(.class)"] | join(" ")), ([s::human_inputs] | length)] | @tsv' a7c3e9b2 aplanner adoes a0f1 5f6a7b8c 9a0b1c2d a4c6e8f0 -- -r
+a7c3e9b2d4f6a8c01\t1:from-parent 3:tool-result\t0 (escaped)
+aplanner-5e1f0a2b3c4d5e6f\t1:from-parent\t0 (escaped)
+adoes-the-lexer-0a1b2c3d4e5f6a7b\t2:from-parent\t0 (escaped)
+a0f1e2d3c4b5a6978\t1:from-parent 3:tool-result\t0 (escaped)
+5f6a7b8c\t1:from-parent\t0 (escaped)
+9a0b1c2d\t1:from-parent\t0 (escaped)
+a4c6e8f0a2b4c6d8e\t1:from-parent 4:tool-result\t0 (escaped)
+```
+
+`s::human_inputs` lists ALPHA's 14 inputs: typed prompts, slash commands (from user and system entries), `!` bash, a queued prompt, an AskUserQuestion answer, a rejection with feedback and a plan decision.
+
+```scrut
+$ cc-sessions jq 's::human_inputs | [s::handle, .kind, .text, (.ts | s::ts)] | s::tsv' a7c3e9f -- -r
+L4\tprompt\tCheck the CONTENT_TERM_ALPHA parser, then please run "make test" now.\t2026-10-30T10:00:04Z (escaped)
+L21\tslash\t/effort high\t2026-10-30T10:00:35Z (escaped)
+L23\tslash\t/demo:review parser changes\t2026-10-30T10:00:41Z (escaped)
+L27\tanswer\tWhich parser mode should the review target? → Strict (Recommended)\t2026-10-30T10:00:51Z (escaped)
+L29\tdenied\tKeep lenient mode until the release.\t2026-10-30T10:00:56Z (escaped)
+L39\tslash\t/compact\t2026-10-30T10:01:21Z (escaped)
+L44\tprompt\tThe output looks wrong here: [Image #1]\\n[image]\t2026-10-30T10:01:30Z (escaped)
+L52\tplan\tapproved: # Plan\\n\\n1. Switch the parser to strict mode behind a flag.\t2026-10-30T10:01:51Z (escaped)
+L57\tbash\tgit status\t2026-10-30T10:02:00Z (escaped)
+L59\tprompt\tSpin up helpers for the tokenizer tests and the rollout.\t2026-10-30T10:19:53Z (escaped)
+L69\tqueued\tAlso check the lexer.\t2026-10-30T10:25:10Z (escaped)
+L71\tslash\t/btw does the lexer share the parser's token table?\t2026-10-30T10:26:41Z (escaped)
+L73\tslash\t/doctor\t2026-10-30T10:28:33Z (escaped)
+L80\tprompt\tThanks, wrap up.\t2026-10-30T10:32:03Z (escaped)
+```
+
+A plain `/compact` entry and its `<command-name>` record are one input (`also`); command output is attached (ANSI escapes removed); answers, denials and plan decisions name their tool call.
+
+```scrut
+$ cc-sessions jq 's::human_inputs | select(.also != [] or .output or .tool) | [s::handle, .kind, (.also | map(tostring) | join(",")), .output.l, .output.text, .tool, .tool_use_id, .decision, .uuid] | s::tsv' a7c3e9f -- -r
+L21\tslash\t-\t22\tSet effort level to high (this session only)\t-\t-\t-\te0a00011-0000-4000-8000-000000000011 (escaped)
+L27\tanswer\t-\t-\t-\tAskUserQuestion\ttoolu_01FxAlpha000000000000004\t-\te0a00017-0000-4000-8000-000000000017 (escaped)
+L29\tdenied\t-\t-\t-\tEdit\ttoolu_01FxAlpha000000000000005\t-\te0a00019-0000-4000-8000-000000000019 (escaped)
+L39\tslash\t35\t40\tCompacted (ctrl+o to see full summary)\t-\t-\t-\te0a00023-0000-4000-8000-000000000023 (escaped)
+L52\tplan\t-\t-\t-\tExitPlanMode\ttoolu_01FxAlpha000000000000010\tapproved\te0a00030-0000-4000-8000-000000000030 (escaped)
+L57\tbash\t-\t58\tOn branch main\\nnothing to commit, working tree clean\t-\t-\t-\te0a00034-0000-4000-8000-000000000034 (escaped)
+```
+
+Other sessions: BETA's prompt that exists only in a `queue-operation` is `queued`, and its re-appended copies are not repeated; SDK prompts are `sdk`.
+
+```scrut
+$ for s in b2d4 b9e1 c4e6 d1f3 e5a7 f6b8 b5a7; do cc-sessions jq '[.session[:4], ([s::human_inputs | "\(s::handle):\(.kind):\(.text)"] | join(" | "))] | s::tsv' "$s" -- -r 2>/dev/null; done
+b2d4\tL2:prompt:Summarise the beta build failures. | L8:queued:Also list the warnings. | L9:prompt:Find where the header should live. | L21:prompt:List the warnings too. (escaped)
+b9e1\tL1:prompt:Find where the header should live. | L6:prompt:Now fix the include path. (escaped)
+c4e6\tL2:prompt:Find the flat config loader. (escaped)
+d1f3\tL3:sdk:Rename the report generator skill to report-builder. (escaped)
+e5a7\tL1:prompt:Show the release notes. (escaped)
+f6b8\tL2:prompt:List the files with spaces in their names. (escaped)
+b5a7\t- (escaped)
+```
+
+`s::interrupts` and `s::outputs` are the related events; `s::human_events` interleaves inputs and interrupts in file order.
+
+```scrut
+$ cc-sessions jq '(s::interrupts | [s::handle, .kind, .text, .interrupted] | s::tsv), (s::outputs | [s::handle, .kind, .of, .text] | s::tsv), ([s::human_events | s::handle] | join(" "))' a7c3e9f -- -r
+L55\tinterrupt\t[Request interrupted by user]\tmsg_01FxAlpha000000000000012 (escaped)
+L22\toutput\t21\tSet effort level to high (this session only) (escaped)
+L40\toutput\t39\tCompacted (ctrl+o to see full summary) (escaped)
+L58\toutput\t57\tOn branch main\\nnothing to commit, working tree clean (escaped)
+L4 L21 L23 L27 L29 L39 L44 L52 L55 L57 L59 L69 L71 L73 L80
+```
+
+## Skill loads
+
+`s::skill_events` lists loads (by the Skill tool, by a slash command followed by a skill body or a bundled body, or an orphan body), failed Skill calls, re-invocations and post-compaction restores.
+
+```scrut
+$ cc-sessions jq 's::skill_events | [s::handle, .event, .name, .how, .tool_use_id, .result_l, .body_l, (.ts | s::ts)] | s::tsv' a7c3e9f f6b8 -- -r
+L23\tload\tdemo:review\tskill\t-\t-\t24\t2026-10-30T10:00:41Z (escaped)
+L32\tfailed\tnope\ttool\ttoolu_01FxAlpha000000000000007\t33\t-\t2026-10-30T10:01:03Z (escaped)
+L43\trestore\tdemo:review\t-\t-\t-\t-\t2026-10-30T10:01:27Z (escaped)
+L45\tload\talpha-helper\ttool\ttoolu_01FxAlpha000000000000008\t46\t47\t2026-10-30T10:01:32Z (escaped)
+L48\tre-invoked\talpha-helper\ttool\ttoolu_01FxAlpha000000000000009\t49\t50\t2026-10-30T10:01:40Z (escaped)
+L73\tload\tdoctor\tbundled\t-\t-\t74\t2026-10-30T10:28:33Z (escaped)
+L1\tload\torphan-skill\torphan\t-\t-\t1\t2026-10-27T11:55:03Z (escaped)
+```
+
+`s::skill_loads` keeps the loads only.
+
+```scrut
+$ cc-sessions jq '[s::skill_loads | "\(.name)/\(.how)"] | join(" ")' a7c3e9f -- -r
+demo:review/skill alpha-helper/tool doctor/bundled
+```
+
+`attributionSkill` names the active skill of an assistant entry; it is never a load.
+
+```scrut
+$ cc-sessions jq '[s::attributions | "\(s::handle):\(.skill)"] | join(" ")' a7c3e9f -- -r
+L25:demo:review L26:demo:review L28:demo:review L48:alpha-helper L51:alpha-helper
+```
+
+`s::skill_match(q)` compares skill names by their last segment.
+
+```scrut
+$ cc-sessions jq '[["claudecraft:skillcraft", "skillcraft"], ["skillcraft", "claudecraft:skillcraft"], ["demo:review", "review"], ["alpha-helper", "helper"]] | map(.[0] as $name | .[1] as $q | $name | s::skill_match($q))' -- -n -c
+[true,true,true,false]
+```
+
+## Tool calls
+
+`s::tool_calls` pairs each tool_use with its result: status is ok, error, denied or none; chars is the length of the result text (text blocks joined by newlines).
+
+```scrut
+$ cc-sessions jq 's::tool_calls | [s::handle, .id[-2:], .name, .result_l, .status, .chars, .is_error] | s::tsv' a7c3e9f -- -r
+L12\t01\tBash\t13\tok\t96\tfalse (escaped)
+L15\t02\tBash\t16\tok\t2277\tfalse (escaped)
+L17\t03\tmcp__demo__fetch\t18\tok\t49\t- (escaped)
+L26\t04\tAskUserQuestion\t27\tok\t153\t- (escaped)
+L28\t05\tEdit\t29\tdenied\t231\ttrue (escaped)
+L30\t06\tBash\t31\terror\t55\ttrue (escaped)
+L32\t07\tSkill\t33\terror\t52\ttrue (escaped)
+L45\t08\tSkill\t46\tok\t29\t- (escaped)
+L48\t09\tSkill\t49\tok\t29\t- (escaped)
+L51\t10\tExitPlanMode\t52\tok\t319\t- (escaped)
+L60\t11\tAgent\t61\tok\t397\t- (escaped)
+L62\t12\tAgent\t63\tok\t180\t- (escaped)
+L64\t13\tWorkflow\t65\tok\t522\tfalse (escaped)
+```
+
+A rejection carries the user's feedback; `input` is the stored input, `wire_input` the form sent to the API, and `result` the `toolUseResult` when the file has one.
+
+```scrut
+$ cc-sessions jq 's::tool_calls | select(.id | endswith("05", "01", "13")) | [s::handle, .feedback, (.input | tojson), (.wire_input | tojson), (.result | type), .message_id, (.ts | s::ts)] | s::tsv' a7c3e9f -- -r
+L12\t-\t{"command":"rg -n CONTENT_TERM_ALPHA src","description":"Find the parser symbol"}\t{"command":"cd /tmp/sessions-fixture/alpha && rg -n CONTENT_TERM_ALPHA src","description":"Find the parser symbol"}\tobject\tmsg_01FxAlpha000000000000001\t2026-10-30T10:00:13Z (escaped)
+L28\tKeep lenient mode until the release.\t{"file_path":"/tmp/sessions-fixture/alpha/src/parser.c","old_string":"MODE_LENIENT","new_string":"MODE_STRICT"}\t{"file_path":"/tmp/sessions-fixture/alpha/src/parser.c","old_string":"MODE_LENIENT","new_string":"MODE_STRICT"}\tstring\tmsg_01FxAlpha000000000000005\t2026-10-30T10:00:53Z (escaped)
+L64\t-\t{"name":"fixture-scan","args":{"target":"src"}}\t{"name":"fixture-scan","args":"{\\\\"target\\\\":\\\\"src\\\\"}"}\tobject\tmsg_01FxAlpha000000000000013\t2026-10-30T10:20:02Z (escaped)
+```
+
+Results made of several text blocks; sub-agent results without `toolUseResult`.
+
+```scrut
+$ cc-sessions jq '. as $t | s::tool_calls | [$t.agent // $t.session[:4], s::handle, .name, .result_l, .status, .chars, (.result | type)] | s::tsv' b2d4 c4e6 a4c6e8f0 -- -r 2>/dev/null
+b2d4\tL5\tBash\t6\tok\t62\tobject (escaped)
+b2d4\tL11\tAgent\t12\tok\t134\tobject (escaped)
+c4e6\tL4\tTask\t7\tok\t102\tobject (escaped)
+a4c6e8f0a2b4c6d8e\tL3\tGlob\t4\tok\t14\tnull (escaped)
+```
+
+A call with no result has status `none`.
+
+```scrut
+$ printf '%s\n' '{"type":"assistant","uuid":"x1","message":{"id":"m1","model":"m","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"sleep 9"}}]}}' > "$CC_TEST_TMP/pending.jsonl"
+> cc-sessions jq 's::tool_calls | [.status, .result_l, .chars] | s::tsv' "$CC_TEST_TMP/pending.jsonl" -- -r
+none\t-\t- (escaped)
+```
+
+## Persisted outputs
+
+`s::persisted_marker` parses a result text only when it starts with the marker. Input: a string.
+
+```scrut
+$ cc-sessions jq '"<persisted-output>\nOutput too large (29.5KB). Full output saved to: /x/tool-results/a b.txt\n\nPreview (first 2KB):\nline", "quoted: <persisted-output>\nOutput too large (1KB). Full output saved to: /y\n\nPreview (first 1KB):\n" | s::persisted_marker' -- -n -c
+{"stated_size":"29.5KB","stated_path":"/x/tool-results/a b.txt","preview_size":"2KB"}
+null
+```
+
+A persisted result's real size is the saved file's size; a stored path that does not exist falls back to the file of the same name under the owning session's `tool-results/`.
+
+```scrut
+$ cc-sessions jq 's::tool_calls | select(.persisted) | [s::handle, .persisted.stated_size, .persisted.preview_size, .persisted.bytes, .persisted.path, .persisted.stated_path] | s::tsv' a7c3e9f e5a7 -- -r | cc_test_rel
+L15\t3.3KB\t2KB\t3402\t<root>/projects/-tmp-sessions-fixture-alpha/a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e/tool-results/b4k7m2q9x.txt\t/tmp/sessions-fixture/config/projects/-tmp-sessions-fixture-alpha/a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e/tool-results/b4k7m2q9x.txt (escaped)
+L4\t2.4KB\t2KB\t2502\t<root>/projects/-tmp-sessions-fixture-reloc/e5a7c9b1-3d5f-4b7d-8f9a-0c1e2a3b4c5d/tool-results/c8n2v5x1q.txt\t/tmp/sessions-fixture/config/projects/-tmp-sessions-fixture-elsewhere/e5a7c9b1-3d5f-4b7d-8f9a-0c1e2a3b4c5d/tool-results/c8n2v5x1q.txt (escaped)
+```
+
+Text that quotes the marker mid-result is not persisted.
+
+```scrut
+$ cc-sessions jq '[s::tool_calls | [s::handle, .chars, (.persisted != null)]]' e5a7 -- -c
+[["L4",2245,true],["L6",154,false]]
+```
+
+A stored path that exists is used as is, wherever it is.
+
+```scrut
+$ mkdir -p "$CC_TEST_TMP/elsewhere" && printf 'ten bytes\n' > "$CC_TEST_TMP/elsewhere/out.txt"
+> jq -n -c --arg p "$CC_TEST_TMP/elsewhere/out.txt" '{type: "assistant", uuid: "a1", message: {id: "m1", model: "m", content: [{type: "tool_use", id: "t1", name: "Bash", input: {}}]}}, {type: "user", uuid: "u1", message: {content: [{type: "tool_result", tool_use_id: "t1", content: "<persisted-output>\nOutput too large (1B). Full output saved to: \($p)\n\nPreview (first 1B):\nt"}]}}' > "$CC_TEST_TMP/adhoc.jsonl"
+> cc-sessions jq 's::tool_calls | [.persisted.bytes, .persisted.path] | s::tsv' "$CC_TEST_TMP/adhoc.jsonl" -- -r | cc_test_rel "$CC_TEST_TMP"
+10\t<root>/elsewhere/out.txt (escaped)
+```
+
+## Content kinds
+
+`s::content_kinds` lists every searchable kind; `s::default_kinds` those searched by default.
+
+```scrut
+$ cc-sessions jq '(s::content_kinds | join(" ")), (s::default_kinds | join(" "))' -- -n -r
+prompt assistant tool-input tool-result from-parent agent-result plan file hook recap thinking injected summary notification peer
+prompt assistant tool-input tool-result from-parent agent-result plan file hook recap
+```
+
+`s::content` emits `{l, kind, text, ts}` for every piece of searchable content; `CONTENT_TERM_ALPHA` sits in exactly 10 of them.
+
+```scrut
+$ cc-sessions jq '. as $t | s::content | select(.text | contains("CONTENT_TERM_ALPHA")) | [($t.agent // "main"), s::handle, .kind] | s::tsv' a7c3e9f a0f1 a9e8 "$WF/journal.jsonl" -- -r
+main\tL4\tprompt (escaped)
+main\tL10\tthinking (escaped)
+main\tL12\ttool-input (escaped)
+main\tL13\ttool-result (escaped)
+main\tL14\tassistant (escaped)
+main\tL47\tinjected (escaped)
+a0f1e2d3c4b5a6978\tL1\tfrom-parent (escaped)
+a9e8d7c6b5a4f3e21\tL3\ttool-input (escaped)
+a9e8d7c6b5a4f3e21\tL4\tagent-result (escaped)
+main\tL5\tagent-result (escaped)
+```
+
+`s::content(kinds)` keeps the given kinds: by default 8 of those 10.
+
+```scrut
+$ cc-sessions jq 'map([s::content(s::default_kinds) | select(.text | contains("CONTENT_TERM_ALPHA"))] | length) | add' a7c3e9f a0f1 a9e8 "$WF/journal.jsonl" -- -s
+8
+```
+
+System copies and state are never content: `NOISE_ONLY_TERM` (in `skill_listing`, `instructions` and `api-request-blob`) appears in no kind.
+
+```scrut
+$ cc-sessions jq '[s::content | select(.text | contains("NOISE_ONLY_TERM"))] | length' a7c3e9f
+0
+```
+
+```scrut
+$ for term in 'please run "make test" now' 'make test' '--force-push-now' 'lib.jq' 'libXjq' '[cc-sessions:transcripts-fork]'; do
+>   cc-sessions jq 'map(. as $t | s::content | select(.text | contains($q)) | "\($t.agent // "main"):\(s::handle):\(.kind)") | join(" ")' a7c3e9f a3d1 -- -s -r --arg q "$term"
+> done
+main:L4:prompt
+main:L4:prompt main:L15:tool-input
+main:L19:assistant
+main:L14:assistant
+main:L13:tool-result
+a3d1e5f7a9b0c2d4e:L1:from-parent
+```
+
+The other kinds present: hook, file, plan, recap, and the hidden summary, notification and peer kinds.
+
+```scrut
+$ cc-sessions jq 's::content | select(.kind | IN("hook", "file", "plan", "recap", "summary", "notification", "peer")) | [s::handle, .kind, (.text | s::trunc(40))] | s::tsv' a7c3e9f -- -r
+L3\thook\tfixture hook ready (escaped)
+L37\tsummary\tThis session is being continued from a … (escaped)
+L41\tfile\t#define MODE_LENIENT 1\\n (escaped)
+L42\tplan\t# Plan\\n\\n1. Switch the parser to strict … (escaped)
+L66\tpeer\tAnother Claude session sent a message:\\n… (escaped)
+L67\tnotification\t<task-notification>\\n<task-id>a7c3e9b2d4… (escaped)
+L68\tnotification\t<task-notification>\\n<task-id>w3k9p2m7z<… (escaped)
+L76\trecap\tWhile you were away: the parser review … (escaped)
+```
+
+## Entry types
+
+`s::entry_type` labels an entry: its type, with the attachment type or system subtype. Input: an entry.
+
+```scrut
+$ cc-sessions jq '[s::entries[] | select(.l == 3 or .l == 36 or .l == 4) | .e | s::entry_type]' a7c3e9f -- -c
+["attachment:hook_success","user","system:compact_boundary"]
+```
+
+`s::unknown_types` reports labels in neither the content nor the state list: only the fixture's `brand_new_kind`.
+
+```scrut
+$ cc-sessions jq '. as $t | s::unknown_types | [($t.agent // $t.session[:4]), .type, .l, .count] | s::tsv' a7c3e9f b5a7 b2d4 b9e1 c4e6 d1f3 e5a7 f6b8 a7c3e9b2 aplanner adoes a3d1 acompact aprompt_suggestion a0f1 a9e8 a4c6e8f0 5f6a7b8c 9a0b1c2d "$WF/journal.jsonl" -- -r 2>/dev/null
+a7c3\tattachment:brand_new_kind\t77\t1 (escaped)
+```
+
+The lists themselves are data for `schema`.
+
+```scrut
+$ cc-sessions jq '[(s::known_entry_types | length > 20), (s::known_attachment_types | index(["skill_listing"]) != null), (s::known_system_subtypes | index(["away_summary"]) != null), ("attachment:hook_brand_new" | s::is_known_type), ("system:model_haiku_fallback" | s::is_known_type), ("attachment:brand_new_kind" | s::is_known_type)]' -- -n -c
+[true,true,true,true,true,false]
+```
+
+## Sub-agents and workflows
+
+`s::agent_calls` lists Agent and Task calls with the agent id their result names (`agentId`, a teammate's `agent_id`, or the id in the result text) and the completion notification linked by `<tool-use-id>`.
+
+```scrut
+$ cc-sessions jq '. as $t | s::agent_calls | [$t.session[:4], s::handle, .tool, .subagent_type, .description, .name, .background, .agent_id, .status, .result_l, .notification.l, .notification.status, .notification.result] | s::tsv' a7c3e9f b2d4 b9e1 c4e6 -- -r 2>/dev/null
+a7c3\tL60\tAgent\tExplore\tSurvey tokenizer tests\t-\ttrue\ta7c3e9b2d4f6a8c01\tasync_launched\t61\t67\tcompleted\tTwo tokenizer tests cover strict mode: test_strict_eof and test_strict_unknown. (escaped)
+a7c3\tL62\tAgent\tgeneral-purpose\tPlan the strict-mode rollout\tplanner\tfalse\taplanner-5e1f0a2b3c4d5e6f\tteammate_spawned\t63\t-\t-\t- (escaped)
+b2d4\tL11\tAgent\tExplore\tCheck header paths\t-\tfalse\ta4c6e8f0a2b4c6d8e\tcompleted\t12\t-\t-\t- (escaped)
+b9e1\tL3\tAgent\tExplore\tCheck header paths\t-\tfalse\ta4c6e8f0a2b4c6d8e\tcompleted\t4\t-\t-\t- (escaped)
+c4e6\tL4\tTask\tExplore\tLocate config loader\t-\tfalse\t5f6a7b8c\tcompleted\t7\t-\t-\t- (escaped)
+```
+
+Without `toolUseResult` the agent id comes from the result text.
+
+```scrut
+$ cc-sessions jq '.rows |= map(del(.e.toolUseResult)) | [s::agent_calls | .agent_id]' a7c3e9f -- -c
+["a7c3e9b2d4f6a8c01","aplanner-5e1f0a2b3c4d5e6f"]
+```
+
+`s::workflow_calls` lists Workflow calls with their run id, task id, stored transcript directory and completion.
+
+```scrut
+$ cc-sessions jq 's::workflow_calls | [s::handle, .name, .run_id, .task_id, .status, .result_l, .notification.l, .notification.status, .notification.result, (.transcript_dir | split("/") | last)] | s::tsv' a7c3e9f -- -r
+L64\tfixture-scan\twf_5d1c9a7e-3b2\tw3k9p2m7z\tasync_launched\t65\t68\tcompleted\t{"status":"ok","findings":1}\twf_5d1c9a7e-3b2 (escaped)
+```
+
+`s::notifications` parses background completions.
+
+```scrut
+$ cc-sessions jq 's::notifications | [s::handle, .tool_use_id, .task_id, .status, .summary, (.output_file | split("/") | last)] | s::tsv' a7c3e9f -- -r
+L67\ttoolu_01FxAlpha000000000000011\ta7c3e9b2d4f6a8c01\tcompleted\tAgent "Survey tokenizer tests" completed\ta7c3e9b2d4f6a8c01.output (escaped)
+L68\ttoolu_01FxAlpha000000000000013\tw3k9p2m7z\tcompleted\tWorkflow "fixture-scan" completed\tw3k9p2m7z.output (escaped)
+```
+
+A notification without `<tool-use-id>` links by `<task-id>`.
+
+```scrut
+$ cc-sessions jq '.rows |= map(if .l == 67 then .e.message.content |= sub("<tool-use-id>[^<]*</tool-use-id>\n"; "") else . end) | [s::agent_calls | .notification.l]' a7c3e9f -- -c
+[67,null]
+```
+
+Forks: the parent's `launchedAgentId`, and the agent's `fork-context-ref`.
+
+```scrut
+$ cc-sessions jq '[s::fork_launches]' a7c3e9f && cc-sessions jq 's::fork_ref' adoes a7c3e9b2
+[{"l":72,"agent_id":"adoes-the-lexer-0a1b2c3d4e5f6a7b"}]
+{"l":1,"parent_session":"a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e","parent_last_uuid":"e0a00043-0000-4000-8000-000000000043"}
+null
+```
+
+`s::journal` reads a workflow run's `journal.jsonl`: each agent's label, phase and result.
+
+```scrut
+$ cc-sessions jq 's::journal | [.agent_id, .key[:6], .label, .phase, .started_l, .result_l, (.result | if type == "string" then . else tojson end)] | s::tsv' "$WF/journal.jsonl" -- -r
+a0f1e2d3c4b5a6978\tv2:3c1\tscan\tScan\t2\t3\tScanned 3 files; one parser symbol found. (escaped)
+a9e8d7c6b5a4f3e21\tv2:7d9\treport\tReport\t4\t5\t{"finding":"CONTENT_TERM_ALPHA is parsed leniently","severity":"low"} (escaped)
+```
+
+`s::delegation` is an agent transcript's delegation prompt; `s::agent_result` its result: the last structured output, else the last assistant text.
+
+```scrut
+$ cc-sessions jq '[.agent, (s::delegation | s::handle, (.text | s::trunc(30))), (s::agent_result | s::handle, (.text | s::trunc(40)))] | s::tsv' a7c3e9b2 aplanner adoes a0f1 a9e8 a3d1 5f6a7b8c -- -r
+a7c3e9b2d4f6a8c01\tL1\tList the tokenizer tests unde…\tL4\tTwo tokenizer tests cover strict mode: … (escaped)
+aplanner-5e1f0a2b3c4d5e6f\tL1\t<teammate-message teammate_id…\tL2\tRollout plan: enable strict mode behind… (escaped)
+adoes-the-lexer-0a1b2c3d4e5f6a7b\tL2\tdoes the lexer share the pars…\tL3\tYes: both include tokens.h, so they sha… (escaped)
+a0f1e2d3c4b5a6978\tL1\t[Workflow harness — computed …\tL4\tScanned 3 files; one parser symbol foun… (escaped)
+a9e8d7c6b5a4f3e21\tL1\t[Workflow harness — computed …\tL4\t{"finding":"CONTENT_TERM_ALPHA is parse… (escaped)
+a3d1e5f7a9b0c2d4e\tL1\t[cc-sessions:transcripts-fork…\tL2\tOne session loaded alpha-helper. (escaped)
+5f6a7b8c\tL1\tLocate the config loader in t…\tL2\tThe loader is config/load.rb. (escaped)
+```
+
+`s::matching_call(calls)` finds an agent transcript's call among `s::agent_calls` records: by agent id, by the meta's `toolUseId`, else by delegation prompt text.
+
+```scrut
+$ cc-sessions jq '(.[0] | [s::agent_calls]) as $calls | .[1:][] | [.agent, (s::matching_call($calls) | if . then s::handle else "-" end), (s::matching_call($calls | map(.agent_id = null)) | if . then s::handle else "-" end)] | s::tsv' c4e6 5f6a7b8c 9a0b1c2d -- -s -r
+5f6a7b8c\tL4\tL4 (escaped)
+9a0b1c2d\t-\t- (escaped)
+```
+
+```scrut
+$ cc-sessions jq '(.[0] | [s::agent_calls] | map(.agent_id = null)) as $calls | .[1] | s::matching_call($calls) | s::handle' a7c3e9f a7c3e9b2 -- -s -r
+L60
+```
+
+## Finding related files
+
+`cc_agent_transcript` finds an agent's transcript in the session directory, else anywhere under the data root (a resumed session keeps using the original's directory).
+
+```scrut
+$ (. "$CC_TEST_ROOT/lib/common.sh"; cc_agent_transcript "$ALPHA" a7c3e9b2d4f6a8c01; cc_agent_transcript "$RESUMED" a4c6e8f0a2b4c6d8e; cc_agent_transcript "$ALPHA" a0f1e2d3c4b5a6978; cc_agent_transcript "$ALPHA" nosuchagent || echo "not found $?") | cc_test_rel
+<root>/projects/-tmp-sessions-fixture-alpha/a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e/subagents/agent-a7c3e9b2d4f6a8c01.jsonl
+<root>/projects/-tmp-sessions-fixture-beta/b2d4f6a8-1c3e-4a5b-8d7f-9e0a1b2c3d4e/subagents/agent-a4c6e8f0a2b4c6d8e.jsonl
+<root>/projects/-tmp-sessions-fixture-alpha/a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e/subagents/workflows/wf_5d1c9a7e-3b2/agent-a0f1e2d3c4b5a6978.jsonl
+not found 1
+```
+
+`cc_run_dir` finds a workflow run's directory the same way.
+
+```scrut
+$ (. "$CC_TEST_ROOT/lib/common.sh"; cc_run_dir "$ALPHA" wf_5d1c9a7e-3b2; cc_run_dir "$BETA" wf_5d1c9a7e-3b2; cc_run_dir "$BETA" wf_nothing || echo "not found $?") | cc_test_rel
+<root>/projects/-tmp-sessions-fixture-alpha/a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e/subagents/workflows/wf_5d1c9a7e-3b2
+<root>/projects/-tmp-sessions-fixture-alpha/a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e/subagents/workflows/wf_5d1c9a7e-3b2
+not found 1
+```
+
+`cc_agent_files` lists a session's agent transcripts: nested ones under its directory, and flat-layout ones whose `sessionId` is the session.
+
+```scrut
+$ (. "$CC_TEST_ROOT/lib/common.sh"; cc_agent_files "$ALPHA.jsonl"; cc_agent_files "$FLAT.jsonl"; cc_agent_files "$RESUMED.jsonl"; echo end) | cc_test_rel | sed 's#<root>/projects/-tmp-sessions-fixture-##'
+alpha/a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e/subagents/agent-a3d1e5f7a9b0c2d4e.jsonl
+alpha/a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e/subagents/agent-a7c3e9b2d4f6a8c01.jsonl
+alpha/a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e/subagents/agent-acompact-3f9a1c.jsonl
+alpha/a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e/subagents/agent-adoes-the-lexer-0a1b2c3d4e5f6a7b.jsonl
+alpha/a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e/subagents/agent-aplanner-5e1f0a2b3c4d5e6f.jsonl
+alpha/a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e/subagents/agent-aprompt_suggestion-8d2e4b.jsonl
+alpha/a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e/subagents/workflows/wf_5d1c9a7e-3b2/agent-a0f1e2d3c4b5a6978.jsonl
+alpha/a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e/subagents/workflows/wf_5d1c9a7e-3b2/agent-a9e8d7c6b5a4f3e21.jsonl
+flat/agent-5f6a7b8c.jsonl
+flat/agent-9a0b1c2d.jsonl
+end
+```
+
+`cc_current_files` is the current session: its main transcript and every transcript under its directory.
+
+```scrut
+$ (. "$CC_TEST_ROOT/lib/common.sh"; CLAUDE_CODE_SESSION_ID=a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e; cc_current_files | wc -l | tr -d ' '; cc_current_files | head -n 1 | cc_test_rel; CLAUDE_CODE_SESSION_ID=; cc_current_files | wc -l | tr -d ' ')
+9
+<root>/projects/-tmp-sessions-fixture-alpha/a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e.jsonl
+0
+```
+
+## Labels and origin
+
+`s::label_of`: the last custom-title, else the last ai-title with a space, else agent-name, else a legacy summary, else the first human input (truncate it with `s::trunc`).
+
+```scrut
+$ cc-sessions jq '. as $t | s::label_of | [$t.session[:4], .source, .l, .text] | s::tsv' a7c3e9f d1f3 e5a7 f6b8 b9e1 b2d4 c4e6 b5a7 -- -r 2>/dev/null
+a7c3\tcustom-title\t79\talpha fixture session (escaped)
+d1f3\tai-title\t4\tRename the report generator skill (escaped)
+e5a7\tai-title\t2\tShow the release notes (escaped)
+f6b8\tprompt\t2\tList the files with spaces in their names. (escaped)
+b9e1\tprompt\t1\tFind where the header should live. (escaped)
+b2d4\tprompt\t2\tSummarise the beta build failures. (escaped)
+c4e6\tsummary\t1\tFlat era config loader search (escaped)
+b5a7\tai-title\t1\tStub session title (escaped)
+```
+
+Single-token ai-titles are plan slugs; without a sentence title, agent-name comes next.
+
+```scrut
+$ cc-sessions jq '.rows |= map(select(.e.type != "ai-title" or .l == 9)) | s::label_of | [.source, .l, .text] | s::tsv' e5a7 -- -r
+agent-name\t10\trelease-notes-plan (escaped)
+```
+
+An agent's label is its meta description or name, else its journal label, else its delegation prompt.
+
+```scrut
+$ cc-sessions jq '. as $t | s::label_of | [$t.agent, .source, .text] | s::tsv' a7c3e9b2 aplanner adoes a3d1 a0f1 acompact aprompt_suggestion 5f6a7b8c -- -r
+a7c3e9b2d4f6a8c01\tmeta\tSurvey tokenizer tests (escaped)
+aplanner-5e1f0a2b3c4d5e6f\tmeta\tPlan the strict-mode rollout (escaped)
+adoes-the-lexer-0a1b2c3d4e5f6a7b\tmeta\tdoes the lexer share the parser's token table? (escaped)
+a3d1e5f7a9b0c2d4e\tmeta\tAnswer a transcripts question (escaped)
+a0f1e2d3c4b5a6978\tmeta\tscan (escaped)
+acompact-3f9a1c\tprompt\tYour task is to create a detailed summary of the conversation so far. (escaped)
+aprompt_suggestion-8d2e4b\tprompt\t[SUGGESTION MODE: Suggest what the user might naturally type next into Claude Code.] (escaped)
+5f6a7b8c\tprompt\tLocate the config loader in the flat project. (escaped)
+```
+
+```scrut
+$ cc-sessions jq '.meta = null | s::agent_label("scan-from-journal"), s::agent_label(null) | [.source, .text] | s::tsv' a0f1 -- -r
+journal\tscan-from-journal (escaped)
+prompt\t[Workflow harness — computed task] Scan src for CONTENT_TERM_ALPHA and summarise where it is defined. (escaped)
+```
+
+`s::origin`: `sdk` when an entrypoint starts with `sdk` or a prompt's `promptSource` is `sdk`, else the entrypoint, else `cli`.
+
+```scrut
+$ cc-sessions jq '[.session[:4], s::origin] | s::tsv' a7c3e9f d1f3 c4e6 b5a7 -- -r && cc-sessions jq '(.rows |= map(del(.e.entrypoint)) | s::origin), (.rows |= map(if .e.entrypoint then .e.entrypoint = "claude-desktop" else . end) | s::origin)' d1f3 e5a7 -- -r
+a7c3\tcli (escaped)
+d1f3\tsdk (escaped)
+c4e6\tcli (escaped)
+b5a7\tcli (escaped)
+sdk
+sdk
+cli
+claude-desktop
+```
+
+`s::is_stub` is true without any user or assistant entry.
+
+```scrut
+$ cc-sessions jq '[.session[:4], .agent, s::is_stub] | s::tsv' b5a7 a7c3e9f a7c3e9b2 -- -r
+b5a7\t-\ttrue (escaped)
+a7c3\t-\tfalse (escaped)
+a7c3\ta7c3e9b2d4f6a8c01\tfalse (escaped)
+```
+
+`s::cwds` lists the working directories in first-use order (the first is `s::first_cwd`); `s::session_ids` and `s::versions` likewise; `s::span` is the earliest and latest timestamp, whatever the file order.
+
+```scrut
+$ cc-sessions jq '[s::first_cwd, (s::cwds | join(" | ")), (s::session_ids | map(.[:4]) | join(",")), (s::versions | join(",")), s::span.first, s::span.last] | s::tsv' e5a7 f6b8 b9e1 b2d4 c4e6 b5a7 -- -r 2>/dev/null
+/tmp/sessions-fixture/reloc\t/tmp/sessions-fixture/reloc | /tmp/sessions-fixture/elsewhere\te5a7\t2.1.312\t2026-10-28T11:30:03.950Z\t2026-10-28T11:30:15.581Z (escaped)
+/tmp/sessions fixture/under_score\t/tmp/sessions fixture/under_score\tf6b8\t2.1.314\t2026-10-27T11:55:03.950Z\t2026-10-27T11:55:08.598Z (escaped)
+/tmp/sessions-fixture/beta\t/tmp/sessions-fixture/beta\tb2d4,b9e1\t2.1.206\t2026-07-15T09:01:03.950Z\t2026-07-20T14:00:05.781Z (escaped)
+/tmp/sessions-fixture/beta\t/tmp/sessions-fixture/beta\tb2d4\t2.1.206\t2026-07-15T09:00:00.120Z\t2026-07-15T09:05:05.198Z (escaped)
+/tmp/sessions-fixture/flat\t/tmp/sessions-fixture/flat\tc4e6\t2.0.76\t2026-01-03T11:40:03.950Z\t2026-01-03T11:40:24.198Z (escaped)
+-\t-\tb5a7\t-\t-\t- (escaped)
+```
+
+## Compactions, entries and errors
+
+`s::compactions` lists compact boundaries with their metadata and the summary entry that follows.
+
+```scrut
+$ cc-sessions jq 's::compactions' a7c3e9f
+{"l":36,"trigger":"manual","pre_tokens":21760,"post_tokens":9120,"dropped":12640,"duration_ms":21000,"summary_l":37,"logical_parent":"e0a0001e-0000-4000-8000-00000000001e","ts":"2026-10-30T10:01:12.717Z"}
+```
+
+`s::lookup(ref)` finds rows by handle, uuid, `toolu_…` id (the call and its result) or message id.
+
+```scrut
+$ cc-sessions jq '[s::lookup("L34", "e0a0001e-0000-4000-8000-00000000001e", "toolu_01FxAlpha000000000000002", "msg_01FxAlpha000000000000002", "e0a0eeee-5555-4000-8000-000000000001", "nothing") | .l]' a7c3e9f -- -c
+[34,34,15,16,14,15,17,56]
+```
+
+`s::ancestors(row)` walks `parentUuid`, and `logicalParentUuid` across a compaction; `s::children(uuid)` goes one step down.
+
+```scrut
+$ cc-sessions jq '[s::lookup("L37") as $r | s::ancestors($r) | .l][:4], ("children: \([s::children("e0a0001e-0000-4000-8000-00000000001e") | .l])")' a7c3e9f -- -c
+[36,34,33,32]
+"children: [35]"
+```
+
+`s::api_errors` lists API error messages.
+
+```scrut
+$ cc-sessions jq '.rows |= map(if .l == 56 then .e.isApiErrorMessage = true | .e.apiErrorStatus = 529 else . end) | [s::api_errors | [.l, .status, .text]]' a7c3e9f -- -c
+[[56,529,"No response requested."]]
+```
+
+## Shell helpers for commands
+
+`cc_jq <filter> [<jq-option>...] -- <file>...` runs a filter once per transcript object, as a command does.
+
+```scrut
+$ (. "$CC_TEST_ROOT/lib/common.sh"; cc_jq '[.kind, (s::totals.output)] | s::tsv' -r -- "$ALPHA.jsonl" "$ALPHA/subagents/agent-aplanner-5e1f0a2b3c4d5e6f.jsonl")
+main\t1487 (escaped)
+subagent\t40 (escaped)
+```
+
+`cc_resolve_all` resolves every reference into `CC_FILES`, each file once.
+
+```scrut
+$ (. "$CC_TEST_ROOT/lib/common.sh"; cc_resolve_all a7c3e9f "$ALPHA.jsonl" a0f1; printf '%s\n' "${CC_FILES[@]}" | cc_test_rel)
+<root>/projects/-tmp-sessions-fixture-alpha/a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e.jsonl
+<root>/projects/-tmp-sessions-fixture-alpha/a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e/subagents/workflows/wf_5d1c9a7e-3b2/agent-a0f1e2d3c4b5a6978.jsonl
+```
+
+`cc_need_value "$@"` requires a value after an option; `cc_count` reads a whole number; `cc_unknown_option` names the valid options and the `--` escape.
+
+```scrut {output_stream: stderr}
+$ (. "$CC_TEST_ROOT/lib/common.sh"; CC_SESSIONS_COMMAND=tools; cc_need_value --name x && echo ok >&2; cc_need_value --name)
+> (. "$CC_TEST_ROOT/lib/common.sh"; CC_SESSIONS_COMMAND=tools; cc_count --width 007 >&2; cc_count --width -1)
+> (. "$CC_TEST_ROOT/lib/common.sh"; CC_SESSIONS_COMMAND=tools; cc_unknown_option --nmae --name --input --full)
+ok
+cc-sessions: --name needs a value; pass one after it; see cc-sessions tools --help
+7
+cc-sessions: --width needs a whole number of 0 or more, got "-1"; pass, for example, --width 20; see cc-sessions tools --help
+cc-sessions: unknown option "--nmae" for tools; valid options: --name, --input, --full; to pass text that starts with -, put it after --; see cc-sessions tools --help
+[2]
+```
+
+## jq 1.7
+
+The library answers the same under jq 1.7 (`/usr/bin/jq`) as under jq 1.8.
+
+```scrut
+$ mkdir -p "$CC_TEST_TMP/jq17" && ln -sf /usr/bin/jq "$CC_TEST_TMP/jq17/jq"
+> f='[s::totals, s::models, [s::duplicates], [s::user_entries | del(.e)], [s::human_events], [s::outputs], [s::messages | del(.blocks)], [s::tool_calls], [s::skill_events], [s::attributions], [s::content], [s::agent_calls], [s::workflow_calls], [s::notifications], [s::fork_launches], s::fork_ref, s::delegation, s::agent_result, s::label_of, s::origin, s::is_stub, s::cwds, s::span, [s::compactions], [s::unknown_types], s::internal_reason, [s::journal]]'
+> set -- a7c3e9f b2d4 b9e1 c4e6 d1f3 e5a7 f6b8 b5a7 a7c3e9b2 aplanner adoes a3d1 acompact a0f1 a9e8 5f6a7b8c 9a0b1c2d "$WF/journal.jsonl"
+> cc-sessions jq "$f" "$@" --max-chars 0 > v18.txt 2>/dev/null && PATH="$CC_TEST_TMP/jq17:$PATH" cc-sessions jq "$f" "$@" --max-chars 0 > v17.txt 2>/dev/null
+> cmp v18.txt v17.txt && wc -l < v18.txt | tr -d ' '
+18
+```
+
+```scrut
+$ PATH="$CC_TEST_TMP/jq17:$PATH" cc-sessions jq '[s::bound("2026-10-30T10:00:04.781Z"), ("2026-10-30T10:00:04.781Z" | s::ts), ([1,2] | s::tsv), ("ab" | s::trunc(1))]' -- -n -c
+[{"from":1793354404,"to":1793354404},"2026-10-30T10:00:04Z","1\t2","…"]
+```
+
+## Run records and process costs
+
+`cc_run_record` finds a workflow run's record; `s::document` is the single JSON object of a one-line file such as a run record or a `.meta.json`.
+
+```scrut
+$ (. "$CC_TEST_ROOT/lib/common.sh"; cc_run_record "$ALPHA" wf_5d1c9a7e-3b2 | cc_test_rel; cc_run_record "$BETA" wf_5d1c9a7e-3b2 | cc_test_rel; cc_run_record "$BETA" wf_nothing || echo "not found $?")
+<root>/projects/-tmp-sessions-fixture-alpha/a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e/workflows/wf_5d1c9a7e-3b2.json
+<root>/projects/-tmp-sessions-fixture-alpha/a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e/workflows/wf_5d1c9a7e-3b2.json
+not found 1
+```
+
+```scrut
+$ cc-sessions jq 's::document | [.status, .agentCount, (.result | if . then tojson else null end), (.phases // [] | map(.title) | join(",")), .totalTokens, .durationMs] | s::tsv' "$ALPHA/workflows/wf_5d1c9a7e-3b2.json" "$ALPHA/subagents/agent-a7c3e9b2d4f6a8c01.meta.json" -- -r
+completed\t2\t{"status":"ok","findings":1}\tScan,Report\t9000\t42000 (escaped)
+-\t-\t-\t-\t-\t- (escaped)
+```
+
+`s::cost_states` lists `cost-state` entries; each covers one process run.
+
+```scrut
+$ cc-sessions jq 's::cost_states | [s::handle, .total_cost_usd, (.models | keys | join(",")), .models["claude-opus-5-5"].inputTokens, .models["claude-opus-5-5"].cacheReadInputTokens, .models["claude-haiku-5-5"].outputTokens] | s::tsv' a7c3e9f -- -r
+L83\t0.4321\tclaude-haiku-5-5,claude-opus-5-5\t21\t245300\t230 (escaped)
+```
+
+The jq wrapper always hands jq absolute paths.
+
+```scrut
+$ (. "$CC_TEST_ROOT/lib/common.sh"; cd "$P/-tmp-sessions-fixture-beta" && cc_jq '.file' -r -- b9e1c3a5-7d2f-4e6a-8b0c-1d3e5f7a9b2c.jsonl) | cc_test_rel
+<root>/projects/-tmp-sessions-fixture-beta/b9e1c3a5-7d2f-4e6a-8b0c-1d3e5f7a9b2c.jsonl
+```
+
+`cc-sessions jq -h` needs no data root.
+
+```scrut
+$ CLAUDE_CONFIG_DIR=/nonexistent/sessions-fixture cc-sessions jq -h | head -n 1
+Usage: cc-sessions jq <filter> [<session>|<file>|-]... [-- <jq-option>...]
+```

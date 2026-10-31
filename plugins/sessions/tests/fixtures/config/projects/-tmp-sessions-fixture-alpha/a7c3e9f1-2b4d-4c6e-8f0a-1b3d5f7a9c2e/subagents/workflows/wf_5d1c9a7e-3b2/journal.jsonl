@@ -1,0 +1,5 @@
+{"type":"launched"}
+{"type":"started","key":"v2:3c1f5e7a9b0d2f4e6a8c0e2f4a6c8e0a2c4e6a8c0e2f4a6c8e0a2c4e6a8c0e2f","agentId":"a0f1e2d3c4b5a6978","label":"scan","phase":"Scan"}
+{"type":"result","key":"v2:3c1f5e7a9b0d2f4e6a8c0e2f4a6c8e0a2c4e6a8c0e2f4a6c8e0a2c4e6a8c0e2f","agentId":"a0f1e2d3c4b5a6978","result":"Scanned 3 files; one parser symbol found.","toolsUsed":["Bash"]}
+{"type":"started","key":"v2:7d9f1b3d5f7a9c1e3a5c7e9a1c3e5a7c9e1a3c5e7a9c1e3a5c7e9a1c3e5a7c9e","agentId":"a9e8d7c6b5a4f3e21","label":"report","phase":"Report"}
+{"type":"result","key":"v2:7d9f1b3d5f7a9c1e3a5c7e9a1c3e5a7c9e1a3c5e7a9c1e3a5c7e9a1c3e5a7c9e","agentId":"a9e8d7c6b5a4f3e21","result":{"finding":"CONTENT_TERM_ALPHA is parsed leniently","severity":"low"},"toolsUsed":["StructuredOutput"]}

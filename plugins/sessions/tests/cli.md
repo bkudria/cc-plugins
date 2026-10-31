@@ -1,0 +1,703 @@
+---
+prepend: [setup.md]
+---
+
+# cc-sessions dispatcher and session references
+
+## Version
+
+`--version` names the tool, the version in plugin.json and the plugin.
+
+```scrut
+$ cc-sessions --version
+cc-sessions *.*.* (sessions plugin) (glob)
+```
+
+The version is the one in `.claude-plugin/plugin.json`.
+
+```scrut
+$ manifest=$(sed -n 's/^ *"version": *"\([^"]*\)".*/\1/p' "$CC_TEST_ROOT/.claude-plugin/plugin.json")
+> [ "$(cc-sessions --version)" = "cc-sessions $manifest (sessions plugin)" ] && echo matches
+matches
+```
+
+## Help index
+
+A copy of the plugin with an extra command shows that commands are discovered from `libexec/`.
+
+```scrut
+$ PLUGIN=$CC_TEST_TMP/plugin && mkdir -p "$PLUGIN"
+> cp -R "$CC_TEST_ROOT/bin" "$CC_TEST_ROOT/lib" "$CC_TEST_ROOT/libexec" "$CC_TEST_ROOT/.claude-plugin" "$PLUGIN/"
+> printf '%s\n' '#!/bin/bash' 'case $1 in' \
+>   '  --synopsis) echo "probe <session>  answer a test question" ;;' \
+>   '  -h|--help) echo "probe help text" ;;' \
+>   '  *) echo "probe ran: $*" ;;' 'esac' > "$PLUGIN/libexec/probe"
+> chmod +x "$PLUGIN/libexec/probe"
+```
+
+`cc-sessions`, `-h` and `--help` print the same index and exit 0.
+
+```scrut
+$ "$PLUGIN/bin/cc-sessions" > bare.txt && "$PLUGIN/bin/cc-sessions" -h > short.txt && "$PLUGIN/bin/cc-sessions" --help > long.txt
+> cmp bare.txt short.txt && cmp bare.txt long.txt && echo same
+same
+```
+
+The index starts with a usage summary and lists each command's synopsis line.
+
+```scrut
+$ head -n 1 long.txt; grep -n '^  probe ' long.txt
+cc-sessions: investigate Claude Code session transcripts
+*:  probe <session>  answer a test question (glob)
+```
+
+Every command in `libexec/` appears exactly once in the index.
+
+```scrut
+$ for c in "$PLUGIN"/libexec/*; do n=${c##*/}; printf '%s %s\n' "$n" "$(grep -c "^  $n " long.txt)"; done | grep -v ' 1$' || echo all-listed
+all-listed
+```
+
+The index ends with the status of each dependency.
+
+```scrut
+$ tail -n 1 long.txt
+deps: jq * ok, rg * ok (glob)
+```
+
+The index stays within 4096 bytes.
+
+```scrut
+$ [ "$(wc -c < long.txt)" -le 4096 ] && echo small
+small
+```
+
+Help never reads transcripts: it works and is unchanged when the data root does not exist.
+
+```scrut
+$ CLAUDE_CONFIG_DIR=/nonexistent/sessions-fixture "$PLUGIN/bin/cc-sessions" --help > missing-root.txt; echo "exit $?"; cmp long.txt missing-root.txt && echo same
+exit 0
+same
+```
+
+`<command> -h` and `<command> --help` print that command's help and exit 0.
+
+```scrut
+$ "$PLUGIN/bin/cc-sessions" probe -h && "$PLUGIN/bin/cc-sessions" probe --help
+probe help text
+probe help text
+```
+
+Help for a command wins over its other arguments.
+
+```scrut
+$ CLAUDE_CONFIG_DIR=/nonexistent/sessions-fixture "$PLUGIN/bin/cc-sessions" probe nothing-here --help
+probe help text
+```
+
+When the bare name `cc-sessions` on PATH is another program, the index warns and names this binary.
+
+```scrut
+$ mkdir -p "$CC_TEST_TMP/shadow" && printf '#!/bin/sh\necho shadow\n' > "$CC_TEST_TMP/shadow/cc-sessions" && chmod +x "$CC_TEST_TMP/shadow/cc-sessions"
+> PATH="$CC_TEST_TMP/shadow:$PATH" "$PLUGIN/bin/cc-sessions" --help | grep '^warning:' | cc_test_rel "$CC_TEST_TMP"
+warning: cc-sessions on PATH is <root>/shadow/cc-sessions, not this program; call <root>/plugin/bin/cc-sessions
+```
+
+It also warns when `cc-sessions` is not on PATH at all.
+
+```scrut
+$ PATH=/usr/bin:/bin "$PLUGIN/bin/cc-sessions" --help | grep '^warning:' | cc_test_rel "$CC_TEST_TMP"
+warning: cc-sessions is not on PATH; call <root>/plugin/bin/cc-sessions
+```
+
+There is no warning when PATH finds this binary.
+
+```scrut
+$ cc-sessions --help | grep '^warning:' || echo no-warning
+no-warning
+```
+
+## Usage errors
+
+An unknown command exits 2, prints nothing on stdout, and says what went wrong, how to fix it and where help is.
+
+```scrut
+$ out=$("$PLUGIN/bin/cc-sessions" prob 2> err.txt); echo "exit $? stdout ${#out}"; cat err.txt
+exit 2 stdout 0
+cc-sessions: unknown command "prob"; did you mean "probe"? Commands: *probe*; see cc-sessions --help (glob)
+```
+
+Without a close match the error lists the commands.
+
+```scrut {output_stream: stderr}
+$ "$PLUGIN/bin/cc-sessions" zzz
+cc-sessions: unknown command "zzz"; use one of: *probe*; see cc-sessions --help (glob)
+[2]
+```
+
+A name that is not a plain command name never reaches the file system.
+
+```scrut {output_stream: stderr}
+$ "$PLUGIN/bin/cc-sessions" ../bin/cc-sessions
+cc-sessions: unknown command "../bin/cc-sessions"; use one of: *probe*; see cc-sessions --help (glob)
+[2]
+```
+
+An unknown option before the command exits 2.
+
+```scrut {output_stream: stderr}
+$ "$PLUGIN/bin/cc-sessions" --frob probe
+cc-sessions: unknown option "--frob"; put options after the command name, as in cc-sessions <command> [<option>...]; see cc-sessions --help
+[2]
+```
+
+`--` ends option scanning, so `--help` after it is an operand.
+
+```scrut
+$ "$PLUGIN/bin/cc-sessions" probe x -- --help
+probe ran: x -- --help
+```
+
+## Session references
+
+`where` prints what a reference resolves to: kind, owning session, agent id and workflow run.
+
+```scrut
+$ where() { cc-sessions jq '"\(.kind) \(.session) \(.agent // "-") \(.run // "-")"' "$@" -- -r; }
+> where_file() { cc-sessions jq '.file' "$@" -- -r | cc_test_rel; }
+```
+
+A full session id, or a unique prefix of it, resolves to the main transcript.
+
+```scrut
+$ where a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e && where a7c3e9f && where_file a7c3e9f
+main a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e - -
+main a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e - -
+<root>/projects/-tmp-sessions-fixture-alpha/a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e.jsonl
+```
+
+Each other session resolves from a four-character prefix.
+
+```scrut
+$ for p in b5a7 b2d4 b9e1 c4e6 d1f3 e5a7 f6b8; do where "$p"; done
+main b5a7c9e1-0d2f-4a4b-9c6e-8f0a2b4c6d8e - -
+main b2d4f6a8-1c3e-4a5b-8d7f-9e0a1b2c3d4e - -
+main b9e1c3a5-7d2f-4e6a-8b0c-1d3e5f7a9b2c - -
+main c4e6a8b0-2d4f-4a6c-9e8a-0b2c4d6e8f1a - -
+main d1f3b5d7-9e0a-4c2e-a4b6-c8d0e2f4a6b8 - -
+main e5a7c9b1-3d5f-4b7d-8f9a-0c1e2a3b4c5d - -
+main f6b8d0e2-4a6c-4e8a-b0c2-d4e6f8a0b2c4 - -
+```
+
+A sub-agent resolves from its full id, a prefix with or without the leading `a`, and its owning session is the parent.
+
+```scrut
+$ where a7c3e9b2d4f6a8c01 && where a7c3e9b && where 7c3e9b && where_file 7c3e9b
+subagent a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e a7c3e9b2d4f6a8c01 -
+subagent a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e a7c3e9b2d4f6a8c01 -
+subagent a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e a7c3e9b2d4f6a8c01 -
+<root>/projects/-tmp-sessions-fixture-alpha/a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e/subagents/agent-a7c3e9b2d4f6a8c01.jsonl
+```
+
+BETA's sub-agent exists only under BETA.
+
+```scrut
+$ where a4c6e8f0a2b4c6d8e && where 4c6e8f0a
+subagent b2d4f6a8-1c3e-4a5b-8d7f-9e0a1b2c3d4e a4c6e8f0a2b4c6d8e -
+subagent b2d4f6a8-1c3e-4a5b-8d7f-9e0a1b2c3d4e a4c6e8f0a2b4c6d8e -
+```
+
+Flat-layout agents (8 hex digits, no leading `a`) belong to the session named by their `sessionId`.
+
+```scrut
+$ where 5f6a7b8c && where 9a0b1c2d && where_file 9a0b1c2d
+flat c4e6a8b0-2d4f-4a6c-9e8a-0b2c4d6e8f1a 5f6a7b8c -
+flat c4e6a8b0-2d4f-4a6c-9e8a-0b2c4d6e8f1a 9a0b1c2d -
+<root>/projects/-tmp-sessions-fixture-flat/agent-9a0b1c2d.jsonl
+```
+
+Internal, named, teammate and fork agents resolve by any part of their id after `agent-`.
+
+```scrut
+$ for p in acompact compact-3f9a1c prompt_suggestion aprompt_suggestion-8d2e4b planner aplanner does-the-lexer adoes a3d1e5f7; do where "$p"; done
+subagent a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e acompact-3f9a1c -
+subagent a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e acompact-3f9a1c -
+subagent a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e aprompt_suggestion-8d2e4b -
+subagent a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e aprompt_suggestion-8d2e4b -
+subagent a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e aplanner-5e1f0a2b3c4d5e6f -
+subagent a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e aplanner-5e1f0a2b3c4d5e6f -
+subagent a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e adoes-the-lexer-0a1b2c3d4e5f6a7b -
+subagent a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e adoes-the-lexer-0a1b2c3d4e5f6a7b -
+subagent a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e a3d1e5f7a9b0c2d4e -
+```
+
+Workflow agents carry their run id.
+
+```scrut
+$ where a0f1 && where a9e8 && where_file a9e8
+workflow-agent a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e a0f1e2d3c4b5a6978 wf_5d1c9a7e-3b2
+workflow-agent a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e a9e8d7c6b5a4f3e21 wf_5d1c9a7e-3b2
+<root>/projects/-tmp-sessions-fixture-alpha/a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e/subagents/workflows/wf_5d1c9a7e-3b2/agent-a9e8d7c6b5a4f3e21.jsonl
+```
+
+`wf_<run-id>` resolves to the session that ran the workflow.
+
+```scrut
+$ where wf_5d1c9a7e-3b2
+main a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e - -
+```
+
+A prefix shared by a session and a sub-agent is ambiguous: exit 2, nothing on stdout, and each candidate with its kind, parent session and path.
+
+```scrut
+$ out=$(cc-sessions jq '.file' a7c3 2> err.txt); echo "exit $? stdout ${#out}"; cc_test_rel < err.txt
+exit 2 stdout 0
+cc-sessions: "a7c3" matches 2 transcripts; pass a longer prefix or one of these paths; see cc-sessions jq --help
+cc-sessions:   a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e\tmain\t-\t<root>/projects/-tmp-sessions-fixture-alpha/a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e.jsonl (escaped)
+cc-sessions:   a7c3e9b2d4f6a8c01\tsubagent\ta7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e\t<root>/projects/-tmp-sessions-fixture-alpha/a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e/subagents/agent-a7c3e9b2d4f6a8c01.jsonl (escaped)
+```
+
+```scrut {output_stream: stderr}
+$ cc-sessions jq '.file' a7c3e9
+cc-sessions: "a7c3e9" matches 2 transcripts; pass a longer prefix or one of these paths; see cc-sessions jq --help
+cc-sessions:   a7c3e9f1-* (glob)
+cc-sessions:   a7c3e9b2d4f6a8c01* (glob)
+[2]
+```
+
+An id that names no transcript exits 2. Entry uuids are not file names.
+
+```scrut {output_stream: stderr}
+$ cc-sessions jq '.file' e0a0
+cc-sessions: no transcript matches "e0a0"; pass a session or agent id, a prefix of at least 4 characters, or a path; see cc-sessions jq --help
+[2]
+```
+
+A reference that is too short or has other characters is a usage error.
+
+```scrut {output_stream: stderr}
+$ cc-sessions jq '.file' a7c; cc-sessions jq '.file' 'a7c3*'; echo "exit $?" >&2
+cc-sessions: "a7c" is not a session reference; pass current, a path, wf_<run-id>, or an id or prefix of at least 4 characters from [A-Za-z0-9_-]; see cc-sessions jq --help
+cc-sessions: "a7c3*" is not a session reference; pass current, a path, wf_<run-id>, or an id or prefix of at least 4 characters from [A-Za-z0-9_-]; see cc-sessions jq --help
+exit 2
+```
+
+`current` is the session in `CLAUDE_CODE_SESSION_ID`.
+
+```scrut
+$ CLAUDE_CODE_SESSION_ID=a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e where current
+main a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e - -
+```
+
+Without `CLAUDE_CODE_SESSION_ID`, `current` is a usage error.
+
+```scrut {output_stream: stderr}
+$ cc-sessions jq '.file' current
+cc-sessions: "current" needs CLAUDE_CODE_SESSION_ID, which is not set; pass a session id or a path instead; see cc-sessions jq --help
+[2]
+```
+
+A `.jsonl` path is used as given, with `~/` expanded.
+
+```scrut
+$ where "$ALPHA.jsonl" && where "~/.claude/projects/-tmp-sessions-fixture-alpha/a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e/subagents/agent-aplanner-5e1f0a2b3c4d5e6f.jsonl"
+main a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e - -
+subagent a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e aplanner-5e1f0a2b3c4d5e6f -
+```
+
+A session directory resolves to its `.jsonl`; a file under `tool-results/` resolves to the session that owns it.
+
+```scrut
+$ where "$ALPHA" && where "$ALPHA/" && where "$ALPHA/tool-results/b4k7m2q9x.txt" && where "$RELOC/tool-results/c8n2v5x1q.txt"
+main a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e - -
+main a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e - -
+main a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e - -
+main e5a7c9b1-3d5f-4b7d-8f9a-0c1e2a3b4c5d - -
+```
+
+A relative path works too.
+
+```scrut
+$ (cd "$P/-tmp-sessions-fixture-reloc" && where ./e5a7c9b1-3d5f-4b7d-8f9a-0c1e2a3b4c5d.jsonl)
+main e5a7c9b1-3d5f-4b7d-8f9a-0c1e2a3b4c5d - -
+```
+
+A path that no longer exists falls back to its basename as an id, so stored paths and ephemeral task files still resolve.
+
+```scrut
+$ where /tmp/sessions-fixture/gone/a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e.jsonl && where /private/tmp/claude-501/-tmp-sessions-fixture-alpha/a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e/tasks/a7c3e9b2d4f6a8c01.output
+main a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e - -
+subagent a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e a7c3e9b2d4f6a8c01 -
+```
+
+A data root whose path contains a space works.
+
+```scrut
+$ CLAUDE_CONFIG_DIR=$CC_TEST_SPACE_CONFIG cc-sessions jq '"\(.kind) \(.file)"' a7c3e9f a0f1 -- -r | cc_test_rel "$CC_TEST_SPACE_CONFIG"
+main <root>/projects/-tmp-sessions-fixture-alpha/a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e.jsonl
+workflow-agent <root>/projects/-tmp-sessions-fixture-alpha/a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e/subagents/workflows/wf_5d1c9a7e-3b2/agent-a0f1e2d3c4b5a6978.jsonl
+```
+
+Without `CLAUDE_CONFIG_DIR` the data root is `~/.claude/projects`.
+
+```scrut
+$ (unset CLAUDE_CONFIG_DIR; cc-sessions jq '.file' a9e8 -- -r) | cc_test_rel
+<root>/projects/-tmp-sessions-fixture-alpha/a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e/subagents/workflows/wf_5d1c9a7e-3b2/agent-a9e8d7c6b5a4f3e21.jsonl
+```
+
+A missing data root means the command could not answer: exit 1.
+
+```scrut {output_stream: stderr}
+$ CLAUDE_CONFIG_DIR=/nonexistent/sessions-fixture cc-sessions jq '.file' a7c3e9f
+cc-sessions: no transcripts directory at /nonexistent/sessions-fixture/projects; set CLAUDE_CONFIG_DIR to the directory that holds projects/; see cc-sessions jq --help
+[1]
+```
+
+## cc-sessions jq
+
+The filter's input is one transcript object per operand, in operand order; output is compact JSON by default.
+
+```scrut
+$ cc-sessions jq '{kind, session}' b2d4 a0f1
+{"kind":"main","session":"b2d4f6a8-1c3e-4a5b-8d7f-9e0a1b2c3d4e"}
+{"kind":"workflow-agent","session":"a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e"}
+```
+
+An operand named twice is read once.
+
+```scrut
+$ cc-sessions jq '.kind' b2d4 "$BETA.jsonl" b2d4f6a8
+"main"
+```
+
+Options after `--` go to jq unchanged.
+
+```scrut
+$ cc-sessions jq '"\($x): \(.kind)"' b2d4 -- -r --arg x kind && cc-sessions jq '{a: 1}' -- -n --indent 1
+kind: main
+{
+ "a": 1
+}
+```
+
+With `-s` the input is one array holding every transcript object.
+
+```scrut
+$ cc-sessions jq 'map(.kind) | join(",")' a7c3e9f a0f1 -- -s -r
+main,workflow-agent
+```
+
+With `-n` the filter runs once on null and needs no operand.
+
+```scrut
+$ cc-sessions jq '"pure"' -- -n -r && cc-sessions jq '[s::transcripts | .kind]' a0f1 -- -nc
+pure
+["workflow-agent"]
+```
+
+`-` reads stdin, explicitly.
+
+```scrut
+$ printf '{"type":"user","uuid":"u1"}\n{"type":"ai-title"}\n' | cc-sessions jq '[.file, .kind, (.rows | length)]' -
+["-","file",2]
+```
+
+Any other file is read as JSON lines as given: a workflow journal, for example.
+
+```scrut
+$ cc-sessions jq '[.kind, .run, .rows[1].e.label]' "$WF/journal.jsonl"
+["journal","wf_5d1c9a7e-3b2","scan"]
+```
+
+jq's exit status is passed through: 5 for a runtime error, 3 for a compile error, 1 for `-e` on false.
+
+```scrut
+$ cc-sessions jq 'error("boom")' b2d4 2>/dev/null; echo "exit $?"
+> cc-sessions jq '.[' b2d4 2>/dev/null; echo "exit $?"
+> cc-sessions jq 'false' b2d4 -- -e; echo "exit $?"
+exit 5
+exit 3
+false
+exit 1
+```
+
+No operand is a usage error unless `-n` is passed to jq.
+
+```scrut {output_stream: stderr}
+$ cc-sessions jq '.kind'
+cc-sessions: jq needs at least one <session>, file or - operand; name a session, or pass -- -n to run the filter without input; see cc-sessions jq --help
+[2]
+```
+
+No filter is a usage error.
+
+```scrut {output_stream: stderr}
+$ cc-sessions jq
+cc-sessions: jq needs a filter; pass one, as in cc-sessions jq '.kind' <session>; see cc-sessions jq --help
+[2]
+```
+
+A jq option before `--` is an unknown option for this command.
+
+```scrut {output_stream: stderr}
+$ cc-sessions jq -r '.kind' b2d4
+cc-sessions: unknown option "-r" for jq; pass jq options after --, as in cc-sessions jq '.kind' <session> -- -r; see cc-sessions jq --help
+[2]
+```
+
+jq options that would replace the operands or the input format are refused.
+
+```scrut
+$ for o in --args --jsonargs --stream --stream-errors --seq -f --from-file --raw-input -R; do cc-sessions jq '.' b2d4 -- "$o" x; echo "exit $?"; done 2>&1 | sort | uniq -c | sed 's/^ *//'
+1 cc-sessions: jq option "--args" is not supported here; operands are always transcripts and the filter is the first operand; see cc-sessions jq --help
+1 cc-sessions: jq option "--from-file" is not supported here; operands are always transcripts and the filter is the first operand; see cc-sessions jq --help
+1 cc-sessions: jq option "--jsonargs" is not supported here; operands are always transcripts and the filter is the first operand; see cc-sessions jq --help
+1 cc-sessions: jq option "--raw-input" is not supported here; operands are always transcripts and the filter is the first operand; see cc-sessions jq --help
+1 cc-sessions: jq option "--seq" is not supported here; operands are always transcripts and the filter is the first operand; see cc-sessions jq --help
+1 cc-sessions: jq option "--stream" is not supported here; operands are always transcripts and the filter is the first operand; see cc-sessions jq --help
+1 cc-sessions: jq option "--stream-errors" is not supported here; operands are always transcripts and the filter is the first operand; see cc-sessions jq --help
+1 cc-sessions: jq option "-R" is not supported here; operands are always transcripts and the filter is the first operand; see cc-sessions jq --help
+1 cc-sessions: jq option "-f" is not supported here; operands are always transcripts and the filter is the first operand; see cc-sessions jq --help
+9 exit 2
+```
+
+The value of a jq option is never taken for an option.
+
+```scrut
+$ cc-sessions jq '$v' -- -n --arg v -s -r
+-s
+```
+
+Unparseable lines are skipped with a notice on stderr; the answer still exits 0.
+
+```scrut
+$ cc-sessions jq '[(.rows | length), .skipped]' b2d4 2>&1 | cc_test_rel
+cc-sessions: skipped 1 unparseable line in <root>/projects/-tmp-sessions-fixture-beta/b2d4f6a8-1c3e-4a5b-8d7f-9e0a1b2c3d4e.jsonl: L20
+[21,[20]]
+```
+
+stdin is never read unless `-` is an operand: a reader blocked on stdin would hang here.
+
+```scrut {timeout: 20s}
+$ mkfifo "$CC_TEST_TMP/never" && cc-sessions jq '.kind' b2d4 3<>"$CC_TEST_TMP/never" <&3
+"main"
+```
+
+## Output budget
+
+`--max-chars` stops stdout at a record boundary; the notice says how many records were left out and, for records that start with a handle, where to continue.
+
+```scrut
+$ cc-sessions jq 'range(1; 31) | "L\(.)\tabcdefgh"' --max-chars 50 -- -n -r
+L1\tabcdefgh (escaped)
+L2\tabcdefgh (escaped)
+L3\tabcdefgh (escaped)
+L4\tabcdefgh (escaped)
+```
+
+```scrut {output_stream: stderr}
+$ cc-sessions jq 'range(1; 31) | "L\(.)\tabcdefgh"' --max-chars 50 -- -n -r
+cc-sessions: output stopped at --max-chars 50 after 4 records; 26 more left out; continue with --since L5
+```
+
+`--limit` stops after that many records.
+
+```scrut {output_stream: combined}
+$ cc-sessions jq 'range(1; 31) | "L\(.)\tabcdefgh"' --limit 3 -- -n -r 2>&1
+L1\tabcdefgh (escaped)
+L2\tabcdefgh (escaped)
+L3\tabcdefgh (escaped)
+cc-sessions: output stopped at --limit 3 after 3 records; 27 more left out; continue with --since L4
+```
+
+The default budget is 20000 characters; records without a handle continue with a larger budget.
+
+```scrut
+$ cc-sessions jq 'range(2000) | "record-\(. + 1000)"' -- -n -r 2> notice.txt | wc -l | tr -d ' '; cat notice.txt
+1666
+cc-sessions: output stopped at --max-chars 20000 after 1666 records; 334 more left out; continue with a larger --max-chars (0 removes the limit)
+```
+
+`--max-chars 0` removes the limit.
+
+```scrut
+$ cc-sessions jq 'range(2000) | "record-\(. + 1000)"' --max-chars 0 -- -n -r 2> notice.txt | wc -l | tr -d ' '; wc -c < notice.txt | tr -d ' '
+2000
+0
+```
+
+A record that alone is over the budget is not printed; the notice gives the size that fits it.
+
+```scrut {output_stream: combined}
+$ cc-sessions jq '"L7\t" + ("x" * 100), "L8\tsmall"' --max-chars 50 -- -n -r 2>&1
+cc-sessions: output stopped at --max-chars 50 after 0 records; 2 more left out; the next record is 104 characters; continue with --max-chars 104 --since L7
+```
+
+Records whose handles do not run forward continue with a larger budget instead of `--since`.
+
+```scrut {output_stream: combined}
+$ cc-sessions jq '"L9\ta", "L2\tb", "L3\tc"' --limit=2 -- -n -r 2>&1
+L9\ta (escaped)
+L2\tb (escaped)
+cc-sessions: output stopped at --limit 2 after 2 records; 1 more left out; continue with a larger --limit (0 removes the limit)
+```
+
+Global options are accepted before the command too, and their values are checked.
+
+```scrut {output_stream: combined}
+$ cc-sessions --max-chars=12 jq '"L1\tone", "L2\ttwo"' -- -n -r 2>&1
+L1\tone (escaped)
+cc-sessions: output stopped at --max-chars 12 after 1 record; 1 more left out; continue with --since L2
+```
+
+```scrut {output_stream: stderr}
+$ cc-sessions jq '1' --limit x -- -n; cc-sessions jq '1' --max-chars; echo "exit $?" >&2
+cc-sessions: --limit needs a whole number of 0 or more, got "x"; pass, for example, --limit 20; see cc-sessions jq --help
+cc-sessions: --max-chars needs a value; pass, for example, --max-chars 20; see cc-sessions jq --help
+exit 2
+```
+
+After `--`, `--max-chars` is not a global option: here jq receives it.
+
+```scrut
+$ cc-sessions jq '1' -- -n --max-chars 5 2>&1 >/dev/null | head -n 1
+*Unknown option --max-chars (glob)
+```
+
+The command's exit status survives the budget filter.
+
+```scrut
+$ cc-sessions jq 'error("boom")' b2d4 --limit 1 2>/dev/null; echo "exit $?"
+exit 5
+```
+
+Commands receive the budget in `CC_SESSIONS_LIMIT` and `CC_SESSIONS_MAX_CHARS`, never as arguments.
+`CC_SESSIONS_LIMIT` is empty when no `--limit` was given, so a command can apply a default of its own.
+
+```scrut
+$ printf '%s\n' '#!/bin/bash' 'echo "args=$* limit=$CC_SESSIONS_LIMIT max=$CC_SESSIONS_MAX_CHARS command=$CC_SESSIONS_COMMAND"' > "$PLUGIN/libexec/envprobe" && chmod +x "$PLUGIN/libexec/envprobe"
+> "$PLUGIN/bin/cc-sessions" envprobe a --limit 7 b && "$PLUGIN/bin/cc-sessions" --max-chars 900 envprobe -- --limit 1
+> "$PLUGIN/bin/cc-sessions" envprobe --limit 0
+args=a b limit=7 max=20000 command=envprobe
+args=-- --limit 1 limit= max=900 command=envprobe
+args= limit=0 max=20000 command=envprobe
+```
+
+Without `--limit`, the dispatcher cuts nothing by count.
+
+```scrut
+$ printf '%s\n' '#!/bin/bash' 'for i in 1 2 3 4 5; do printf "L%s\tx\n" "$i"; done' > "$PLUGIN/libexec/fiveprobe" && chmod +x "$PLUGIN/libexec/fiveprobe"
+> "$PLUGIN/bin/cc-sessions" fiveprobe 2>&1 | wc -l | tr -d ' '
+5
+```
+
+When the reader of stdout goes away early, output ends quietly: no notice and no write error, even when SIGPIPE is ignored.
+
+```scrut
+$ (cc-sessions jq 'range(100000)' -- -n | head -n 1) 2>&1; (trap '' PIPE; cc-sessions jq 'range(100000)' -- -n | head -n 1) 2>&1
+0
+0
+```
+
+Help is never cut.
+
+```scrut
+$ cc-sessions --max-chars 10 --help | wc -l | awk '$1 > 20 { print "whole index" }'
+whole index
+```
+
+## Dependencies
+
+`nojq` holds every tool in `/usr/bin` and `/bin` except jq; neither has rg.
+
+```scrut
+$ NOJQ=$CC_TEST_TMP/nojq && mkdir -p "$NOJQ" && { ln -s /usr/bin/* /bin/* "$NOJQ"/ 2>/dev/null; rm -f "$NOJQ/jq"; }
+> OLDJQ=$CC_TEST_TMP/oldjq && mkdir -p "$OLDJQ" && printf '%s\n' '#!/bin/sh' 'echo jq-1.6' > "$OLDJQ/jq" && chmod +x "$OLDJQ/jq"
+> JQ17=$CC_TEST_TMP/jq17 && mkdir -p "$JQ17" && ln -s /usr/bin/jq "$JQ17/jq"
+> RG=$(command -v rg) && JQ=$(command -v jq)
+```
+
+Without jq a command cannot answer: exit 1, with what is missing and how to fix it.
+
+```scrut {output_stream: stderr}
+$ PATH="$CC_TEST_ROOT/bin:$NOJQ" cc-sessions jq '.kind' b2d4
+cc-sessions: jq is missing (need 1.7 or later); install jq 1.7 or later and put it on PATH; see cc-sessions jq --help
+[1]
+```
+
+Help and `--version` still work, and the index reports the missing dependencies.
+
+```scrut
+$ PATH="$CC_TEST_ROOT/bin:$NOJQ" cc-sessions --help | tail -n 1; PATH="$CC_TEST_ROOT/bin:$NOJQ" cc-sessions jq --help > /dev/null && echo "jq help exit $?"
+> PATH="$CC_TEST_ROOT/bin:$NOJQ" cc-sessions --version
+deps: jq missing (need 1.7 or later), rg missing
+jq help exit 0
+cc-sessions *.*.* (sessions plugin) (glob)
+```
+
+A jq older than 1.7 is refused the same way.
+
+```scrut
+$ PATH="$OLDJQ:$PATH" cc-sessions jq '.kind' b2d4 2>&1; echo "exit $?"; PATH="$OLDJQ:$PATH" cc-sessions --help | tail -n 1
+cc-sessions: jq 1.6 is too old (need 1.7 or later); install jq 1.7 or later and put it on PATH; see cc-sessions jq --help
+exit 1
+deps: jq 1.6 too old (need 1.7 or later), rg * ok (glob)
+```
+
+A command that needs rg calls `cc_need rg`; without rg it exits 1.
+
+```scrut
+$ printf '%s\n' '#!/bin/bash' '. "${0%/*}/../lib/common.sh"' 'case $1 in --synopsis) echo "rgprobe  needs rg";; esac' 'cc_need rg' 'echo "rg found"' > "$PLUGIN/libexec/rgprobe" && chmod +x "$PLUGIN/libexec/rgprobe"
+> mkdir -p "$CC_TEST_TMP/jqonly" && ln -s "$JQ" "$CC_TEST_TMP/jqonly/jq"
+> PATH="$CC_TEST_TMP/jqonly:$NOJQ" "$PLUGIN/bin/cc-sessions" rgprobe 2>&1; echo "exit $?"; "$PLUGIN/bin/cc-sessions" rgprobe
+cc-sessions: rg (ripgrep) is missing; install ripgrep and put it on PATH; see cc-sessions rgprobe --help
+exit 1
+rg found
+```
+
+With jq 1.7 (`/usr/bin/jq`, 1.7.1-apple) first on PATH the index accepts it and commands work.
+
+```scrut
+$ PATH="$JQ17:$PATH" cc-sessions --help | tail -n 1 && PATH="$JQ17:$PATH" cc-sessions jq '[.kind, (.rows | length), .skipped]' b2d4 a9e8 2>/dev/null
+deps: jq 1.7.1* ok, rg * ok (glob)
+["main",21,[20]]
+["workflow-agent",5,[]]
+```
+
+```scrut
+$ PATH="$JQ17:$PATH" where wf_5d1c9a7e-3b2 && PATH="$JQ17:$PATH" cc-sessions jq 'range(1; 9) | "L\(.)\tx"' --limit 2 -- -n -r
+main a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e - -
+L1\tx (escaped)
+L2\tx (escaped)
+```
+
+Run explicitly under `/bin/bash` (3.2 on macOS), the dispatcher and commands behave the same.
+
+```scrut
+$ /bin/bash "$CC_TEST_ROOT/bin/cc-sessions" jq '"\(.kind) \(.agent)"' 7c3e9b planner -- -r && /bin/bash "$CC_TEST_ROOT/bin/cc-sessions" --help | head -n 1
+subagent a7c3e9b2d4f6a8c01
+subagent aplanner-5e1f0a2b3c4d5e6f
+cc-sessions: investigate Claude Code session transcripts
+```
+
+```scrut {output_stream: stderr}
+$ /bin/bash "$CC_TEST_ROOT/bin/cc-sessions" jq '.kind' a7c3 2>&1 >/dev/null | head -n 1 >&2; /bin/bash "$CC_TEST_ROOT/bin/cc-sessions" jq '.kind' a7c3 2>/dev/null; echo "exit $?" >&2
+cc-sessions: "a7c3" matches 2 transcripts; pass a longer prefix or one of these paths; see cc-sessions jq --help
+exit 2
+```
+
+## Lint
+
+shellcheck finds nothing in the dispatcher, the commands, the shared shell code or the test setup.
+
+```scrut
+$ cd "$CC_TEST_ROOT" && shellcheck -x -P SCRIPTDIR bin/cc-sessions libexec/* lib/*.sh tests/setup.sh && echo clean
+clean
+```
+
+Every jq module compiles with jq 1.8 and jq 1.7.
+
+```scrut
+$ for j in "$JQ" /usr/bin/jq; do for m in "$CC_TEST_ROOT"/lib/*.jq; do n=${m##*/}; "$j" -n -L "$CC_TEST_ROOT/lib" "import \"${n%.jq}\" as m; empty" || echo "failed: $j $n"; done; done; echo checked
+checked
+```

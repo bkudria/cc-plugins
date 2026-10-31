@@ -1,0 +1,151 @@
+#!/bin/bash
+# shellcheck source=../lib/common.sh
+. "${0%/*}/../lib/common.sh"
+
+cc_jq_synopsis() {
+  printf '%s\n' "jq <filter> [<session>|<file>|-]... [-- <jq-option>...]  anything else: jq with lib/sessions.jq as s"
+}
+
+cc_jq_help() {
+  cat << 'EOF'
+Usage: cc-sessions jq <filter> [<session>|<file>|-]... [-- <jq-option>...]
+
+Runs jq with lib/sessions.jq imported as s. The filter runs once per operand, in operand order, with a
+transcript object as its input:
+
+  {file, kind, session, agent, run, session_dir, project_dir, meta, bytes, mtime, lines,
+   rows: [{l, e}], skipped: [<line>...], sizes}
+
+  kind         main, subagent, workflow-agent, flat, journal, or file (any other file, and -)
+  session      the owning top-level session id; agent and run are set for agents
+  meta         the agent's .meta.json; bytes and mtime come from stat
+  rows         every parsed line: l is its line number (handle L<l>), e the entry; unparseable lines are
+               skipped, listed in skipped and counted in a notice on stderr
+  sizes        bytes of every file under the session's tool-results/ and of every stored persisted path
+
+Operands: a <session> (see cc-sessions --help), any other file (read as JSON lines as given), or - for
+stdin. stdin is read only for -. An operand named twice is read once.
+
+jq options go after -- and reach jq unchanged; output is compact (-c) unless --indent N is passed.
+  -s           the input is one array of every transcript object, and the filter runs once
+  -n           the filter runs once on null; operands are still available through s::transcripts
+Refused, because operands are always transcripts: --args, --jsonargs, -f/--from-file, -R/--raw-input,
+--stream, --stream-errors, --seq.
+
+Exit status: jq's own (0, 1 with -e, 2 usage, 3 compile error, 5 runtime error); 2 for a usage error
+of this command; 1 when an operand cannot be read.
+
+Functions of lib/sessions.jq (input is a transcript object unless the description says otherwise):
+EOF
+  awk '
+    /^#: / { doc = substr($0, 4); next }
+    /^def [A-Za-z][A-Za-z0-9_]*/ {
+      signature = $0
+      sub(/^def /, "", signature)
+      sub(/:.*/, "", signature)
+      printf "  s::%s  %s\n", signature, doc
+    }
+    { doc = "" }' "$CC_SESSIONS_LIB/sessions.jq"
+}
+
+case ${1-} in
+  --synopsis)
+    cc_jq_synopsis
+    exit 0
+    ;;
+  -h | --help)
+    cc_jq_help
+    exit 0
+    ;;
+esac
+
+cc_refuse_jq_option() {
+  cc_usage_error "jq option \"$1\" is not supported here" "operands are always transcripts and the filter is the first operand"
+}
+
+filter='' have_filter=0
+operands=() jq_options=()
+while [ $# -gt 0 ]; do
+  case $1 in
+    --)
+      shift
+      jq_options=("$@")
+      break
+      ;;
+    -) operands+=(-) ;;
+    -*) cc_usage_error "unknown option \"$1\" for jq" "pass jq options after --, as in cc-sessions jq '.kind' <session> -- ${1}" ;;
+    *)
+      if [ $have_filter -eq 0 ]; then
+        filter=$1 have_filter=1
+      else
+        operands+=("$1")
+      fi
+      ;;
+  esac
+  shift
+done
+
+[ $have_filter -eq 1 ] || cc_usage_error "jq needs a filter" "pass one, as in cc-sessions jq '.kind' <session>"
+
+null_input=0 slurp=0 passed=() pending=0
+for option in ${jq_options[@]+"${jq_options[@]}"}; do
+  if [ $pending -gt 0 ]; then
+    passed+=("$option")
+    pending=$((pending - 1))
+    continue
+  fi
+  case $option in
+    --args | --jsonargs | --stream | --stream-errors | --seq | -f | --from-file | -R | --raw-input)
+      cc_refuse_jq_option "$option"
+      ;;
+    --arg | --argjson | --slurpfile | --rawfile) pending=2 ;;
+    --indent | -L | --library-path) pending=1 ;;
+    -n | --null-input)
+      null_input=1
+      continue
+      ;;
+    -s | --slurp)
+      slurp=1
+      continue
+      ;;
+    --*) ;;
+    -*)
+      case $option in *f* | *R*) cc_refuse_jq_option "$option" ;; esac
+      case $option in *n*) null_input=1 ;; esac
+      case $option in *s*) slurp=1 ;; esac
+      option=-${option#-}
+      option=${option//n/}
+      option=${option//s/}
+      [ "$option" = - ] && continue
+      ;;
+  esac
+  passed+=("$option")
+done
+
+if [ $null_input -eq 0 ] && [ ${#operands[@]} -eq 0 ]; then
+  cc_usage_error "jq needs at least one <session>, file or - operand" "name a session, or pass -- -n to run the filter without input"
+fi
+
+files=()
+for operand in ${operands[@]+"${operands[@]}"}; do
+  if [ "$operand" = - ]; then
+    file=-
+  elif [ -f "$operand" ] && [[ $operand != *.jsonl ]] && [[ $operand != */tool-results/* ]] || [[ $operand == */journal.jsonl && -f $operand ]]; then
+    case $operand in /*) file=$operand ;; *) file=$PWD/$operand ;; esac
+  else
+    cc_resolve "$operand"
+    file=$CC_FILE
+  fi
+  for seen in ${files[@]+"${files[@]}"}; do [ "$seen" = "$file" ] && continue 2; done
+  files+=("$file")
+done
+
+if [ $null_input -eq 1 ]; then
+  program="import \"sessions\" as s; ($filter)"
+elif [ $slurp -eq 1 ]; then
+  program="import \"sessions\" as s; [s::transcripts] | ($filter)"
+else
+  program="import \"sessions\" as s; s::transcripts | ($filter)"
+fi
+
+cc_jq_program "$program" ${passed[@]+"${passed[@]}"} -- ${files[@]+"${files[@]}"}

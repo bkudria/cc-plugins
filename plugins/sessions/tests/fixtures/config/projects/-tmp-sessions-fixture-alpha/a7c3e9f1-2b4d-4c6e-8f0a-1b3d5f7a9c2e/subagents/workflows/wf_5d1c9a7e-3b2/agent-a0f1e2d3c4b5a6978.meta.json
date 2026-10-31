@@ -1,0 +1,1 @@
+{"agentType":"workflow-subagent","isBuiltIn":true,"description":"scan","workflowPhase":"Scan","spawnDepth":1,"requestShape":"foreground","requestNonInteractive":false,"model":"haiku"}

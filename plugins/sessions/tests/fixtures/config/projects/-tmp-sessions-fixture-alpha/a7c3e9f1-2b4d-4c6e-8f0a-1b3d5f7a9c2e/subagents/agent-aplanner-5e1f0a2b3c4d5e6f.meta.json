@@ -1,0 +1,1 @@
+{"agentType":"planner","isBuiltIn":false,"description":"Plan the strict-mode rollout","name":"planner","spawnDepth":0,"requestShape":"background","requestNonInteractive":true,"model":"haiku","taskKind":"in_process_teammate","teamName":"session-a7c3e9f1","color":"blue","planModeRequired":false,"spawnedAgentType":"general-purpose","permissionMode":"default"}

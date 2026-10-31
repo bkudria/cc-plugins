@@ -1,0 +1,12 @@
+{
+  "name": "sessions",
+  "description": "Investigate past Claude Code sessions from their transcripts with cc-sessions, an agent-oriented CLI that reads the current transcript format correctly and keeps its output bounded.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "repository": "https://github.com/bkudria/cc-plugins",
+  "homepage": "https://github.com/bkudria/cc-plugins/tree/main/plugins/sessions",
+  "keywords": ["sessions", "transcripts", "history", "jsonl", "cli", "claude-code"],
+  "author": {
+    "name": "Benjamin Kudria"
+  }
+}

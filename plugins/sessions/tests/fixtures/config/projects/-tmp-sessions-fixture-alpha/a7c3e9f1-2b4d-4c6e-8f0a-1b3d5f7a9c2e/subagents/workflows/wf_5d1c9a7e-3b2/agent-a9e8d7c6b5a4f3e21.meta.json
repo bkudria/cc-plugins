@@ -1,0 +1,1 @@
+{"agentType":"workflow-subagent","isBuiltIn":true,"description":"report","workflowPhase":"Report","spawnDepth":1,"requestShape":"foreground","requestNonInteractive":false,"model":"haiku"}
