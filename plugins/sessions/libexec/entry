@@ -1,0 +1,83 @@
+#!/bin/bash
+# shellcheck source=../lib/common.sh
+. "${0%/*}/../lib/common.sh"
+
+cc_entry_help() {
+  cat << 'EOF'
+Usage: cc-sessions entry <session> <ref> [--full] [--since T] [--until T]
+
+One entry in full. <ref> is one of:
+  L<line>        the line as written, even one that repeats an earlier uuid (a notice says so)
+  <uuid>         the entry with that uuid (its first copy)
+  toolu_…        the tool_use entry and the entry holding its result
+  msg_…          every entry of that API message (any other message id works too)
+Output, for each matching entry in file order:
+  entry  <handle>  <uuid>  <type>  <time>
+  the entry as JSON indented by 2, keys as written; strings over 2000 characters end in
+  …[+<n> chars]
+then the parent chain of the first match, nearest first, up to 20 lines (a notice says how to
+go on):
+  parent  <handle>  <uuid>  <type>  <time>
+type is the entry type, attachment:<type> or system:<subtype>; time is the entry's own timestamp,
+or - when it has none. The chain follows parentUuid, and logicalParentUuid across a compaction.
+Options:
+  --full               strings whole (the output budget still applies: --max-chars 0 lifts it)
+  --since T, --until T keep only matching entries inside the bounds (handle, timestamp or age)
+No default limit.
+Empty answer: for no match, or an unparseable line, nothing on stdout and a notice on stderr.
+Exit status: 0 answered, also when empty; 1 the transcript cannot be read; 2 usage error.
+EOF
+}
+
+case ${1-} in
+  --synopsis)
+    printf '%s\n' 'entry <session> <ref>  one entry in full (handle, uuid, toolu_… or msg_… id) with its parent chain'
+    exit 0
+    ;;
+  -h | --help)
+    cc_entry_help
+    exit 0
+    ;;
+esac
+
+since=null until=null width=2000 bounds='' operands=()
+while [ $# -gt 0 ]; do
+  case $1 in
+    --full) width=0 ;;
+    --since | --until)
+      cc_need_value "$@"
+      if [ "$1" = --since ]; then
+        since=$(cc_bound --since "$2") || exit
+      else
+        until=$(cc_bound --until "$2") || exit
+      fi
+      bounds+=" $1 $2"
+      shift
+      ;;
+    --)
+      shift
+      operands+=("$@")
+      break
+      ;;
+    -*) cc_unknown_option "$1" --full --since --until ;;
+    *) operands+=("$1") ;;
+  esac
+  shift
+done
+
+if [ ${#operands[@]} -lt 2 ]; then
+  cc_usage_error "entry needs a <session> and an entry reference" "pass both, as in cc-sessions entry current L12"
+fi
+if [ ${#operands[@]} -gt 2 ]; then
+  cc_usage_error "entry takes a <session> and one entry reference, got ${#operands[@]} operands" "pass one handle, uuid, toolu_… or msg_… id"
+fi
+ref=${operands[1]}
+[[ $ref =~ ^[0-9]+$ ]] && cc_usage_error "\"$ref\" is not an entry reference" "pass L$ref for line $ref"
+[ -n "$ref" ] || cc_usage_error "the entry reference is empty" "pass a handle, uuid, toolu_… or msg_… id"
+
+cc_resolve "${operands[0]}"
+
+# shellcheck disable=SC2016 # $ref and the others are jq variables
+cc_jq_program "$(cc_module_program entry 'entry($ref; $since; $until; $width; $bounds)')" \
+  -r --indent 2 --arg ref "$ref" --argjson since "$since" --argjson until "$until" --argjson width "$width" \
+  --arg bounds "$bounds" -- "$CC_FILE" || cc_jq_failed $? "$CC_FILE"

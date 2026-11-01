@@ -1,0 +1,122 @@
+#!/bin/bash
+# shellcheck source=../lib/common.sh
+. "${0%/*}/../lib/common.sh"
+
+conversation_help() {
+  cat << 'EOF'
+Usage: cc-sessions conversation <session> [--thinking] [--events] [--tokens] [--around L<n>[:N]]
+                                [--agents] [--since T] [--until T] [--full]
+
+What was said: the human's input, the assistant's text, one line per tool call, and a marker for
+each piece of injected content, in file order.
+
+Options:
+  --thinking         add thinking records (non-empty thinking blocks)
+  --events           add event records: hooks, permission-mode, mode, model and effort changes, API
+                     errors, compactions, turn durations, recaps, cwd changes, harness notes
+  --tokens           add the token fields; every API message then has an assistant record
+  --around L<n>[:N]  only N records (default 10) each side of the record at or before L<n>
+  --agents           merge in the records of the session's sub-agents and workflow agents, by time
+                     (internal agents are left out)
+  --since T          records from T on: a handle L<n>, a timestamp, or an age (30m, 2h, 7d)
+  --until T          records up to T, inclusive
+  --full             keep text whole (the output budget still applies)
+
+Fields:
+  handle  L<line> in the file named by src; an assistant record is at its first text line
+  src     main for the session's own transcript, else the agent id
+  time    the entry's timestamp, or the nearest earlier one in the file (UTC)
+  role    prompt slash bash sdk queued answer denied plan interrupt output: the human, as in
+          cc-sessions prompts; assistant: one API message's text; tool: one call, "<name> <input>
+          → <status> <size>", as in cc-sessions tools; injected, summary, notification: markers
+          such as [skill body: <name>], [compaction summary <n> chars], [task notification:
+          <summary>]; peer, from-parent: a message from another session or the parent agent;
+          thinking; event
+  text    cut at 600 characters for assistant records and 200 for others, unless --full
+With --tokens, five more fields, set on assistant records and - on others:
+  input  cache_read  cache_creation  output  context (input + cache creation + cache read)
+No default limit.
+
+Empty answer: nothing on stdout; on stderr "cc-sessions: no conversation records in <file>[ with
+<options>]".
+Exit status: 0 answered, also when empty; 1 a transcript could not be read; 2 usage error (unknown
+option, missing or bad value, a handle past the end of the file, unknown or ambiguous <session>).
+EOF
+}
+
+case ${1-} in
+  --synopsis)
+    printf '%s\n' 'conversation <session> [--around L<n>[:N]] [--thinking] [--events] [--tokens] [--agents]  what was said, turn by turn'
+    exit 0
+    ;;
+  -h | --help)
+    conversation_help
+    exit 0
+    ;;
+esac
+
+thinking=false events=false tokens=false around=null agents=0 since=null until=null since_text='' until_text=''
+width=200 assistant_width=600
+operands=()
+while [ $# -gt 0 ]; do
+  case $1 in
+    --thinking) thinking=true ;;
+    --events) events=true ;;
+    --tokens) tokens=true ;;
+    --around)
+      cc_need_value "$@"
+      [[ $2 =~ ^L([0-9]+)(:([0-9]+))?$ ]] ||
+        cc_usage_error "--around needs L<line> or L<line>:<count>, got \"$2\"" "pass a handle from another command, such as --around L120:5"
+      around="{\"line\":$((10#${BASH_REMATCH[1]})),\"count\":$((10#${BASH_REMATCH[3]:-10}))}"
+      shift
+      ;;
+    --agents) agents=1 ;;
+    --since)
+      cc_need_value "$@"
+      since=$(cc_bound --since "$2") || exit
+      since_text=$2
+      shift
+      ;;
+    --until)
+      cc_need_value "$@"
+      until=$(cc_bound --until "$2") || exit
+      until_text=$2
+      shift
+      ;;
+    --full) width=0 assistant_width=0 ;;
+    --)
+      shift
+      operands+=("$@")
+      break
+      ;;
+    -*) cc_unknown_option "$1" --thinking --events --tokens --around --agents --since --until --full ;;
+    *) operands+=("$1") ;;
+  esac
+  shift
+done
+
+cc_one_session ${#operands[@]}
+
+cc_resolve "${operands[0]}"
+files=("$CC_FILE")
+what=$CC_FILE
+if [ $agents -eq 1 ] && [ "$CC_KIND" = main ]; then
+  while IFS= read -r path; do
+    for seen in "${files[@]}"; do [ "$seen" = "$path" ] && continue 2; done
+    files+=("$path")
+  done < <(cc_session_agent_files "$CC_FILE")
+  [ ${#files[@]} -gt 1 ] && what+=" and its agent transcripts"
+fi
+
+filters=''
+[ -n "$since_text" ] && filters+=" --since $since_text"
+[ -n "$until_text" ] && filters+=" --until $until_text"
+[ -n "$filters" ] && filters=" with${filters}"
+
+# shellcheck disable=SC2016 # jq program text
+cc_jq_program "$(cc_module_program conversation '
+  main({thinking: $thinking, events: $events, tokens: $tokens, around: $around, since: $since, until: $until,
+        width: $width, assistant_width: $assistant_width, file: $file, what: $what, filters: $filters})')" \
+  -r --argjson thinking "$thinking" --argjson events "$events" --argjson tokens "$tokens" --argjson around "$around" \
+  --argjson since "$since" --argjson until "$until" --argjson width "$width" --argjson assistant_width "$assistant_width" \
+  --arg file "$CC_FILE" --arg what "$what" --arg filters "$filters" -- "${files[@]}" || cc_jq_failed $? "$CC_FILE"

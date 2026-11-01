@@ -1,0 +1,105 @@
+#!/bin/bash
+# shellcheck source=../lib/common.sh
+. "${0%/*}/../lib/common.sh"
+
+cc_overview_help() {
+  cat << 'EOF'
+Usage: cc-sessions overview <session> [--agents] [--since T] [--until T] [--full]
+
+What a session is: one fact per record, key TAB value [TAB value...]. A key repeats once per item;
+a fact that does not apply is left out. Handles are L<line> in the transcript.
+Fields, by key in output order:
+  path, id, kind      the transcript, its session or agent id, main|subagent|workflow-agent|flat
+  parent              (agents) the owning session id, then the run id of a workflow agent
+  internal            (internal agents) compaction, prompt-suggestion, warmup or transcripts-fork
+  resumed_from        a session whose history this file copies: its id, first and last handle
+  project, cwd        the project directory name; each working directory with its first handle
+  label               text, source (custom-title ai-title agent-name summary prompt meta), handle
+  origin              cli, sdk or the entrypoint
+  versions, models    Claude Code versions; models without <synthetic>; in first-use order
+  start, end          the earliest and the latest timestamp, each with its handle
+  duration            end - start, as [<d>d][<h>h][<m>m]<s>s
+  prompts             human inputs; kind=count (prompt slash bash sdk queued answer denied plan)
+  messages            API messages, then synthetic=count
+  tokens              input, cache_creation, cache_read, output (last usage of each message)
+  tokens_with_agents  (--agents) the same over this and its non-internal agents, each message once
+  peak_context        the largest input + cache_creation + cache_read, with its handle
+  cost                each cost-state (one per process run): handle, USD, then for each model
+                      <model>=input/cache_creation/cache_read/output
+  tool                per tool, most calls first: name, calls, result characters, errors
+  largest             the 5 largest results: result handle, tool, size (as in tools), saved file
+  compaction          handle, trigger, pre_tokens, post_tokens
+  skill               each skill load: handle, name, how (tool skill bundled orphan)
+  agents              (main) the session's agent transcripts: count, kind=count (agent teammate
+                      fork workflow-agent flat), and internal=count (not in the count)
+  agent               (--agents) per non-internal agent: id, kind, type, the 4 token counts, label
+  workflows           workflow runs started
+  errors, api_errors  tool calls with status error (a denial is not one); API error messages
+  persisted           tool results saved to a file
+  skipped_lines, duplicate_entries  unparseable lines; lines repeating an earlier uuid
+Options: --agents adds tokens_with_agents and the agent lines. --since T and --until T count only
+entries inside the bounds (a handle bound applies to each file's own lines); path to origin
+describe the whole file. --full: whole labels (default 100 characters, as in list). No limit.
+Empty answer: when no entry is inside the bounds, nothing on stdout and on stderr "cc-sessions:
+no entries in <file> with <options>".
+Exit status: 0 answered, also when empty; 1 the transcript cannot be read; 2 usage error.
+EOF
+}
+
+case ${1-} in
+  --synopsis)
+    printf '%s\n' 'overview <session> [--agents]  what a session is: ids, cwd, label, models, time, tokens, tools, skills, agents, errors'
+    exit 0
+    ;;
+  -h | --help)
+    cc_overview_help
+    exit 0
+    ;;
+esac
+
+since=null until=null width=100 agents=false bounds='' operands=()
+while [ $# -gt 0 ]; do
+  case $1 in
+    --agents) agents=true ;;
+    --full) width=0 ;;
+    --since | --until)
+      cc_need_value "$@"
+      if [ "$1" = --since ]; then
+        since=$(cc_bound --since "$2") || exit
+      else
+        until=$(cc_bound --until "$2") || exit
+      fi
+      bounds+=" $1 $2"
+      shift
+      ;;
+    --)
+      shift
+      operands+=("$@")
+      break
+      ;;
+    -*) cc_unknown_option "$1" --agents --since --until --full ;;
+    *) operands+=("$1") ;;
+  esac
+  shift
+done
+
+cc_one_session ${#operands[@]}
+
+cc_resolve "${operands[0]}"
+files=("$CC_FILE")
+if [ "$CC_KIND" = main ]; then
+  while IFS= read -r file; do
+    files+=("$file")
+  done < <(cc_session_agent_files "$CC_FILE" --journals)
+fi
+
+# shellcheck disable=SC2016 # $since and the others are jq variables
+out=$(cc_jq_program "$(cc_module_program overview 'overview($since; $until; $width; $agents)')" \
+  -r --argjson since "$since" --argjson until "$until" --argjson width "$width" --argjson agents "$agents" \
+  -- "${files[@]}") || cc_jq_failed $? "$CC_FILE"
+
+if [ -z "$out" ]; then
+  cc_notice "no entries in $CC_FILE with${bounds}"
+  exit 0
+fi
+printf '%s\n' "$out"

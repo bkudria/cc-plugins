@@ -1,0 +1,187 @@
+#!/bin/bash
+# shellcheck source=../lib/common.sh
+. "${0%/*}/../lib/common.sh"
+
+cc_schema_help() {
+  cat << 'EOF'
+Usage: cc-sessions schema [<session>...] [--since T] [--until T]
+
+What transcripts contain, to see what a Claude Code version writes. One record per row:
+section TAB name TAB count TAB detail. Rows that name a type outside the lists in lib/sessions.jq
+come first (detail UNKNOWN ...); then the sections in this order, most counted first:
+  type         entry type         entries  known|UNKNOWN <first>..<last version seen>
+  system       system subtype     entries  known|UNKNOWN <first>..<last>
+  attachment   attachment type    entries  known|UNKNOWN <first>..<last>
+  keys         entry type         entries  its top-level keys, sorted; key? when some lack it
+  tool-result  tool name          results  toolUseResult keys, marked the same way; (string),
+                                           (array) and the like for results that are not objects
+  files        file kind          files    total size; kinds: main subagent workflow-agent flat
+                                           journal meta run-record workflow-script tool-result
+                                           memory sessions-index other
+Entries are de-duplicated by uuid. An entry without a version takes the nearest earlier version in
+its file. Unparseable lines are skipped and counted in a notice.
+
+Without <session>: every file under the data root modified inside the bounds, default --since 7d
+(--until alone sets no lower bound); transcripts and workflow journals are read in batches, several
+at a time. With sessions: those transcripts only.
+Options:
+  --since T, --until T  without <session>: modified time (a timestamp or an age);
+                        with sessions: entries (a handle, a timestamp or an age)
+There is no default limit.
+Empty answer: when nothing is inside the bounds, nothing on stdout and a notice on stderr.
+Exit status: 0 answered, also when empty; 1 an unreadable file or no data root; 2 usage error.
+EOF
+}
+
+case ${1-} in
+  --synopsis)
+    printf '%s\n' 'schema [<session>...]  which entry types, subtypes, attachment types, keys and tool results transcripts contain'
+    exit 0
+    ;;
+  -h | --help)
+    cc_schema_help
+    exit 0
+    ;;
+esac
+
+since=null until=null since_text='' until_text='' operands=()
+while [ $# -gt 0 ]; do
+  case $1 in
+    --since)
+      cc_need_value "$@"
+      since=$(cc_bound --since "$2") || exit
+      since_text=$2
+      shift
+      ;;
+    --until)
+      cc_need_value "$@"
+      until=$(cc_bound --until "$2") || exit
+      until_text=$2
+      shift
+      ;;
+    --)
+      shift
+      operands+=("$@")
+      break
+      ;;
+    -*) cc_unknown_option "$1" --since --until ;;
+    *) operands+=("$1") ;;
+  esac
+  shift
+done
+
+bounds=${since_text:+ --since $since_text}${until_text:+ --until $until_text}
+
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/cc-sessions-schema.XXXXXX") || cc_fail "cannot create a temporary directory" "check that TMPDIR is writable"
+trap 'rm -rf "$tmp"' EXIT
+
+corpus=false
+extra='{"t":{},"k":{},"r":{},"f":{},"s":{"lines":0,"files":0}}'
+if [ ${#operands[@]} -gt 0 ]; then
+  cc_resolve_all "${operands[@]}"
+  for file in "${CC_FILES[@]}"; do
+    printf '%s\t%s\n' "$(stat -f %z "$file" 2> /dev/null < /dev/null)" "$file"
+  done > "$tmp/list"
+  scope="${operands[*]}"
+else
+  corpus=true
+  root=$(cc_require_data_root) || exit
+  [ -n "$since_text$until_text" ] || since_text=7d bounds=' --since 7d'
+  from='' to=''
+  if [ -n "$since_text" ]; then
+    from=$(cc_mtime_bound --since "$since_text" "or name a <session>") || exit
+    from=${from%% *}
+  fi
+  if [ -n "$until_text" ]; then
+    to=$(cc_mtime_bound --until "$until_text" "or name a <session>") || exit
+    to=${to##* }
+  fi
+  # Transcripts and journals go to the list to be read; every other file is only counted by kind.
+  extra=$(find "$root" -type f -exec stat -f '%m%t%z%t%N' {} + 2> /dev/null < /dev/null |
+    awk -F '\t' -v from="$from" -v to="$to" -v list="$tmp/list" '
+      BEGIN { printf "" > list }
+      {
+        path = $3
+        for (i = 4; i <= NF; i++) path = path "\t" $i
+        if (from != "" && $1 + 0 < from + 0) next
+        if (to != "" && $1 + 0 > to + 0) next
+        if (path ~ /\/tool-results\//) kind = "tool-result"
+        else if (path ~ /\/memory\//) kind = "memory"
+        else if (path ~ /\.meta\.json$/) kind = "meta"
+        else if (path ~ /\/workflows\/scripts\//) kind = "workflow-script"
+        else if (path ~ /\/workflows\/[^\/]+\.json$/) kind = "run-record"
+        else if (path ~ /\/sessions-index\.json$/) kind = "sessions-index"
+        else if (path ~ /\.jsonl$/) { print $2 "\t" path > list; next }
+        else kind = "other"
+        n[kind]++
+        b[kind] += $2
+      }
+      END {
+        printf "{\"t\":{},\"k\":{},\"r\":{},\"s\":{\"lines\":0,\"files\":0},\"f\":{"
+        sep = ""
+        for (k in n) { printf "%s\"%s\":{\"n\":%d,\"bytes\":%.0f}", sep, k, n[k], b[k]; sep = "," }
+        print "}}"
+      }')
+  scope=$root
+  since=null until=null
+fi
+
+# Each batch is one jq run over files totalling at most this many bytes (and at most 100 files, for
+# the argument list), so memory stays bounded however large the corpus is; up to 8 run at once.
+batch_bytes=${CC_SESSIONS_SCHEMA_BATCH_BYTES:-16777216}
+jobs=$(sysctl -n hw.ncpu 2> /dev/null < /dev/null)
+[[ $jobs =~ ^[0-9]+$ ]] || jobs=1
+[ "$jobs" -gt 8 ] && jobs=8
+# shellcheck disable=SC2016 # $since and the others are jq variables
+tally=$(cc_module_program schema 'tally($since; $until)')
+
+pids=() batch=() bytes=0 count=0 failed=0
+schema_launch() {
+  (cc_jq_program "$tally" -c --argjson since "$since" --argjson until "$until" \
+    -- "${batch[@]}" > "$tmp/part.$count" 2> "$tmp/err.$count") &
+  pids+=("$!")
+  count=$((count + 1)) batch=() bytes=0
+}
+schema_wait() {
+  wait "${pids[0]}" || failed=$?
+  pids=("${pids[@]:1}")
+}
+while IFS=$'\t' read -r size path; do
+  [ -n "$path" ] || continue
+  if [ ${#batch[@]} -gt 0 ] && { [ $((bytes + size)) -gt "$batch_bytes" ] || [ ${#batch[@]} -ge 100 ]; }; then
+    [ ${#pids[@]} -ge "$jobs" ] && schema_wait
+    schema_launch
+  fi
+  batch+=("$path")
+  bytes=$((bytes + ${size:-0}))
+done < "$tmp/list"
+[ ${#batch[@]} -gt 0 ] && schema_launch
+while [ ${#pids[@]} -gt 0 ]; do schema_wait; done
+
+parts=()
+index=0
+while [ $index -lt $count ]; do
+  parts+=("$tmp/part.$index")
+  if [ $failed -ne 0 ] || [ $corpus = false ]; then
+    cat "$tmp/err.$index" >&2
+  else
+    grep -v -e '^cc-sessions: skipped [0-9]* unparseable line' "$tmp/err.$index" >&2
+  fi
+  index=$((index + 1))
+done
+[ $failed -eq 0 ] || cc_jq_failed "$failed" "every transcript"
+
+# shellcheck disable=SC2016 # $extra and $corpus are jq variables
+out=$("$(cc_jq_binary)" -n -r -L "$CC_SESSIONS_LIB" --argjson extra "$extra" --argjson corpus "$corpus" \
+  -- "$(cc_module_program schema 'report($extra; $corpus)')" ${parts[@]+"${parts[@]}"} < /dev/null) ||
+  cc_fail "could not combine the counts" "rerun with fewer sessions or a narrower --since"
+
+if [ -z "$out" ]; then
+  if [ $corpus = true ]; then
+    cc_notice "no files modified under $scope with${bounds}"
+  else
+    cc_notice "no entries in $scope with${bounds}"
+  fi
+  exit 0
+fi
+printf '%s\n' "$out"

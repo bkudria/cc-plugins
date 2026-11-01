@@ -36,6 +36,7 @@ FLAT=$P/-tmp-sessions-fixture-flat/c4e6a8b0-2d4f-4a6c-9e8a-0b2c4d6e8f1a
 SDK=$P/-tmp-sessions-fixture-scuttlerun-project-Xy12/d1f3b5d7-9e0a-4c2e-a4b6-c8d0e2f4a6b8
 RELOC=$P/-tmp-sessions-fixture-reloc/e5a7c9b1-3d5f-4b7d-8f9a-0c1e2a3b4c5d
 UNDER=$P/-tmp-sessions-fixture-under-score/f6b8d0e2-4a6c-4e8a-b0c2-d4e6f8a0b2c4
+GAMMA=$P/-tmp-sessions-fixture-gamma/c7d9e1f3-5a6b-4c8d-9e0f-1a2b3c4d5e6f
 WF=$ALPHA/subagents/workflows/wf_5d1c9a7e-3b2
 
 # Prints its input with the data root replaced by "<root>", so expectations stay independent of TMPDIR.

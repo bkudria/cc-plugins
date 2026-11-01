@@ -1,0 +1,133 @@
+#!/bin/bash
+# shellcheck source=../lib/common.sh
+. "${0%/*}/../lib/common.sh"
+
+tools_help() {
+  cat << 'EOF'
+Usage: cc-sessions tools <session> [--name REGEX] [--input REGEX] [--result REGEX] [--errors]
+                         [--agents] [--since T] [--until T] [--full]
+
+What tools ran: each tool call paired with its result, one record per call, in file order.
+
+Options:
+  --name REGEX    calls whose tool name matches (jq regex: case-sensitive, unanchored)
+  --input REGEX   calls whose input matches: the rendered input, the input JSON or the wire form
+  --result REGEX  calls whose result matches: its text (a persisted output: the preview) or the
+                  rendered result
+  --errors        calls whose result is an error (a denial is the user's choice, not an error)
+  --agents        merge in the calls of the session's sub-agents and workflow agents, by time
+                  (internal agents are left out)
+  --since T       calls from T on: a handle L<n>, a timestamp, or an age (30m, 2h, 7d)
+  --until T       calls up to T, inclusive
+  --full          keep input and result whole (the output budget still applies)
+
+Fields:
+  handle  L<line> of the tool_use entry, in the file named by src
+  src     main for the session's own transcript, else the agent id
+  time    the entry's timestamp, or the nearest earlier one in the file (UTC)
+  name    the tool; MCP tools in full (mcp__<server>__<tool>)
+  status  ok, error, denied (the user rejected it), none (no result recorded), persisted (an ok
+          result saved to a file)
+  size    the result's length in characters; persisted: the saved file's bytes, as <n>B
+  input   Bash the command's first line (+ [bg], [timeout=…]); Read, Write, Edit, NotebookEdit the
+          path (+ range or edit sizes); Grep, Glob pattern and path; AskUserQuestion questions and
+          options; Agent <type> "<description>" (+ name, model, [bg]); Workflow name or script and
+          args; Skill name and args; WebFetch the URL; WebSearch, ToolSearch the query; SendMessage,
+          TaskStop the target; MCP and other tools compact JSON
+  result  AskUserQuestion the answers; Agent the agent id and the status its notification or call
+          gives; Workflow the run id and status; denied the user's feedback; persisted the saved
+          file's path; else the text
+input and result are cut at 160 characters unless --full. No default limit.
+
+Empty answer: nothing on stdout; on stderr "cc-sessions: no tool calls in <file>[ with <options>]".
+Exit status: 0 answered, also when empty; 1 a transcript could not be read; 2 usage error (unknown
+option, missing or bad value, bad regex, unknown or ambiguous <session>).
+EOF
+}
+
+case ${1-} in
+  --synopsis)
+    printf '%s\n' 'tools <session> [--name RE] [--input RE] [--result RE] [--errors] [--agents]  what tools ran, paired with results'
+    exit 0
+    ;;
+  -h | --help)
+    tools_help
+    exit 0
+    ;;
+esac
+
+tools_regex() {
+  # shellcheck disable=SC2016 # jq program text
+  "$(cc_jq_binary)" -n --arg r "$2" '"" | test($r)' > /dev/null 2>&1 < /dev/null ||
+    cc_usage_error "$1 \"$2\" is not a valid regular expression" "pass a jq (Oniguruma) regex, such as $1 '^git '"
+}
+
+name='' input='' result='' errors=false agents=0 since=null until=null since_text='' until_text='' width=160
+operands=()
+while [ $# -gt 0 ]; do
+  case $1 in
+    --name | --input | --result)
+      cc_need_value "$@"
+      tools_regex "$1" "$2"
+      case $1 in
+        --name) name=$2 ;;
+        --input) input=$2 ;;
+        --result) result=$2 ;;
+      esac
+      shift
+      ;;
+    --errors) errors=true ;;
+    --agents) agents=1 ;;
+    --since)
+      cc_need_value "$@"
+      since=$(cc_bound --since "$2") || exit
+      since_text=$2
+      shift
+      ;;
+    --until)
+      cc_need_value "$@"
+      until=$(cc_bound --until "$2") || exit
+      until_text=$2
+      shift
+      ;;
+    --full) width=0 ;;
+    --)
+      shift
+      operands+=("$@")
+      break
+      ;;
+    -*) cc_unknown_option "$1" --name --input --result --errors --agents --since --until --full ;;
+    *) operands+=("$1") ;;
+  esac
+  shift
+done
+
+cc_one_session ${#operands[@]}
+
+cc_resolve "${operands[0]}"
+files=("$CC_FILE")
+what=$CC_FILE
+if [ $agents -eq 1 ] && [ "$CC_KIND" = main ]; then
+  while IFS= read -r path; do
+    for seen in "${files[@]}"; do [ "$seen" = "$path" ] && continue 2; done
+    files+=("$path")
+  done < <(cc_session_agent_files "$CC_FILE")
+  [ ${#files[@]} -gt 1 ] && what+=" and its agent transcripts"
+fi
+
+filters=''
+[ -n "$name" ] && filters+=" --name \"$name\""
+[ -n "$input" ] && filters+=" --input \"$input\""
+[ -n "$result" ] && filters+=" --result \"$result\""
+[ "$errors" = true ] && filters+=" --errors"
+[ -n "$since_text" ] && filters+=" --since $since_text"
+[ -n "$until_text" ] && filters+=" --until $until_text"
+[ -n "$filters" ] && filters=" with${filters}"
+
+# shellcheck disable=SC2016 # jq program text
+cc_jq_program "$(cc_module_program tools '
+  main({name: $name, input: $input, result: $result, errors: $errors, since: $since, until: $until,
+        width: $width, what: $what, filters: $filters})')" \
+  -r --arg name "$name" --arg input "$input" --arg result "$result" --argjson errors "$errors" \
+  --argjson since "$since" --argjson until "$until" --argjson width "$width" --arg what "$what" \
+  --arg filters "$filters" -- "${files[@]}" || cc_jq_failed $? "$CC_FILE"

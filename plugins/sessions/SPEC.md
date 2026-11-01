@@ -11,12 +11,13 @@ newer version writes.
 |---|---|
 | `bin/cc-sessions` | Dispatcher: help index, `--version`, global flags, output budget, then runs `libexec/<command>` |
 | `libexec/<command>` | One executable per command. Answers `--help` and `--synopsis` (one index line) without reading transcripts |
-| `lib/common.sh` | Shared shell code: session resolution, argument helpers, error messages, the jq wrapper |
+| `lib/common.sh` | Shared shell code: session resolution, a session's agent files, argument helpers, error messages, the jq wrapper |
 | `lib/sessions.jq` | Shared jq module (`s::`) holding every rule in this file |
-| `lib/<command>.jq` | A command's jq program, when it has one |
+| `lib/<command>.jq` | A command's jq program, when it has one. Its text runs as the main program (`cc_module_program`) and is never imported: jq 1.8.2 aborts when an imported module calls an `s::` function that calls another |
+| `lib/render.jq` | The one-line renderings of a tool call that `tools` and `conversation` share; imported, so it calls only `s::` functions that call no other |
 | `tests/` | scrut tests and the synthetic fixture tree they run against |
 
-Requirements: bash 3.2 or later, jq 1.7 or later, ripgrep (for `search`), BSD `find`/`stat` (macOS).
+Requirements: bash 3.2 or later, jq 1.7 or later, ripgrep (for `list` and `search`), BSD `find`/`stat` (macOS).
 All shell code runs under `/bin/bash` 3.2: no associative arrays, `mapfile`, `${var,,}` or `declare -n`.
 
 ## Files
@@ -32,7 +33,8 @@ The data root is `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects`. Under it, each 
 | `<project>/<session-id>/tool-results/*` | Tool outputs too large to keep inline |
 | `<project>/agent-<agent-id>.jsonl` | A sub-agent transcript in the older flat layout; linked to its parent by `sessionId` |
 
-`journal.jsonl`, `*.meta.json`, `memory/` and `sessions-index.json` are never treated as transcripts.
+`journal.jsonl`, `*.meta.json`, `memory/` and `sessions-index.json` are never session or agent transcripts. A journal's
+records are still read: for agent labels and results, as `agent-result` content, and by `schema`.
 Project directory names are not decoded back into paths: the `cwd` field inside a transcript is the real path.
 
 Agent ids take several shapes: `a` plus 16 hex digits, named `a<name>-<16 hex>`, internal `acompact-<hex>` and
@@ -55,7 +57,8 @@ Every `<session>` argument accepts, in this order:
 
 ## Reading
 
-- Lines are parsed tolerantly (`jq -R 'fromjson?'`). Unparseable lines are skipped and counted in a stderr notice.
+- Lines are parsed tolerantly (`jq -R 'fromjson?'`). Unparseable lines are skipped and counted in a stderr notice per
+  file. `list` and `search` across sessions report sessions, not lines, and print none; `schema` sums them in one notice.
 - jq and rg always get absolute paths and never read stdin (project directory names start with `-`).
 - Entries are de-duplicated by `uuid`, keeping the first occurrence: some files re-append an earlier block of history.
 - File order is authoritative. Timestamps can run backwards in file order, and several entry types carry none.
@@ -131,16 +134,31 @@ shows the exact name.
 | `hook` | hook attachment stdout/content | yes |
 | `recap` | `system.away_summary` | yes |
 | `thinking` | non-empty thinking blocks | no |
-| `injected`, `summary`, `notification`, `peer` | as defined under Human input | no |
+| `injected`, `summary`, `notification`, `peer` | as defined under Human input; a notification can also be an attachment (see Sub-agents) | no |
 
-Everything else (`api-request*`, `progress`, `queue-operation`, `last-prompt`, file-history entries, titles, mode and
-state markers, and every other attachment type such as `skill_listing`, `invoked_skills`, `instructions` and
-`nested_memory`) copies system content or records state, and is never searched. `lib/sessions.jq` lists every known entry
+Everything else (`api-request*`, `progress`, `queue-operation` apart from the enqueues of Human input rule 4,
+`last-prompt`, file-history entries, titles, mode and state markers, and every other attachment type such as
+`skill_listing`, `invoked_skills`, `instructions` and `nested_memory`) copies system content or records state, and is
+never searched. `lib/sessions.jq` lists every known entry
 type, attachment type and system subtype by name (`hook_*` attachments and `model_*_fallback` subtypes match as
-patterns); `schema` reports any type outside those lists.
+patterns), and which attachment types and system subtypes can hold content; `schema` reports any type outside those
+lists.
+
+## Search
+
+- `<text>` is literal and matched in the decoded text, or a jq (Oniguruma) regex with `--regex`. Smart case: text with
+  no uppercase letter (a regex's backslash escapes do not count) matches any case.
+- Within sessions: one record per hit. With several sessions `src` names each session's own transcript by its id;
+  `--agents` adds each session's agents and run journals.
+- Across sessions: one record per session. Hits in its agents and run journals count toward it (`agent` ends the kinds
+  list); internal agents are left out. `hits` ends in `+`, a lower bound, when a file had more matching lines than
+  were read from it (100 after the noise filter, 300 before).
 
 ## Sub-agents and workflows
 
+- A session's agents are its nested and flat-layout agent transcripts plus those its Agent and Workflow calls name
+  elsewhere under the root (a resumed copy's agents stay in the original's directory). Every command that reads a
+  session's agents uses this set.
 - Agent call → transcript: `toolUseResult.agentId` (or `agent_id` for teammates) names `subagents/agent-<id>.jsonl` in the
   session directory; if absent there, any `agent-<id>.jsonl` under the root (resumed sessions keep the original's directory).
   The sub-agent's `.meta.json` `toolUseId`, when present, confirms the link.
@@ -149,28 +167,44 @@ patterns); `schema` reports any type outside those lists.
   come from `journal.jsonl`.
 - Flat-layout sub-agents link to their parent by `sessionId`, and to the Task call by `agentId` or by prompt text.
 - Fork agents link through the parent's `system` entry carrying `launchedAgentId` and their own `fork-context-ref` line.
-- A background completion arrives as a `notification` user entry; it links to its call by `<tool-use-id>`, else
-  `<task-id>`. `/private/tmp/.../tasks/<id>.output` paths are ephemeral and never followed.
+- A background completion arrives as a `notification` user entry or, from 2.1.31x, as a `queued_command` attachment
+  with `commandMode` `task-notification`; either links to its call by `<tool-use-id>`, else `<task-id>`.
+  `/private/tmp/.../tasks/<id>.output` paths are ephemeral and never followed.
 - Internal agents are left out of corpus search, listings and roll-ups: `agent-acompact-*`, `agent-aprompt_suggestion-*`,
   agents whose first prompt is `Warmup`, and forks of the `sessions:transcripts` skill (their first prompt contains
   `[cc-sessions:transcripts-fork]`). They stay reachable through an explicit `<session>` argument.
+- An agent's kind is the first that applies: `internal`; `teammate` (meta `taskKind` names a teammate, or its call's
+  result is `teammate_spawned`); `fork` (meta `isFork`, or a `fork-context-ref` line); `flat`; `workflow-agent`; `agent`.
 - An agent's result is, in order of preference: its notification's `<result>`, its journal result, its last
   `structured_output`, its last assistant text. Teammates get no notification.
+- An agent's status, in order of preference: its journal (a result means `completed`), its run record, its notification,
+  its call's own result (a finished synchronous call), else the transcript's end: `completed` when the last user or
+  assistant entry is an assistant message that stopped (`end_turn`, `stop_sequence`, or, before 2.1.300, no
+  `stop_reason` and no tool call), `failed` on an API error message, otherwise `unknown`.
 
-## Persisted outputs
+## Tool calls and persisted outputs
+
+A tool call's status is `ok`, `error` (its result is marked `is_error` and is not a rejection), `denied` (the user
+rejected it: the result starts `The user doesn't want to proceed with this tool use`) or `none` (no result recorded). A
+denial is the user's choice, never counted as an error.
 
 A tool result is persisted only when its text **starts** with:
 
     <persisted-output>\nOutput too large (<n><B|KB|MB>). Full output saved to: <path>\n\nPreview (first <n><B|KB|MB>):\n
 
 A tool result's size is the length of its text in characters, text blocks joined by newlines. A persisted result's real
-size is the saved file's size on disk, in bytes. When `<path>` does not exist, the file of the same name under the owning
-session's `tool-results/` is used. Text that quotes the marker mid-result is not a persisted output.
+size is the saved file's size on disk, in bytes, and is what commands print (`<n>B`) and rank by. When `<path>` does not
+exist, the file of the same name under the owning session's `tool-results/` is used; when neither exists, the size the
+marker states. Text that quotes the marker mid-result is not a persisted output.
 
 ## Labels and origin
 
 - Session label: the last `custom-title`; else the last `ai-title` that contains a space (single-token titles are plan
-  slugs); else `agent-name`; else a legacy `summary`; else the first human input, truncated.
+  slugs); else `agent-name`; else a legacy `summary`; else the first human input. Every command shows it on one line,
+  whitespace runs as one space, cut at 100 characters unless `--full`.
+- A listing's pattern matches the session id, every title entry (`custom-title`, `ai-title`, `agent-name`, `summary`)
+  and the first human input. `--cwd PATH` matches any cwd of the transcript equal to PATH or under it; PATH is made
+  absolute but not resolved through links.
 - Sub-agent label: its `.meta.json` `description` or `name`, else its journal label, else its delegation prompt, truncated.
 - Origin: `sdk` when `entrypoint` starts with `sdk` or a prompt's `promptSource` is `sdk`; otherwise the `entrypoint`
   value, or `cli` when there is none. Listings show `cli` sessions unless asked for others.
@@ -181,20 +215,28 @@ session's `tool-results/` is used. Text that quotes the marker mid-result is not
 
 - One record per line; fields separated by a tab; tabs, newlines and backslashes inside a field escaped as `\t`, `\n` and
   `\\`; an empty field printed as `-`. No header line. Each command's `--help` names its fields in order.
-- Per-session records start with a handle: `L<line>` within the file named by the record's source field. `entry` accepts
+- Per-session records start with a handle: `L<line>` within the transcript, or within the file named by the record's
+  `src` field. `entry` accepts
   a handle, a `uuid`, a `toolu_…` id or a `msg_…` id. `--since`/`--until` accept a handle, a timestamp, or a relative
   age (`30m`, `2h`, `7d`). With several files, a handle bound applies to each file's own lines. A time bound compares each
   record's timestamp, or the nearest earlier one in file order; records before a file's first timestamp match only handle
   bounds.
 - Timestamps print as `YYYY-MM-DDTHH:MM:SSZ` (UTC, milliseconds dropped), so a printed timestamp passed back to `--since`
   or `--until` selects the same record.
-- Long text fields are truncated to a per-command width unless `--full` is given.
+- Every per-session command takes `--since` and `--until`, and every command that cuts text takes `--full`; long text
+  fields are cut to a per-command width, ending in `…`, unless `--full` is given. Across sessions (`list`, and `search`
+  and `schema` without `<session>`), `--since` and `--until` compare modified times, and a handle is a usage error.
+- With `--agents`, `tools` and `conversation` merge the records of several files by time, each file keeping its own
+  order; `search` reports hits file by file.
 - Output budget: stdout stops at a record boundary after `--max-chars` characters (default 20000; 0 removes the limit) or
   `--limit` records (no default unless the command's help names one). A one-line stderr notice then states how many
   records were left out and how to continue (`--since L<next>` for per-session output). A cross-session command with a
-  default limit stops reading sessions once it has enough rows and says how to continue (`--until <modified>`).
+  default limit applies `--limit` and `--max-chars` itself, stops reading at the last whole row and says how to continue
+  in the same words (`--until <modified of the last row>`; `--until` is inclusive, so that row repeats and no session
+  that shares its time is lost).
 - Notices and errors go to stderr, prefixed `cc-sessions:`. An error states the problem, the fix, and
   `cc-sessions <command> --help`.
+- An empty answer's notice reads `no <things> in <what was read>`, then `with` and the options that narrowed it.
 - Exit codes: 0 when the command answered, including an empty answer (with a stderr notice saying what was searched);
   1 when it could not (unreadable file, missing dependency); 2 for a usage error (unknown command or flag, bad value,
   unresolvable or ambiguous `<session>`). `cc-sessions jq` returns jq's exit code.

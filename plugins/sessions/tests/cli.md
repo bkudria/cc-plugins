@@ -65,6 +65,25 @@ $ tail -n 1 long.txt
 deps: jq * ok, rg * ok (glob)
 ```
 
+Synopses name each command's operands and its own options. The options most commands share are explained once, in
+the index, and no synopsis repeats them.
+
+```scrut
+$ grep -E '^  [a-z]+ .*\[--(since|until|full)[] ]' long.txt || echo none
+> grep -E '^  --since T, --until T|^  --full|^  --agents' long.txt | awk '{ print $1 }'
+none
+--since
+--full
+--agents
+```
+
+Per-session records name their file in the `src` field, as every command's help calls it.
+
+```scrut
+$ grep -c 'src field' long.txt
+1
+```
+
 The index stays within 4096 bytes.
 
 ```scrut
@@ -115,6 +134,24 @@ There is no warning when PATH finds this binary.
 ```scrut
 $ cc-sessions --help | grep '^warning:' || echo no-warning
 no-warning
+```
+
+Every command's help has one shape: it starts with the usage line, documents every option the command accepts,
+states its empty answer and its exit status in the same words, and fits in 40 lines of at most 100 characters.
+
+```scrut
+$ for c in $(cd "$CC_TEST_ROOT/libexec" && ls); do
+>   [ "$c" = jq ] && continue
+>   cc-sessions "$c" --help > "help.$c"
+>   head -n 1 "help.$c" | grep -q "^Usage: cc-sessions $c " || echo "$c: no usage line"
+>   grep -q '^Empty answer: ' "help.$c" || echo "$c: no empty answer"
+>   grep -q '^Exit status: 0 answered, also when empty; 1 ' "help.$c" || echo "$c: no exit status"
+>   [ "$(wc -l < "help.$c")" -le 40 ] || echo "$c: $(wc -l < "help.$c" | tr -d ' ') lines"
+>   jq -R -r --arg c "$c" 'select(length > 100) | "\($c): a line of \(length) characters"' "help.$c"
+>   cc-sessions "$c" --no-such-option 2>&1 | sed -n 's/.*valid options: \([^;]*\);.*/\1/p' | tr ',' '\n' | tr -d ' ' |
+>     while read -r o; do grep -q -e "$o\b" "help.$c" || echo "$c: $o undocumented"; done
+> done; echo checked
+checked
 ```
 
 ## Usage errors
@@ -273,6 +310,37 @@ cc-sessions: no transcript matches "e0a0"; pass a session or agent id, a prefix 
 [2]
 ```
 
+An ambiguous reference lists at most 20 candidates. Files under `memory/` are never transcripts.
+
+```scrut
+$ RR=$CC_TEST_TMP/refs && mkdir -p "$RR/projects/-tmp-refs/memory" && for i in $(seq -w 1 22); do : > "$RR/projects/-tmp-refs/abcd00$i.jsonl"; done
+> : > "$RR/projects/-tmp-refs/memory/zzzz1234.jsonl"
+> CLAUDE_CONFIG_DIR=$RR cc-sessions jq '.file' abcd 2> err.txt; echo "exit $?"; wc -l < err.txt | tr -d ' '; tail -n 1 err.txt
+> CLAUDE_CONFIG_DIR=$RR cc-sessions jq '.file' zzzz 2>&1
+exit 2
+22
+cc-sessions:   … and 2 more
+cc-sessions: no transcript matches "zzzz"; pass a session or agent id, a prefix of at least 4 characters, or a path; see cc-sessions jq --help
+[2]
+```
+
+`--` ends the options of every command: what follows is an operand.
+
+```scrut
+$ for c in overview prompts conversation tools agents schema; do cc-sessions "$c" -- a7c3e9f > /dev/null 2>&1; echo "$c $?"; done
+> cc-sessions entry -- a7c3e9f L4 > /dev/null; echo "entry $?"; cc-sessions list -- alpha > /dev/null; echo "list $?"
+> cc-sessions search -- parser a7c3e9f > /dev/null; echo "search $?"
+overview 0
+prompts 0
+conversation 0
+tools 0
+agents 0
+schema 0
+entry 0
+list 0
+search 0
+```
+
 A reference that is too short or has other characters is a usage error.
 
 ```scrut {output_stream: stderr}
@@ -351,6 +419,23 @@ A missing data root means the command could not answer: exit 1.
 $ CLAUDE_CONFIG_DIR=/nonexistent/sessions-fixture cc-sessions jq '.file' a7c3e9f
 cc-sessions: no transcripts directory at /nonexistent/sessions-fixture/projects; set CLAUDE_CONFIG_DIR to the directory that holds projects/; see cc-sessions jq --help
 [1]
+```
+
+A transcript that cannot be read means the command could not answer: exit 1, with one error that names the file.
+
+```scrut
+$ UR=$CC_TEST_TMP/unreadable && mkdir -p "$UR/projects/-tmp-u" && printf '%s\n' '{"type":"user","uuid":"u1","message":{"content":"Hi."}}' > "$UR/projects/-tmp-u/f0f0f0f0.jsonl" && chmod 000 "$UR/projects/-tmp-u/f0f0f0f0.jsonl"
+> for c in overview prompts conversation tools agents schema 'entry - L1' 'search Hi'; do set -- $c; [ "$1" = entry ] && set -- entry f0f0f0f0 L1; [ "$1" = search ] && set -- search Hi f0f0f0f0; [ $# -eq 1 ] && set -- "$1" f0f0f0f0
+>   CLAUDE_CONFIG_DIR=$UR cc-sessions "$@" > /dev/null 2> err.txt; echo "$1 exit $? errors $(wc -l < err.txt | tr -d ' ') $(sed -n 's/^cc-sessions: \(cannot read\) .*f0f0f0f0.jsonl; .*/\1/p' err.txt)"; done
+> chmod 644 "$UR/projects/-tmp-u/f0f0f0f0.jsonl"
+overview exit 1 errors 1 cannot read
+prompts exit 1 errors 1 cannot read
+conversation exit 1 errors 1 cannot read
+tools exit 1 errors 1 cannot read
+agents exit 1 errors 1 cannot read
+schema exit 1 errors 1 cannot read
+entry exit 1 errors 1 cannot read
+search exit 1 errors 1 cannot read
 ```
 
 ## cc-sessions jq
@@ -481,6 +566,23 @@ stdin is never read unless `-` is an operand: a reader blocked on stdin would ha
 ```scrut {timeout: 20s}
 $ mkfifo "$CC_TEST_TMP/never" && cc-sessions jq '.kind' b2d4 3<>"$CC_TEST_TMP/never" <&3
 "main"
+```
+
+No command reads stdin: with a stdin that never ends, each one still answers.
+
+```scrut {timeout: 60s}
+$ for c in 'overview a7c3e9f' 'prompts a7c3e9f' 'conversation a7c3e9f' 'tools a7c3e9f' 'agents a7c3e9f' 'entry a7c3e9f L4' 'schema a7c3e9f' 'search parser a7c3e9f' 'search parser' 'list'; do
+>   set -f; set -- $c; set +f; cc-sessions "$@" 3<>"$CC_TEST_TMP/never" <&3 > /dev/null 2>&1; echo "$1 $?"; done
+overview 0
+prompts 0
+conversation 0
+tools 0
+agents 0
+entry 0
+schema 0
+search 0
+search 0
+list 0
 ```
 
 ## Output budget
@@ -671,6 +773,17 @@ L1\tx (escaped)
 L2\tx (escaped)
 ```
 
+Under jq 1.7, `--since` and `--until` take ages in every command.
+
+```scrut
+$ PATH="$JQ17:$PATH" cc-sessions overview a7c3e9f --until 1s | grep -c '^tokens'; PATH="$JQ17:$PATH" cc-sessions entry a7c3e9f L4 --until 1s | head -n 1 | cut -f 1,2
+> PATH="$JQ17:$PATH" cc-sessions list --since 100000d | wc -l | tr -d ' '; PATH="$JQ17:$PATH" cc-sessions prompts a7c3e9f --until 1s | wc -l | tr -d ' '
+1
+entry\tL4 (escaped)
+7
+18
+```
+
 Run explicitly under `/bin/bash` (3.2 on macOS), the dispatcher and commands behave the same.
 
 ```scrut
@@ -695,9 +808,12 @@ $ cd "$CC_TEST_ROOT" && shellcheck -x -P SCRIPTDIR bin/cc-sessions libexec/* lib
 clean
 ```
 
-Every jq module compiles with jq 1.8 and jq 1.7.
+Every jq module compiles with jq 1.8 and jq 1.7, imported and as the main program (as commands run them).
 
 ```scrut
-$ for j in "$JQ" /usr/bin/jq; do for m in "$CC_TEST_ROOT"/lib/*.jq; do n=${m##*/}; "$j" -n -L "$CC_TEST_ROOT/lib" "import \"${n%.jq}\" as m; empty" || echo "failed: $j $n"; done; done; echo checked
+$ for j in "$JQ" /usr/bin/jq; do for m in "$CC_TEST_ROOT"/lib/*.jq; do n=${m##*/}
+>   "$j" -n -L "$CC_TEST_ROOT/lib" "import \"${n%.jq}\" as m; empty" || echo "failed: $j $n"
+>   "$j" -n -L "$CC_TEST_ROOT/lib" "$(cat "$m")"$'\n''empty' || echo "failed as main: $j $n"
+> done; done; echo checked
 checked
 ```

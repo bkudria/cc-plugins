@@ -1,0 +1,93 @@
+#!/bin/bash
+# shellcheck source=../lib/common.sh
+. "${0%/*}/../lib/common.sh"
+
+prompts_help() {
+  cat << 'EOF'
+Usage: cc-sessions prompts <session> [--since T] [--until T] [--full]
+
+What the human did in one transcript (a session's or an agent's), in file order.
+
+Options:
+  --since T    records from T on: a handle (L120), a timestamp, or an age (30m, 2h, 7d)
+  --until T    records up to T, in the same forms
+  --full       whole text (default: 300 characters, ending with …)
+
+Fields:
+  handle  L<line> in the transcript
+  time    the entry's timestamp, or the nearest earlier one in the file (UTC)
+  kind    one of the kinds below
+  text    the input; images show as [image]
+
+Kinds:
+  prompt     typed input
+  slash      a slash command and its arguments (a typed /x and its command entry are one record)
+  bash       a ! command
+  sdk        a prompt sent through the SDK
+  queued     a message typed while Claude was working
+  answer     an AskUserQuestion answer: <question> → <answer>
+  denied     a rejected tool call: <tool>, or <tool>: <feedback>
+  plan       an ExitPlanMode decision: approved: <plan>, rejected, or rejected: <feedback>
+  interrupt  the user interrupted Claude
+  output     the output of the slash or ! command just before it
+
+No default limit.
+Empty answer: nothing on stdout; on stderr "cc-sessions: no human input in <transcript>[ with
+<options>]".
+Exit status: 0 answered, also when empty; 1 the transcript cannot be read; 2 usage error
+(unknown option, bad value, unknown or ambiguous <session>).
+EOF
+}
+
+case ${1-} in
+  --synopsis)
+    printf '%s\n' 'prompts <session>  what the human did: inputs, answers, denials, plan decisions, interrupts, command output'
+    exit 0
+    ;;
+  -h | --help)
+    prompts_help
+    exit 0
+    ;;
+esac
+
+since=null until=null since_text='' until_text='' width=300 operands=()
+while [ $# -gt 0 ]; do
+  case $1 in
+    --since)
+      cc_need_value "$@"
+      since=$(cc_bound --since "$2") || exit
+      since_text=$2
+      shift
+      ;;
+    --until)
+      cc_need_value "$@"
+      until=$(cc_bound --until "$2") || exit
+      until_text=$2
+      shift
+      ;;
+    --full) width=0 ;;
+    --)
+      shift
+      operands+=("$@")
+      break
+      ;;
+    -*) cc_unknown_option "$1" --since --until --full ;;
+    *) operands+=("$1") ;;
+  esac
+  shift
+done
+
+cc_one_session ${#operands[@]}
+cc_resolve "${operands[0]}"
+
+# shellcheck disable=SC2016 # $since, $until and $width are jq variables
+cc_jq_program "$(cc_module_program prompts 's::transcripts | main($since; $until; $width)')" -r \
+  --argjson since "$since" --argjson until "$until" --argjson width "$width" -- "$CC_FILE" |
+  { if IFS= read -r line; then printf '%s\n' "$line" && cat; else exit 3; fi; }
+statuses=("${PIPESTATUS[@]}")
+[ "${statuses[0]}" -eq 0 ] || cc_jq_failed "${statuses[0]}" "$CC_FILE"
+if [ "${statuses[1]}" -eq 3 ]; then
+  bounds=${since_text:+ --since $since_text}${until_text:+ --until $until_text}
+  cc_notice "no human input in $CC_FILE${bounds:+ with${bounds}}"
+fi
+exit 0

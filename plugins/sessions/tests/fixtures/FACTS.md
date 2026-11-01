@@ -6,6 +6,8 @@ entry of each `message.id`; context = input + cache creation + cache read.
 
 ## Conventions
 
+- The files under `config/` are edited by hand. Add a case as a new session, or as lines appended at the end of a file:
+  tests cite handles, so no existing line may move. Record each addition here and in `mtimes.tsv`.
 - `mtimes.tsv` lists `<path>\t<YYYYMMDDhhmm.SS>` for every file under `config/`. Apply it with `TZ=UTC touch -t`.
 - Stored absolute paths inside transcripts (persisted-output paths, `persistedOutputPath`, `transcriptDir`, `scriptPath`)
   point under `/tmp/sessions-fixture/config/projects/`, which never exists. Every lookup must fall back to the tree.
@@ -23,6 +25,7 @@ entry of each `message.id`; context = input + cache creation + cache read.
 | `SDK` | `projects/-tmp-sessions-fixture-scuttlerun-project-Xy12/d1f3b5d7-9e0a-4c2e-a4b6-c8d0e2f4a6b8` |
 | `RELOC` | `projects/-tmp-sessions-fixture-reloc/e5a7c9b1-3d5f-4b7d-8f9a-0c1e2a3b4c5d` |
 | `UNDER` | `projects/-tmp-sessions-fixture-under-score/f6b8d0e2-4a6c-4e8a-b0c2-d4e6f8a0b2c4` |
+| `GAMMA` | `projects/-tmp-sessions-fixture-gamma/c7d9e1f3-5a6b-4c8d-9e0f-1a2b3c4d5e6f` |
 | `WF` | `ALPHA/subagents/workflows/wf_5d1c9a7e-3b2` |
 
 `X.jsonl` is the main transcript; `X/` is its session directory.
@@ -36,11 +39,12 @@ entry of each `message.id`; context = input + cache creation + cache read.
 | SDK | `d1f3b5d7-9e0a-4c2e-a4b6-c8d0e2f4a6b8` | 5 | `/tmp/sessions-fixture/scuttlerun-project-Xy12` | 2.1.310 | sdk | `Rename the report generator skill` (ai-title L4) | only with an origin filter that admits sdk | 2026-10-29 12:00:00 |
 | RELOC | `e5a7c9b1-3d5f-4b7d-8f9a-0c1e2a3b4c5d` | 10 | `/tmp/sessions-fixture/reloc` | 2.1.312 | cli | `Show the release notes` (ai-title L2) | yes | 2026-10-28 12:00:00 |
 | UNDER | `f6b8d0e2-4a6c-4e8a-b0c2-d4e6f8a0b2c4` | 3 | `/tmp/sessions fixture/under_score` | 2.1.314 | cli | `List the files with spaces in their names.` (first human input L2) | yes | 2026-10-27 12:00:00 |
+| GAMMA | `c7d9e1f3-5a6b-4c8d-9e0f-1a2b3c4d5e6f` | 24 | `/tmp/sessions-fixture/gamma` | 2.1.316 | cli | `gamma-indexer` (agent-name L14) | yes | 2026-10-26 15:00:00 |
 | RESUMED | `b9e1c3a5-7d2f-4e6a-8b0c-1d3e5f7a9b2c` | 7 | `/tmp/sessions-fixture/beta` | 2.1.206 | cli | `Find where the header should live.` (first human input L1) | yes | 2026-07-20 12:00:00 |
 | BETA | `b2d4f6a8-1c3e-4a5b-8d7f-9e0a1b2c3d4e` | 22 | `/tmp/sessions-fixture/beta` | 2.1.206 | cli | `Summarise the beta build failures.` (first human input L2) | yes | 2026-07-15 12:00:00 |
 | FLAT | `c4e6a8b0-2d4f-4a6c-9e8a-0b2c4d6e8f1a` | 8 | `/tmp/sessions-fixture/flat` | 2.0.76 | cli (no entrypoint) | `Flat era config loader search` (legacy summary L1) | yes | 2026-01-03 12:00:00 |
 
-- Default listing (cli only), newest first: ALPHA, RELOC, UNDER, RESUMED, BETA, FLAT. With sdk admitted, SDK sits between
+- Default listing (cli only), newest first: ALPHA, RELOC, UNDER, GAMMA, RESUMED, BETA, FLAT. With sdk admitted, SDK sits between
   ALPHA and RELOC. STUB is newest of all and must never appear. `projects/-tmp-sessions-fixture-flat/agent-*.jsonl` are
   flat sub-agents, never sessions.
 - Project directory names follow Claude Code's encoding (every character outside `[A-Za-z0-9]` becomes `-`):
@@ -68,6 +72,7 @@ entry of each `message.id`; context = input + cache creation + cache read.
 | `a3d1e5f7` | `ALPHA/subagents/agent-a3d1e5f7a9b0c2d4e.jsonl` | transcripts-fork agent (internal) |
 | `a0f1`, `a9e8` | `WF/agent-a0f1e2d3c4b5a6978.jsonl`, `WF/agent-a9e8d7c6b5a4f3e21.jsonl` | workflow agents |
 | `b5a7`, `b2d4`, `b9e1`, `c4e6`, `d1f3`, `e5a7`, `f6b8` | the one session with that prefix | STUB, BETA, RESUMED, FLAT, SDK, RELOC, UNDER |
+| `c7d9` | `GAMMA.jsonl` | GAMMA (no session directory) |
 | `wf_5d1c9a7e-3b2` | (rule 3) | ALPHA |
 | `e0a0` | nothing | exit 2 (entry uuids are not file names) |
 | `ALPHA/tool-results/b4k7m2q9x.txt` (as a path) | — | ALPHA |
@@ -425,6 +430,104 @@ L1 isMeta `Base directory for this skill: /tmp/sessions fixture/under_score/.cla
 skill…` with no trigger: an orphan skill load named `orphan-skill`. L2 user prompt `List the files with spaces in their
 names.` (H1, the label). L3 assistant `Two files have spaces in their names.` (3/4000/0/11).
 
+## GAMMA (current era, 2.1.316)
+
+### Lines
+
+| L | Entry | Role in the rules |
+|---|---|---|
+| 1 | user, origin human, typed: `Rebuild the gamma index with full effort, then check the table.` | human input H1 |
+| 2 | attachment `skill_listing` (`gamma-helper`) | NOISE_ONLY_TERM; never searched |
+| 3 | attachment `ultra_effort_enter` (`reminderType` `full`) | state |
+| 4 | user isMeta, `turnCompanion`: `<command-message>fixture-focus</command-message>\n<command-name>fixture-focus</command-name>\n<skill-format>true</skill-format>` (same `promptId` as L1) | injected; harness command trigger |
+| 5 | user isMeta, `turnCompanion`: `# Fixture focus\n\nVerify each step before reporting it.` | injected (bundled body) |
+| 6 | assistant M1 block 0: text `Reading the gamma table first.` | |
+| 7 | assistant M1 block 1: tool_use T1 Read `/tmp/sessions-fixture/gamma/data/table.txt` | |
+| 8 | user tool_result T1: 30000 characters inline | largest result; not persisted |
+| 9 | attachment `nested_memory` (`/tmp/sessions-fixture/gamma/data/CLAUDE.md`, renderedRole `user`) | NOISE_ONLY_TERM; never searched |
+| 10 | assistant M2: tool_use T2 Bash `make index`, `run_in_background: true` | background call |
+| 11 | user tool_result T2 `Command running in background with ID: b8r2k6t4q. …` | |
+| 12 | assistant M3: text `The index is rebuilding in the background.` | |
+| 13 | `ai-title` `gamma-index-plan` | single token (plan slug) |
+| 14 | `agent-name` `gamma-indexer` | label |
+| 15 | `queue-operation` enqueue, content = L17's text | not input (the text appears at L17); never searched |
+| 16 | `queue-operation` dequeue | |
+| 17 | user `<task-notification>` for T2 (origin `task-notification`, promptSource `system`) | notification |
+| 18 | assistant M4: text `The index rebuild finished with exit code 0.` | |
+| 19 | user, origin human, typed: `I changed notes.md by hand; compare it with the table.` | human input H2 |
+| 20 | assistant M5: tool_use T3 Bash `git diff --stat` | |
+| 21 | user tool_result T3 | |
+| 22 | attachment `edited_text_file` (`/tmp/sessions-fixture/gamma/notes.md`) | kind `file` |
+| 23 | assistant M6 block 0: thinking, empty (signature only) | not content |
+| 24 | assistant M6 block 1: text `Only the notes header changed; the table still matches it.` | |
+
+Entry counts: user 8, assistant 8, attachment 4, queue-operation 2, ai-title 1, agent-name 1. No corrupt lines, no
+duplicate uuids, no backwards timestamps. First timestamp `2026-10-26T14:00:03.950Z` (L1), last
+`2026-10-26T14:20:13.781Z` (L24). `GAMMA/` does not exist: no sub-agents, workflows or persisted outputs.
+
+### Human input (2)
+
+| # | Handle | Kind | Text | Timestamp |
+|---|---|---|---|---|
+| H1 | L1 | prompt | `Rebuild the gamma index with full effort, then check the table.` | 14:00:03.950Z |
+| H2 | L19 | prompt | `I changed notes.md by hand; compare it with the table.` | 14:20:03.550Z |
+
+- Not input: injected L4, L5; notification L17; tool results L8, L11, L21; the enqueue L15 (its text is L17's).
+
+### Skill loads
+
+| Handle | Name | How | Evidence |
+|---|---|---|---|
+| L4 → L5 | `fixture-focus` | harness command, `bundled` | `<command-name>fixture-focus</command-name>` (no slash) with `<skill-format>`, directly followed by an isMeta body that does not start with `Base directory` |
+
+- The trigger L4 is itself isMeta. No Skill tool call, `invoked_skills` or `attributionSkill`. The `skill_listing` (L2)
+  names `gamma-helper`, which never loads.
+
+### Tool calls (3; no errors)
+
+| Call | Tool use id | Tool | Input | Result | Status | Result chars |
+|---|---|---|---|---|---|---|
+| L7 | `toolu_01FxGamma000000000000001` | Read | `/tmp/sessions-fixture/gamma/data/table.txt` | L8 | ok | **30000** |
+| L10 | `toolu_01FxGamma000000000000002` | Bash | `make index` (description `Rebuild the gamma index`, `run_in_background: true`) | L11 | ok | 229 |
+| L20 | `toolu_01FxGamma000000000000003` | Bash | `git diff --stat` | L21 | ok | 63 |
+
+`is_error` is `false` on L11 and L21, absent on L8.
+
+- L8 is a Read result in the 2.1.31x form: one unpadded `<n>\t<line>` per file line, 701 lines: `cell 0001 | weight 037
+  | state settled` through `cell 0699 | weight 863 | state settled`, then `end` and 39 dots, then an empty line 701.
+  It does not start with the persisted-output marker. `toolUseResult` is `{type: "text", file: {filePath, content
+  (27304 characters), numLines: 701, startLine: 1, totalLines: 701}}`. With `--full`, a record carrying this result
+  alone is longer than the default 20000-character budget.
+- Background call: L11 `toolUseResult` is `{stdout: "", stderr: "", interrupted: false, isImage: false,
+  noOutputExpected: false, backgroundTaskId: "b8r2k6t4q"}`. Completion L17: `<task-id>b8r2k6t4q</task-id>`,
+  `<tool-use-id>` = T2, `<status>completed</status>`, `<summary>Background command "Rebuild the gamma index" completed
+  (exit code 0)</summary>`, no `<result>`. Its `<output-file>` (also named in L11's text) is
+  `/private/tmp/claude-501/-tmp-sessions-fixture-gamma/c7d9e1f3-5a6b-4c8d-9e0f-1a2b3c4d5e6f/tasks/b8r2k6t4q.output`,
+  which never exists and is never followed.
+
+### API messages and tokens
+
+| Message | Lines | Blocks | Input | Cache creation | Cache read | Output | Context |
+|---|---|---|---|---|---|---|---|
+| M1 `msg_01FxGamma000000000000001` | L6, L7 | text, tool_use | 3 | 6000 | 9000 | 120 | 15003 |
+| M2 `…002` | L10 | tool_use | 1 | 8200 | 15000 | 60 | 23201 |
+| M3 `…003` | L12 | text | 1 | 300 | 23200 | 20 | 23501 |
+| M4 `…004` | L18 | text | 1 | 400 | 23500 | 15 | 23901 |
+| M5 `…005` | L20 | tool_use | 2 | 500 | 23900 | 40 | 24402 |
+| M6 `…006` | L23, L24 | thinking (empty), text | 1 | 350 | 24400 | 30 | **24751** |
+
+(`…NNN` abbreviates `msg_01FxGamma000000000000NNN`.) Every split entry repeats its message's final usage (2.1.300+).
+
+- API messages: 6; assistant entries: 8. Models: `claude-opus-5-5` only.
+- Totals: input **9**, cache creation **15750**, cache read **119000**, output **285**; peak context **24751** (M6,
+  first entry L23).
+- Trap: summing every entry gives output 435.
+
+### Label
+
+No `custom-title` and no `summary`; the only `ai-title` (L13) is a single token, so the label is the `agent-name`
+`gamma-indexer` (L14), not the first human input (L1).
+
 ## STUB
 
 One line: `{"type":"ai-title","aiTitle":"Stub session title",…}`. No user or assistant entry; skipped by listings.
@@ -451,7 +554,10 @@ absent from `invoked_skills`, `api-request-blob`, `last-prompt`, notifications a
 
 | Term | Occurrences |
 |---|---|
-| `NOISE_ONLY_TERM` | ALPHA L5 (`skill_listing`), L6 (`instructions`), L7 (`api-request-blob`) only; search finds nothing (exit 0, stderr notice) |
+| `NOISE_ONLY_TERM` | ALPHA L5 (`skill_listing`), L6 (`instructions`), L7 (`api-request-blob`), GAMMA L2 (`skill_listing`), L9 (`nested_memory`) only; search finds nothing (exit 0, stderr notice) |
+| `GAMMA_FILE_TERM` | GAMMA L22 only (`edited_text_file`: `attachment.snippet`, also in `rendered`); kind `file`, searched by default; corpus search finds one session, GAMMA |
+| `state settled` | GAMMA L8 only: 699 times in the one 30000-character tool-result (and in `toolUseResult.file.content`) |
+| `b8r2k6t4q` | GAMMA L11 (tool-result), L15 (`queue-operation`; never searched), L17 (notification; not searched by default) |
 | ``please run "make test" now`` | ALPHA L4 (prompt) only; on disk the quotes are `\"` |
 | `make test` (fixed string) | ALPHA L4 (prompt), L15 (tool-input; also in `wireToolInputs`) |
 | `--force-push-now` | ALPHA L19 (assistant) only |
@@ -460,7 +566,8 @@ absent from `invoked_skills`, `api-request-blob`, `last-prompt`, notifications a
 | `libXjq` | ALPHA L13 (tool-result) only |
 | `[cc-sessions:transcripts-fork]` | `ALPHA/subagents/agent-a3d1e5f7a9b0c2d4e.jsonl` L1 only |
 
-Other searchable kinds present: `hook` ALPHA L3; `file` ALPHA L41; `plan` ALPHA L42; `recap` ALPHA L76.
+Other searchable kinds present: `hook` ALPHA L3; `file` ALPHA L41 (`file`), GAMMA L22 (`edited_text_file`); `plan`
+ALPHA L42; `recap` ALPHA L76.
 
 ## Schema
 
@@ -468,7 +575,8 @@ Other searchable kinds present: `hook` ALPHA L3; `file` ALPHA L41; `plan` ALPHA 
   `agent-name`, `summary`, `last-prompt`, `permission-mode`, `mode`, `api-request`, `api-request-blob`, `cost-state`,
   `queue-operation`, `progress`, `relocated`, `fork-context-ref`. Journal types: `launched`, `started`, `result`.
 - Attachment types: `hook_success`, `skill_listing`, `instructions`, `file`, `plan_file_reference`, `invoked_skills`,
-  `queued_command`, `structured_output`, and the unknown **`brand_new_kind`** (ALPHA L77), which `schema` must flag.
+  `queued_command`, `structured_output`, `ultra_effort_enter`, `nested_memory`, `edited_text_file`, and the unknown
+  **`brand_new_kind`** (ALPHA L77), which `schema` must flag.
 - System subtypes: `compact_boundary`, `local_command`, `informational`, `away_summary`.
 
 ## Departures from real transcripts
@@ -480,3 +588,9 @@ Other searchable kinds present: `hook` ALPHA L3; `file` ALPHA L41; `plan` ALPHA 
 - Persisted outputs are about 3 KB (Claude Code persists at roughly 30 KB). The preview is the first ≤2 KB, cut at a
   line end.
 - uuids, message ids, tool ids, signatures and hashes are patterned, not random.
+- GAMMA's `agent-name` (`gamma-indexer`) differs from its `ai-title` (`gamma-index-plan`) so that the label rule is
+  visible in the text; in real 2.1.31x transcripts nearly every `agent-name` repeats the `ai-title` written just
+  before it.
+- GAMMA's entries carry a subset of the top-level keys real 2.1.316 entries have: no `session_id`, `slug`,
+  `serverClassifierRequest`, `serverClassifierContext`, `permissionDecision`, `requestRef`, `requestedModel` or
+  `effort`.

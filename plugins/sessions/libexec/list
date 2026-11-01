@@ -1,0 +1,275 @@
+#!/bin/bash
+# shellcheck disable=SC2016 # $names inside single quotes are jq variables
+# shellcheck source=../lib/common.sh
+. "${0%/*}/../lib/common.sh"
+
+cc_list_help() {
+  cat << 'EOF'
+Usage: cc-sessions list [<pattern>] [--skill NAME] [--cwd PATH] [--since T] [--until T]
+                        [--origin O] [--full] [--limit N]
+
+Sessions, newest first by modified time. Stub sessions (no user or assistant entry) and agent
+transcripts are never rows.
+
+  <pattern>     literal text matched against the session id, every title (custom-title, ai-title,
+                agent-name, legacy summary) and the first human input; all-lowercase text matches
+                any case. Put a pattern that starts with - after --
+  --skill NAME  sessions that loaded skill NAME, in the main transcript or a non-internal agent;
+                bare and namespaced names match by their last segment; adds the skill field
+  --cwd PATH    sessions with any cwd equal to PATH or under it (PATH is not resolved through links)
+  --since T     sessions modified at or after T: a timestamp (2026-10-30T10:00:04Z, 2026-10-30)
+                or an age (30m, 2h, 7d)
+  --until T     sessions modified at or before T; a printed modified time includes its session
+  --origin O    cli (default), sdk, all, or another entrypoint name
+  --full        whole labels (default: 100 characters, whitespace runs shown as one space)
+  --limit N     at most N sessions (default 50; 0: no limit)
+
+Fields, one session per record:
+  id        session id
+  modified  last modified time of the main transcript (UTC)
+  size      main transcript size: 512B, 2.4K, 12K, 3.4M
+  origin    cli, sdk, or the entrypoint that started the session
+  mark      * for the current session (CLAUDE_CODE_SESSION_ID), else -
+  cwd       first working directory
+  label     custom title, else ai-title with a space, else agent name, else summary, else the
+            first human input
+  skill     with --skill: <exact name> <how>[,<how>...] [+<n> agents], how being tool, skill,
+            bundled or orphan; +<n> agents counts the agents that loaded it
+
+When --limit or --max-chars stops the listing, a notice says how many older sessions were left
+out and to continue with --until <modified of the last row>.
+Empty answer: nothing on stdout; a notice names the pattern, the options and how many sessions
+were checked.
+Exit status: 0 answered, also when empty; 1 no transcripts directory, or rg missing; 2 usage
+error (unknown option, bad value).
+EOF
+}
+
+case ${1-} in
+  --synopsis)
+    printf '%s\n' 'list [<pattern>] [--skill NAME] [--cwd PATH] [--origin O]  which sessions exist, newest first'
+    exit 0
+    ;;
+  -h | --help)
+    cc_list_help
+    exit 0
+    ;;
+esac
+
+# Lines as "<path>TAB<line>TAB<json>", the input of s::group_lines.
+cc_list_lines=(--no-heading --with-filename --line-number --field-match-separator=$'\t' --field-context-separator=$'\t' --no-context-separator)
+
+# Keeps the candidate rows ("<pos>TAB<mtime>TAB<bytes>TAB<path>") whose path is in the list $1.
+cc_list_keep() {
+  keep=$(awk -F '\t' 'FILENAME == ARGV[1] { want[$0] = 1; next } { path = $0; sub(/^[^\t]*\t[^\t]*\t[^\t]*\t/, "", path) } path in want' \
+    <(printf '%s\n' "$1") <(printf '%s\n' "$keep"))
+}
+
+cc_list_paths() {
+  paths=()
+  [ -n "$keep" ] || return 0
+  cc_lines "$(printf '%s\n' "$keep" | cut -f 4-)"
+  paths=(${CC_LINES[@]+"${CC_LINES[@]}"})
+}
+
+# The agent transcripts of the sessions in paths that left a load marker.
+cc_list_skill_agents() {
+  printf '%s\n' "${paths[@]}" | awk -F '\t' 'FILENAME == "-" { want[$0] = 1; next } FILENAME == hits { hit[$0] = 1; next }
+    ($1 in want) && ($2 in hit) { print $2 }' hits="$skill_hits" - "$skill_hits" "$agent_map"
+}
+
+patterns=() skill='' cwd='' since='' until='' origin=cli full=0
+while [ $# -gt 0 ]; do
+  case $1 in
+    --skill)
+      cc_need_value "$@"
+      skill=$2
+      shift
+      ;;
+    --cwd)
+      cc_need_value "$@"
+      cwd=$2
+      shift
+      ;;
+    --since)
+      cc_need_value "$@"
+      since=$(cc_mtime_bound --since "$2") || exit
+      since_text=$2
+      shift
+      ;;
+    --until)
+      cc_need_value "$@"
+      until=$(cc_mtime_bound --until "$2") || exit
+      until_text=$2
+      shift
+      ;;
+    --origin)
+      cc_need_value "$@"
+      origin=$2
+      shift
+      ;;
+    --full) full=1 ;;
+    --)
+      shift
+      patterns+=("$@")
+      break
+      ;;
+    -*) cc_unknown_option "$1" --skill --cwd --since --until --origin --full ;;
+    *) patterns+=("$1") ;;
+  esac
+  shift
+done
+
+[ ${#patterns[@]} -le 1 ] || cc_usage_error "list takes at most one <pattern>, got ${#patterns[@]}" "quote a pattern that holds spaces"
+pattern=${patterns[0]-}
+if [ ${#patterns[@]} -eq 1 ] && [ -z "$pattern" ]; then
+  cc_usage_error "the <pattern> is empty" "pass some text, or no pattern to list every session"
+fi
+[[ $origin =~ ^[a-z][a-z0-9_-]*$ ]] || cc_usage_error "--origin needs cli, sdk, all or an entrypoint name, got \"$origin\"" "pass, for example, --origin all"
+[ -z "$skill" ] || [[ $skill =~ ^[A-Za-z0-9_.:-]+$ ]] || cc_usage_error "--skill needs a skill name, got \"$skill\"" "pass, for example, --skill review or --skill demo:review"
+[ -z "$cwd" ] || cwd=$(cc_abs_path "$cwd")
+
+filters=${skill:+ --skill $skill}${cwd:+ --cwd $cwd}${since:+ --since $since_text}${until:+ --until $until_text}
+
+root=$(cc_require_data_root) || exit
+cc_need rg
+limit=${CC_SESSIONS_LIMIT:-50}
+width=100
+[ $full -eq 1 ] && width=0
+
+plan=$("$(cc_jq_binary)" -n -r -L "$CC_SESSIONS_LIB" --arg pattern "$pattern" --arg skill "$skill" --arg cwd "$cwd" "$(cc_module_program list '
+  (if $pattern != "" then $pattern | s::rg_literal else "" end),
+  (if $pattern != "" and ($pattern | s::smart_insensitive) then "-i" else "-s" end),
+  (if $cwd != "" then $cwd | s::rg_cwd else "" end),
+  (if $skill != "" then rg_skill_trigger($skill) else "" end),
+  (if $skill != "" then rg_skill_markers($skill)[] else empty end)')" < /dev/null)
+pattern_re='' pattern_case='' cwd_re='' trigger_re='' launched_re='' input_re='' reinvoked_re='' body_re=''
+{
+  IFS= read -r pattern_re
+  IFS= read -r pattern_case
+  IFS= read -r cwd_re
+  IFS= read -r trigger_re
+  IFS= read -r launched_re
+  IFS= read -r input_re
+  IFS= read -r reinvoked_re
+  IFS= read -r body_re
+} <<< "$plan"
+# A load always leaves a launch result, a trigger or a Base-directory body; the other lines it can
+# leave are read only from transcripts that have one of those.
+load_markers=(-e "$launched_re" -e "$trigger_re" -e "$body_re")
+markers=(-e "$launched_re" -e "$input_re" -e "$reinvoked_re" -e "$body_re")
+opts=$("$(cc_jq_binary)" -n -c --arg pattern "$pattern" --arg skill "$skill" --arg cwd "$cwd" --arg origin "$origin" \
+  --arg current "${CLAUDE_CODE_SESSION_ID-}" --argjson width "$width" \
+  'def opt: if . == "" then null else . end;
+  {pattern: ($pattern | opt), skill: ($skill | opt), cwd: ($cwd | opt), origin: $origin,
+    current: $current, width: $width}' < /dev/null)
+
+human_re='"type":"user","message":\{"role":"user","content":(?:"|\[\{"type":"(?:text|image)")'
+local_command_re='"type":"system","subtype":"local_command"'
+titles_re='^\{"type":"(?:custom-title|ai-title|agent-name|summary)"'
+sdk_res=(-e '"entrypoint":"sdk' -e '"promptSource":"sdk"')
+content_re='"type":"(?:user","message|assistant",")'
+
+since_from=${since%% *} until_to=${until##* }
+cands=$(cc_sessions_by_mtime "$since_from" "$until_to")
+total=0
+[ -n "$cands" ] && total=$(($(printf '%s\n' "$cands" | wc -l)))
+if [ -n "$skill" ] && [ -n "$cands" ]; then
+  work=$(mktemp -d "${TMPDIR:-/tmp}/cc-sessions-list.XXXXXX") || cc_fail "cannot create a temporary directory" "check TMPDIR"
+  trap 'rm -rf "$work"' EXIT
+  agent_map=$work/agents.tsv skill_hits=$work/hits.txt
+  cc_corpus_agent_map > "$agent_map"
+  cc_rg -l --no-ignore --hidden --glob '*.jsonl' --glob '!journal.jsonl' "${load_markers[@]}" -- "$root" > "$skill_hits"
+  keep=$cands
+  cc_list_keep "$(awk -F '\t' 'FILENAME == ARGV[1] { owner[$2] = $1; next } { print (($0 in owner) ? owner[$0] : $0) }' "$agent_map" "$skill_hits")"
+  cands=$keep
+fi
+rows=0
+[ -n "$cands" ] && rows=$(($(printf '%s\n' "$cands" | wc -l)))
+
+# The lines the label and the pattern come from: the first user entries with text and the title entries.
+cc_list_label_lines() {
+  cc_rg "${cc_list_lines[@]}" -m 16 -e "$human_re" -e "$local_command_re" -- "$@"
+  cc_rg "${cc_list_lines[@]}" -e "$titles_re" -- "$@"
+}
+
+# Prints the rows ("<pos>TAB<record>") of the candidates from $1 up to, not including, $2. Each filter
+# first narrows the batch with rg, so jq reads only the lines of sessions that can qualify.
+cc_list_batch() {
+  local paths=() agents=() anywhere=() hits line
+  keep=$(printf '%s\n' "$cands" | sed -n "$(($1 + 1)),$2p")
+  cc_list_paths
+  if [ -n "$pattern" ]; then
+    hits=$(printf '%s\n' "${paths[@]}" | awk -v pattern="$pattern" -v fold="$pattern_case" '{
+      id = $0; sub(/^.*\//, "", id); sub(/\.jsonl$/, "", id)
+      if (fold == "-i" ? index(tolower(id), tolower(pattern)) : index(id, pattern)) print
+    }')
+    anywhere=()
+    cc_lines "$(cc_rg -l "$pattern_case" -e "$pattern_re" -- "${paths[@]}")"
+    anywhere=(${CC_LINES[@]+"${CC_LINES[@]}"})
+    if [ ${#anywhere[@]} -gt 0 ]; then
+      hits+=$'\n'$(rg --no-config --text --no-messages --no-line-number --no-filename "$pattern_case" \
+        -e "^[^\t]*\t[0-9]+\t.*(?:$pattern_re)" -- <(cc_list_label_lines "${anywhere[@]}") 2> /dev/null < /dev/null | cut -f 1)
+    fi
+    cc_list_keep "$hits"
+    cc_list_paths
+  fi
+  if [ -n "$cwd" ] && [ ${#paths[@]} -gt 0 ]; then
+    cc_list_keep "$(cc_rg -l -e "$cwd_re" -- "${paths[@]}")"
+    cc_list_paths
+  fi
+  [ ${#paths[@]} -gt 0 ] || return 0
+  cc_list_keep "$(cc_rg -l -m 1 -e "$content_re" -- "${paths[@]}")"
+  cc_list_paths
+  if [ -n "$skill" ] && [ ${#paths[@]} -gt 0 ]; then
+    cc_lines "$(cc_list_skill_agents)"
+    agents=(${CC_LINES[@]+"${CC_LINES[@]}"})
+  fi
+  [ ${#paths[@]} -gt 0 ] || return 0
+  "$(cc_jq_binary)" -n -R -r -L "$CC_SESSIONS_LIB" --argjson opts "$opts" --arg candidates "$keep" \
+    "$(cc_module_program list main)" <(
+      cc_list_label_lines "${paths[@]}"
+      cc_rg "${cc_list_lines[@]}" -m 1 "${sdk_res[@]}" -- "${paths[@]}"
+      [ -z "$cwd" ] || cc_rg "${cc_list_lines[@]}" -m 1 -e "$cwd_re" -- "${paths[@]}"
+      if [ -n "$skill" ]; then
+        cc_rg "${cc_list_lines[@]}" "${markers[@]}" -- "${paths[@]}" ${agents[@]+"${agents[@]}"}
+        cc_rg "${cc_list_lines[@]}" -A 3 -e "$trigger_re" -- "${paths[@]}" ${agents[@]+"${agents[@]}"}
+        cc_rg "${cc_list_lines[@]}" -m 1 -e "$human_re" -- ${agents[@]+"${agents[@]}"}
+      fi
+    ) < /dev/null
+}
+
+# The budget is applied here rather than left to the dispatcher, so that reading stops with it and the
+# notice can say where to continue.
+max_chars=${CC_SESSIONS_MAX_CHARS:-20000}
+start=0 size=$((limit + 1)) shown=0 used=0 stop='' next_size=0 last_pos=-1 last_modified=''
+[ "$size" -lt 64 ] && size=64
+while [ $start -lt "$rows" ] && [ -z "$stop" ]; do
+  end=$((start + size))
+  [ $end -gt "$rows" ] && end=$rows
+  while IFS=$'\t' read -r pos row; do
+    [ -n "$pos" ] || continue
+    if [ "$limit" -gt 0 ] && [ $shown -ge "$limit" ]; then
+      stop="--limit $limit"
+      break
+    fi
+    next_size=$((${#row} + 1))
+    if [ "$max_chars" -gt 0 ] && [ $((used + next_size)) -gt "$max_chars" ]; then
+      stop="--max-chars $max_chars"
+      break
+    fi
+    printf '%s\n' "$row"
+    shown=$((shown + 1)) used=$((used + next_size)) last_pos=$pos
+    last_modified=${row#*$'\t'}
+    last_modified=${last_modified%%$'\t'*}
+  done <<< "$(cc_list_batch "$start" "$end")"
+  start=$end
+  [ $size -lt 8192 ] && size=$((size * 2))
+done
+
+if [ -n "$stop" ]; then
+  cc_sessions_stopped "$stop" "$shown" $((total - last_pos - 1)) "$next_size" "$last_modified"
+elif [ $shown -eq 0 ]; then
+  cc_notice "no sessions${pattern:+ match \"$pattern\"} with$filters --origin $origin; $total sessions checked in $root"
+fi
+exit 0

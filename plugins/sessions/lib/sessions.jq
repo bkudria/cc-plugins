@@ -16,7 +16,8 @@ def _raw_lines($var):
 def _handles_text:
   (.[:5] | map("L\(.)") | join(", ")) + (if length > 5 then " and \(length - 5) more" else "" end);
 
-def _skipped_notice:
+#: Prints the notice of a transcript object's unparseable lines on stderr ("cc-sessions: skipped <n> unparseable lines in <file>: L…"); emits nothing.
+def skipped_notice:
   if (.skipped | length) > 0 then
     ("cc-sessions: skipped \(.skipped | length) unparseable line\(if (.skipped | length) == 1 then "" else "s" end)"
       + " in \(.file): \(.skipped | _handles_text)\n") | stderr | empty
@@ -42,13 +43,51 @@ def transcripts:
       project_dir: ($c[7] // "-" | _dash),
       bytes: ($c[8] // "-" | _dash | if . then tonumber else null end),
       mtime: ($c[9] // "-" | _dash | if . then tonumber else null end),
-      meta: ($c[10] // "-" | _dash | if . then (try fromjson catch null) else null end),
+      meta: ($c[10] // "-" | _dash | if . then (. as $m | try ($ARGS.named[$m] | fromjson) catch null) else null end),
       lines: ($lines | length),
       rows: $parsed.rows,
       skipped: $parsed.skipped,
       sizes: $sizes
     }
-  | _skipped_notice, .;
+  | skipped_notice, .;
+
+# Cross-session reading: rg prints selected lines as "<path>TAB<line>TAB<json>", and these functions turn
+# them back into transcript objects holding only those rows, so s:: rules run on them without parsing
+# whole files.
+
+#: The cc_path_info fields of an absolute transcript path: {file, kind, session, agent, run, session_dir, project_dir}; a flat agent's session is null (it is its sessionId).
+def path_info:
+  . as $file
+  | ($file | sub("/[^/]*$"; "")) as $dir
+  | ($file | sub("^.*/"; "")) as $base
+  | (if $file | test("/subagents/workflows/[^/]+/journal\\.jsonl$") then
+       {kind: "journal", run: ($dir | sub("^.*/"; "")), session_dir: ($dir | sub("/subagents/workflows/[^/]+$"; ""))}
+     elif $file | test("/subagents/workflows/[^/]+/agent-[^/]*\\.jsonl$") then
+       {kind: "workflow-agent", run: ($dir | sub("^.*/"; "")), session_dir: ($dir | sub("/subagents/workflows/[^/]+$"; ""))}
+     elif $file | test("/subagents/agent-[^/]*\\.jsonl$") then {kind: "subagent", session_dir: ($dir | sub("/subagents$"; ""))}
+     elif $base | test("^agent-.*\\.jsonl$") then {kind: "flat", project_dir: $dir}
+     elif $base | endswith(".jsonl") then {kind: "main", session_dir: ($file | sub("\\.jsonl$"; ""))}
+     else {kind: "file"} end) as $i
+  | {file: $file, kind: $i.kind, session: null, agent: null, run: ($i.run // null), session_dir: ($i.session_dir // null),
+     project_dir: ($i.project_dir // null)}
+  | if .session_dir then .session = (.session_dir | sub("^.*/"; "")) | .project_dir = (.session_dir | sub("/[^/]*$"; "")) else . end
+  | if .kind | IN("subagent", "workflow-agent", "flat") then .agent = ($base | ltrimstr("agent-") | sub("\\.jsonl$"; "")) else . end;
+
+#: rg output lines grouped by file: {<path>: {<line>: <raw json>}}; a line seen twice is kept once. Input: a stream of "<path>TAB<line>TAB<json>" strings.
+def group_lines(lines):
+  reduce (lines | select(length > 0) | split("\t") | select(length >= 3)) as $p ({};
+    .[$p[0]][$p[1]] = ($p[2:] | join("\t")));
+
+#: A transcript object of one file's selected lines, like s::transcripts but lines is null and sizes empty; $stat is {mtime, bytes} or null. Input: {<line>: <raw json>}.
+def from_lines($path; $stat):
+  (to_entries | map({l: (.key | tonumber), raw: .value}) | sort_by(.l)) as $lines
+  | (reduce $lines[] as $x ({rows: [], skipped: []};
+      (try ($x.raw | fromjson) catch null) as $e
+      | if ($e | type) == "object" then .rows += [{l: $x.l, e: $e}] else .skipped += [$x.l] end)) as $parsed
+  | ($path | path_info)
+  | if .kind == "flat" then .session = first($parsed.rows[] | .e.sessionId | strings) // null else . end
+  | . + {meta: null, bytes: ($stat.bytes // null), mtime: ($stat.mtime // null), lines: null,
+         rows: $parsed.rows, skipped: $parsed.skipped, sizes: {}};
 
 def _dedupe:
   reduce .rows[] as $r ({seen: {}, out: [], t: null};
@@ -79,7 +118,8 @@ def duplicates:
 #: One TSV field: "-" for null or "", otherwise the string (other values as JSON) with backslash, TAB and newline written \\, \t and \n.
 def field:
   if . == null or . == "" then "-"
-  else (if type == "string" then . else tojson end) | gsub("\\\\"; "\\\\") | gsub("\t"; "\\t") | gsub("\n"; "\\n")
+  # split and join, because gsub takes time quadratic in the number of matches
+  else (if type == "string" then . else tojson end) | split("\\") | join("\\\\") | split("\t") | join("\\t") | split("\n") | join("\\n")
   end;
 
 #: An array of values as one TSV record (each through s::field).
@@ -88,12 +128,80 @@ def tsv: map(field) | join("\t");
 #: The string cut to at most $n characters, ending with "…" when cut; $n of 0 (or less) keeps it whole; non-strings pass through.
 def trunc($n): if type == "string" and $n > 0 and length > $n then .[:($n - 1)] + "…" else . end;
 
+# jq's global regex functions (gsub, match "g") take time quadratic in the number of matches, so
+# long text is cut before any of them runs.
+
+#: Display text: whitespace runs as one space, cut to $width characters (ending with …); $width 0 keeps the text exactly.
+def display($width):
+  if type != "string" then .
+  elif $width > 0 then
+    (length > $width * 8) as $long
+    | .[:($width * 8)] | gsub("\\s+"; " ") | sub("^ "; "") | sub(" $"; "")
+    | if $long and length < $width then . + "…" else trunc($width) end
+    | if $long and (endswith("…") | not) then .[:($width - 1)] + "…" else . end
+    | sub(" …$"; "…")
+  else . end;
+
+#: True when the query text holds no capital letter, so it matches case-insensitively (smart case); backslash escapes of a regex do not count.
+def smart_insensitive: gsub("\\\\."; "") | test("\\p{Lu}") | not;
+
+#: The literal text as an Oniguruma regex.
+def literal_regex: gsub("(?<c>[.*+?^${}()|\\[\\]\\\\/#-])"; "\\\(.c)");
+
+def _hex4: [(. / 4096 | floor) % 16, (. / 256 | floor) % 16, (. / 16 | floor) % 16, . % 16] | map("0123456789abcdef"[.:(. + 1)]) | join("");
+
+def _rg_char:
+  if . == 34 then "\\\\\""
+  elif . == 92 then "\\\\\\\\"
+  elif . == 10 then "\\\\n"
+  elif . == 9 then "\\\\t"
+  elif . == 13 then "\\\\r"
+  elif . == 8 then "(?:\\\\b|\\\\u0008)"
+  elif . == 12 then "(?:\\\\f|\\\\u000c)"
+  elif . < 32 then "\\\\u\(_hex4)"
+  elif . < 128 then [.] | implode | if test("[.+*?()|\\[\\]{}^$#&~\\\\-]") then "\\" + . else . end
+  elif . < 65536 then "(?:\([.] | implode)|(?i:\\\\u\(_hex4)))"
+  else (. - 65536) as $c | "(?:\([.] | implode)|(?i:\\\\u\(55296 + ($c / 1024 | floor) | _hex4)\\\\u\(56320 + ($c % 1024) | _hex4)))"
+  end;
+
+#: A Rust regex (for rg) that matches the literal text inside a JSON line: quotes, backslashes, control characters and \uXXXX escapes are matched in their encoded forms.
+def rg_literal: explode | map(_rg_char) | join("");
+
+#: The rg regex of a cwd equal to the input path or under it, inside a JSON line.
+def rg_cwd: if . == "/" then "\"cwd\":\"/" else "\"cwd\":\"" + rg_literal + "(?:/|\")" end;
+
+#: True when the input cwd is $path or lies under it at a path boundary.
+def under($path): type == "string" and (. == $path or ($path == "/" and startswith("/")) or startswith($path + "/"));
+
+#: The first match of $re in the input string as {offset, length, string}, else null.
+def first_match($re; $ci): if type == "string" then first(match($re; if $ci then "i" else "" end)) // null else null end;
+
+#: Candidate sessions as cc_sessions_by_mtime lists them ("<pos>TAB<mtime>TAB<bytes>TAB<path>" lines) as records {pos, mtime, bytes, path, id}.
+def candidates($text):
+  $text | split("\n") | map(select(length > 0) | split("\t")
+    | {pos: (.[0] | tonumber), mtime: (.[1] | tonumber), bytes: (.[2] | tonumber), path: (.[3:] | join("\t"))}
+    | .id = (.path | sub("^.*/"; "") | sub("\\.jsonl$"; "")));
+
 #: A timestamp as YYYY-MM-DDTHH:MM:SSZ (UTC, milliseconds dropped); takes an ISO string or epoch seconds or milliseconds; null stays null.
 def ts:
   if type == "number" then (if . > 100000000000 then . / 1000 else . end) | floor | todate
   elif type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}") then .[0:19] + "Z"
   elif type == "string" then .
   else null end;
+
+#: A byte count as 512B, 2.4K, 12K, 3.4M or 1.2G.
+def human_size:
+  if type != "number" then null
+  elif . < 1024 then "\(.)B"
+  else
+    . as $n
+    | [["K", 1024], ["M", 1048576], ["G", 1073741824], ["T", 1099511627776]] as $units
+    | ([range(0; $units | length) | select($n >= $units[.][1])] | last) as $i
+    | (if ($n / $units[$i][1] | round) >= 1024 and $i < 3 then $i + 1 else $i end) as $j
+    | ($n / $units[$j][1]) as $v
+    | if $v < 9.95 then ($v * 10 | round) as $t | "\($t / 10 | floor).\($t % 10)\($units[$j][0])"
+      else "\($v | round)\($units[$j][0])" end
+  end;
 
 #: The handle "L<line>" of a row or record.
 def handle: "L\(.l)";
@@ -111,7 +219,7 @@ def bound($spec; $now):
   if ($spec | type) != "string" then _bound_error($spec)
   elif $spec | test("^L[0-9]+$") then {line: ($spec[1:] | tonumber)}
   elif $spec | test("^[0-9]+[smhdw]$") then
-    ($spec[:-1] | tonumber) * ({s: 1, m: 60, h: 3600, d: 86400, w: 604800}[$spec[-1:]]) as $age
+    (($spec[:-1] | tonumber) * ({s: 1, m: 60, h: 3600, d: 86400, w: 604800}[$spec[-1:]])) as $age
     | ($now - $age | floor) as $at | {from: $at, to: $at}
   else
     (try (
@@ -249,6 +357,9 @@ def user_entries: if ._users then ._users[] else _user_rows end;
 
 def _memo_users: _memo | if ._users then . else ._users = [_user_rows] end;
 
+#: The transcript carrying its de-duplicated entries and user classes, so that later s:: calls on it compute them once; answers are unchanged.
+def memo: _memo_users;
+
 def _slash_name: [capture("<command-name>(?<n>[^<]*)</command-name>")][0].n // null;
 
 def _slash_text:
@@ -263,7 +374,7 @@ def _output_text:
   | join("\n") | _strip_ansi;
 
 def _record($r; $kind; $text):
-  {l: $r.l, kind: $kind, text: $text, ts: $r.t, uuid: ($r.e.uuid // null), also: [], output: null, tool: null, tool_use_id: null, decision: null};
+  {l: $r.l, kind: $kind, text: $text, ts: $r.t, uuid: ($r.e.uuid // null), also: [], outputs: [], tool: null, tool_use_id: null, decision: null};
 
 def _tool_uses:
   reduce (entries[] | select(.e.type == "assistant") | {l, t} as $at | .e.message.content | arrays | .[] | select(.type == "tool_use") | . + $at) as $u
@@ -303,7 +414,7 @@ def _tool_decisions:
 def _attach_outputs($outputs):
   reduce $outputs[] as $o (.;
     (map(select((.kind == "slash" or .kind == "bash") and .l < $o.l)) | last | .l) as $owner
-    | if $owner == null then . else map(if .l == $owner and .output == null then .output = {l: $o.l, text: $o.text} else . end) end);
+    | if $owner == null then . else map(if .l == $owner then .outputs += [{l: $o.l, text: $o.text}] else . end) end);
 
 #: Output events of slash and ! commands: {l, kind: "output", text, ts, of}, of being the line of the command it belongs to (null if none).
 def outputs:
@@ -316,7 +427,7 @@ def outputs:
   | . as $o
   | {l, kind: "output", text: (.text | _output_text), ts: .t, of: ($commands | map(select(. < $o.l)) | last)};
 
-#: Human input in file order: {l, kind, text, ts, uuid, also, output, tool, tool_use_id, decision}; kind is prompt, slash, bash, sdk, queued, answer, denied or plan; also lists merged duplicate lines; output is {l, text} of a command's output.
+#: Human input in file order: {l, kind, text, ts, uuid, also, outputs, tool, tool_use_id, decision}; kind is prompt, slash, bash, sdk, queued, answer, denied or plan; also lists merged duplicate lines; outputs lists a command's outputs as {l, text}.
 def human_inputs:
   _memo_users
   | . as $t
@@ -468,6 +579,7 @@ def _attachment_content:
     elif $type == "plan_file_reference" then {kind: "plan", text: (.planContent // "")}
     elif $type == "file" then {kind: "file", text: ([.content.file.content?, (.content | strings)] | map(strings) | join("\n"))}
     elif $type == "edited_text_file" then {kind: "file", text: ([.snippet, .content] | map(strings) | join("\n"))}
+    elif $type == "queued_command" and .commandMode == "task-notification" then {kind: "notification", text: (.prompt | _text)}
     elif ($type | startswith("hook_")) or $type == "async_hook_response" then
       {kind: "hook", text: ([.stdout, .content, .stderr] | map(strings | select(length > 0)) | _uniq | join("\n"))}
     else empty end;
@@ -523,6 +635,12 @@ def known_system_subtypes:
   ["compact_boundary", "microcompact_boundary", "local_command", "informational", "away_summary", "stop_hook_summary",
    "turn_duration", "api_error", "scheduled_task_fire", "agents_killed"];
 
+#: Attachment types that can hold content (any hook_* type too); every other attachment type is state.
+def content_attachment_types: ["queued_command", "structured_output", "plan_file_reference", "file", "edited_text_file", "async_hook_response"];
+
+#: System subtypes that can hold content; every other subtype is state.
+def content_system_subtypes: ["local_command", "away_summary"];
+
 #: An entry's type label: its type, or attachment:<type> / system:<subtype>. Input: an entry.
 def entry_type:
   (.type // "?") as $type
@@ -551,11 +669,16 @@ def _notification_for($notes; $call_id; $task_id):
   // (if $task_id then first($notes[] | select(.tool_use_id == null and .task_id == $task_id)) else null end)
   // null;
 
-#: Background completions (<task-notification> user entries): {l, tool_use_id, task_id, status, summary, result, output_file, ts}; output_file paths are ephemeral and never followed.
+def _queued_notification: .e.type == "attachment" and .e.attachment.type == "queued_command" and .e.attachment.commandMode == "task-notification";
+
+#: Background completions (<task-notification> user entries, or queued_command attachments of commandMode task-notification): {l, tool_use_id, task_id, status, summary, result, output_file, ts, text}; output_file paths are ephemeral and never followed.
 def notifications:
-  _memo_users | user_entries | select(.class == "notification") | .text as $x
+  _memo_users
+  | [ (user_entries | select(.class == "notification") | {l, t, text}),
+      (entries[] | select(_queued_notification) | {l, t, text: (.e.attachment.prompt | _text)}) ]
+  | sort_by(.l)[] | .text as $x
   | {l, tool_use_id: ($x | _tag("tool-use-id")), task_id: ($x | _tag("task-id")), status: ($x | _tag("status")),
-     summary: ($x | _tag("summary")), result: ($x | _tag("result")), output_file: ($x | _tag("output-file")), ts: .t};
+     summary: ($x | _tag("summary")), result: ($x | _tag("result")), output_file: ($x | _tag("output-file")), ts: .t, text: $x};
 
 #: Agent and Task calls: {l, id, tool, description, subagent_type, name, prompt, background, agent_id, status, result_l, ts, notification}; agent_id comes from toolUseResult.agentId or agent_id, else the result text; notification is the s::notifications record linked by tool-use id, else by task id.
 def agent_calls:
@@ -582,8 +705,8 @@ def workflow_calls:
      script_path: ($r.scriptPath // ([$text | capture("Script file: (?<v>[^\n]+)")][0].v) // null),
      status: ($r.status // .status), result_l, ts, notification: _notification_for($notes; .id; $task)};
 
-#: Fork agents launched from this transcript (system entries with launchedAgentId): {l, agent_id}.
-def fork_launches: entries[] | select(.e.type == "system" and (.e.launchedAgentId | type) == "string") | {l, agent_id: .e.launchedAgentId};
+#: Fork agents launched from this transcript (system entries with launchedAgentId): {l, agent_id, ts}.
+def fork_launches: entries[] | select(.e.type == "system" and (.e.launchedAgentId | type) == "string") | {l, agent_id: .e.launchedAgentId, ts: .t};
 
 #: A fork agent's fork-context-ref line: {l, parent_session, parent_last_uuid}, else null.
 def fork_ref:
@@ -597,6 +720,16 @@ def journal:
   | ([$rows[] | select(.e.agentId == $agent and .e.type == "result")] | last) as $r
   | {agent_id: $agent, key: ($s.e.key // $r.e.key // null), label: ($s.e.label // null), phase: ($s.e.phase // null),
      started_l: ($s.l // null), result_l: ($r.l // null), result: ($r.e.result // null)};
+
+#: An agent transcript's kind, the first that applies: internal, teammate (meta taskKind names a teammate), fork (meta isFork or a fork-context-ref), flat, workflow-agent, agent; null for other transcripts.
+def agent_kind:
+  if (.kind | IN("subagent", "workflow-agent", "flat")) | not then null
+  elif is_internal then "internal"
+  elif (.meta.taskKind? // "") | tostring | test("teammate") then "teammate"
+  elif .meta.isFork? == true or fork_ref != null then "fork"
+  elif .kind == "flat" then "flat"
+  elif .kind == "workflow-agent" then "workflow-agent"
+  else "agent" end;
 
 #: An agent transcript's delegation prompt (its first from-parent entry): {l, text, ts}, else null.
 def delegation: first(user_entries | select(.class == "from-parent") | {l, text, ts: .t}) // null;

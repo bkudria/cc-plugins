@@ -78,21 +78,26 @@ EOF
                    an unknown or ambiguous reference exits 2 and lists candidates
 
 Options for every command:
-  --limit N        stop after N records (default: none, unless the command's --help names one; 0: none)
+  --limit N        stop after N records (default: none, or the command's own; 0: no limit)
   --max-chars N    stop stdout at a record boundary after N characters (default 20000; 0: no limit)
   --               end of options: later arguments are operands even when they start with -
   -h, --help       the command's help; help never reads transcripts
+Options most commands take, with one meaning (each command's --help lists its own):
+  --since T, --until T  from/to T, inclusive: a handle L<line>, a timestamp (2026-10-30T10:00:04Z,
+                   2026-10-30) or an age (30m, 2h, 7d); across sessions, T is a modified time
+  --full           text fields whole, instead of cut to the command's width
+  --agents         also read the session's sub-agent and workflow-agent transcripts (not internal)
 
 Output: one record per line, fields separated by TAB; TAB, newline and backslash inside a field are
 written \t, \n and \\; an empty field is "-"; no header (each command's --help names its fields).
-Per-session records start with a handle L<line> into the file named by the record's source field.
---since and --until take a handle, a timestamp or an age (30m, 2h, 7d). Timestamps are UTC,
-YYYY-MM-DDTHH:MM:SSZ. When output stops early, a notice on stderr says how many records were left
-out and how to continue. Notices and errors go to stderr, prefixed "cc-sessions:".
+Per-session records start with a handle L<line> into the transcript, or into the file named by
+the record's src field. Timestamps are UTC, YYYY-MM-DDTHH:MM:SSZ; a printed one passed to --since
+or --until selects the same record. When output stops early, a notice on stderr says how many
+records were left out and how to continue. Notices and errors go to stderr, prefixed "cc-sessions:".
 
-Exit status: 0 answered (an empty answer too, with a notice); 1 could not answer (unreadable file,
-missing dependency); 2 usage error (unknown command or option, bad value, unknown or ambiguous
-<session>). cc-sessions jq exits with jq's status.
+Exit status: 0 answered, also when empty (a notice says what was searched); 1 could not answer
+(unreadable file, missing dependency); 2 usage error (unknown command or option, bad value,
+unknown or ambiguous <session>). cc-sessions jq exits with jq's status.
 
 Environment: CLAUDE_CONFIG_DIR (transcripts are in $CLAUDE_CONFIG_DIR/projects; default ~/.claude),
 CLAUDE_CODE_SESSION_ID (the session called current).

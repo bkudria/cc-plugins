@@ -1,0 +1,160 @@
+#!/bin/bash
+# shellcheck source=../lib/common.sh
+. "${0%/*}/../lib/common.sh"
+
+agents_help() {
+  cat << 'EOF'
+Usage: cc-sessions agents <session> [--since T] [--until T] [--full]
+
+The sub-agents, teammates, forks and workflow runs a transcript started, where their transcripts
+are and what they returned. For a session, agent files that no call links to are listed last.
+
+Options:
+  --since T    rows from T on: a handle (L120), a timestamp, or an age (30m, 2h, 7d)
+  --until T    rows up to T, in the same forms
+  --full       whole label and result (default: label 80 characters, result 150)
+A bound applies to the starting call; rows without one count as after the last line, at the
+agent's first time.
+
+The first record is: dir  <absolute session directory>. Then one record per agent or run.
+Fields:
+  handle         L<line> of the Agent, Task or Workflow call, or of a fork's launch; - if none
+  kind           agent, teammate, fork, flat (older layout), workflow (a run), workflow-agent
+                 (after its run), internal (compaction, prompt suggestion, Warmup, transcripts fork)
+  id             agent id, or run id
+  type           agent type; for a run, the workflow name
+  status         completed, failed, killed, running, denied or unknown: from the journal, the run
+                 record, the notification, the call's result, else the transcript's end
+  model          models of its messages; for a run, its default model
+  output_tokens  output tokens of its transcript; for a run, the sum over its agents
+  label          description or name, else journal label, else delegation prompt
+  path           its transcript (a run: its directory), relative to dir when under it, else
+                 absolute; - when not found
+  result         the notification's result, else the journal's, else structured output, else
+                 the last text
+
+No default limit.
+Empty answer: nothing on stdout; on stderr
+"cc-sessions: no sub-agent or workflow calls in <transcript> and no agent files under <dir>".
+Exit status: 0 answered, also when empty; 1 a transcript cannot be read; 2 usage error
+(unknown option, bad value, unknown or ambiguous <session>).
+EOF
+}
+
+case ${1-} in
+  --synopsis)
+    printf '%s\n' 'agents <session>  sub-agents, teammates, forks and workflow runs: their transcripts, status and results'
+    exit 0
+    ;;
+  -h | --help)
+    agents_help
+    exit 0
+    ;;
+esac
+
+since=null until=null since_text='' until_text='' label_width=80 result_width=150 operands=()
+while [ $# -gt 0 ]; do
+  case $1 in
+    --since)
+      cc_need_value "$@"
+      since=$(cc_bound --since "$2") || exit
+      since_text=$2
+      shift
+      ;;
+    --until)
+      cc_need_value "$@"
+      until=$(cc_bound --until "$2") || exit
+      until_text=$2
+      shift
+      ;;
+    --full) label_width=0 result_width=0 ;;
+    --)
+      shift
+      operands+=("$@")
+      break
+      ;;
+    -*) cc_unknown_option "$1" --since --until --full ;;
+    *) operands+=("$1") ;;
+  esac
+  shift
+done
+
+cc_one_session ${#operands[@]}
+cc_resolve "${operands[0]}"
+subject=$CC_FILE subject_kind=$CC_KIND session_dir=$CC_SESSION_DIR
+
+documents=() agent_files=()
+
+agents_add() {
+  local list=$1 path=$2 seen
+  case $list in
+    documents) for seen in ${documents[@]+"${documents[@]}"}; do [ "$seen" = "$path" ] && return 0; done ;;
+    *) for seen in ${agent_files[@]+"${agent_files[@]}"}; do [ "$seen" = "$path" ] && return 0; done ;;
+  esac
+  [ "$path" = "$subject" ] && return 0
+  case $list in
+    documents) documents+=("$path") ;;
+    *) agent_files+=("$path") ;;
+  esac
+}
+
+agents_add_run_dir() {
+  local path
+  [ -f "$1/journal.jsonl" ] && agents_add documents "$1/journal.jsonl"
+  for path in "$1"/agent-*.jsonl; do
+    [ -f "$path" ] && agents_add agent_files "$path"
+  done
+  return 0
+}
+
+if [ "$subject_kind" = main ]; then
+  for path in "$session_dir"/subagents/workflows/*/journal.jsonl "$session_dir"/workflows/*.json; do
+    [ -f "$path" ] && agents_add documents "$path"
+  done
+  while IFS= read -r path; do
+    agents_add agent_files "$path"
+  done < <(cc_agent_files "$subject")
+fi
+
+# Journals and run records come before agent transcripts: an agent's label can come from its journal.
+agents_run() {
+  # shellcheck disable=SC2016 # the $ names are jq variables
+  cc_jq_program "$(cc_module_program agents 'main($since; $until; $label_width; $result_width; $final)')" -r \
+    --argjson since "$since" --argjson until "$until" --argjson label_width "$label_width" \
+    --argjson result_width "$result_width" --argjson final "$1" \
+    -- "$subject" ${documents[@]+"${documents[@]}"} ${agent_files[@]+"${agent_files[@]}"}
+}
+
+# Agents of a resumed copy, or of an agent transcript, live elsewhere: the first pass names the ids it
+# could not find among the session's files, and a second pass runs with those found.
+output=$(agents_run false) || cc_jq_failed $? "the agents of $subject"
+if [[ $output == need$'\t'* ]]; then
+  wanted=()
+  while IFS=$'\t' read -r _ what id; do
+    case $what in
+      agent) wanted+=("$id") ;;
+      run)
+        path=$(cc_run_dir "$session_dir" "$id") && agents_add_run_dir "$path"
+        path=$(cc_run_record "$session_dir" "$id") && agents_add documents "$path"
+        ;;
+    esac
+  done <<< "$output"
+  if [ ${#wanted[@]} -gt 0 ]; then
+    while IFS= read -r path; do
+      agents_add agent_files "$path"
+    done < <(cc_agent_transcripts "$session_dir" "${wanted[@]}")
+  fi
+  output=$(agents_run true) || cc_jq_failed $? "the agents of $subject"
+fi
+
+if [ -n "$output" ]; then
+  printf '%s\n' "$output"
+  exit 0
+fi
+bounds=${since_text:+ --since $since_text}${until_text:+ --until $until_text}
+if [ "$subject_kind" = main ]; then
+  cc_notice "no sub-agent or workflow calls in $subject and no agent files under $session_dir${bounds:+ with$bounds}"
+else
+  cc_notice "no sub-agent or workflow calls in $subject${bounds:+ with$bounds}"
+fi
+exit 0
