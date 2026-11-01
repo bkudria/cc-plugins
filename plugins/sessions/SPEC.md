@@ -18,8 +18,8 @@ newer version writes.
 | `lib/file-separator` | The line `cc_jq_program` writes after each file when it hands jq every file as one text |
 | `tests/` | scrut tests and the synthetic fixture tree they run against |
 
-Requirements: bash 3.2 or later, jq 1.7 or later, ripgrep (for `list`, `search`, and finding the sessions of a session's
-split-pane teammates), BSD `find`/`stat` (macOS).
+Requirements: bash 3.2 or later, jq 1.7 or later, ripgrep (for `list`, `search`, and finding a session's agents that
+sit elsewhere and the sessions of its split-pane teammates), BSD `find`/`stat` (macOS).
 All shell code runs under `/bin/bash` 3.2: no associative arrays, `mapfile`, `${var,,}` or `declare -n`.
 
 ## Files
@@ -76,8 +76,8 @@ Every `<session>` argument accepts, in this order:
 - Claude Code 2.0.50 through 2.1.56 often wrote a message's last entry before its output was counted, so that no entry
   holds the final `output_tokens`. Of messages of 2,000 characters or more, the last entry counts fewer than 10 output
   tokens in none before 2.0.50, 35% from 2.0.50 to 2.1.9, 97% from 2.1.12 to 2.1.29, 43% from 2.1.30 to 2.1.56 and
-  0.1% after. Output token figures from those versions are lower bounds; `agents` says so in a stderr notice when a
-  row shown draws on them.
+  0.1% after. Output token figures from those versions are lower bounds; `overview`, `conversation --tokens` and
+  `agents` say so in a stderr notice when a figure they show draws on such messages.
 - Messages whose model is `<synthetic>` are harness-generated, carry zero usage, and are left out of model lists.
 - A session's token totals cover its main transcript. Sub-agent totals are reported per agent; a roll-up skips internal
   agents and counts each `message.id` once. Context size per message is input + cache creation + cache read.
@@ -91,20 +91,31 @@ After de-duplication, an entry is human input when it is one of:
    `origin.kind` of `human` or none; and whose text does not start with `<local-command-stdout>`, `<local-command-stderr>`,
    `<bash-stdout>`, `<bash-stderr>`, `[Request interrupted by user`, `<task-notification>`, `<bash-notification>`,
    `<agent-notification>`, `Another Claude session sent a message`, `<teammate-message`, `<agent-message`, `[Usage limit`,
-   `<local-command-caveat>` or `Caveat:`.
-   Its kind is `slash` for `<command-name>/…`. A plain `/x …` entry and the next `<command-name>/x` entry are one input,
-   recorded at the `<command-name>` entry's line; non-user entries and user entries that are `isMeta`, `isCompactSummary`
-   or `isVisibleInTranscriptOnly` can sit between them. The kind is `bash` for `<bash-input>`, `sdk` when `promptSource`
-   is `sdk` or `system`, and `prompt` otherwise.
-2. A `system` entry of subtype `local_command` containing `<command-name>` (kind `slash`).
+   `<local-command-caveat>` or `Caveat:`, nor with a `<command-name>` element (a `<command-message>` element may come
+   first) whose name lacks the leading `/` (a harness command, `injected`).
+   Its kind is `slash` when the text starts with such an element naming `/…`; text that only mentions the tag is a
+   `prompt`. A plain `/x …` entry and the next `<command-name>/x` entry are one input, recorded at the `<command-name>`
+   entry's line; non-user entries and user entries that are `isMeta`, `isCompactSummary` or `isVisibleInTranscriptOnly`
+   can sit between them. The kind is `bash` for `<bash-input>`, `sdk` when `promptSource` is `sdk` or `system`, and
+   `prompt` otherwise.
+2. A `system` entry of subtype `local_command` whose content starts with `<command-name>` (kind `slash`).
 3. An `attachment` of type `queued_command` with `commandMode` `prompt`, origin `human` or none, not an `<agent-message`,
-   whose text appears in no user entry (kind `queued`; a `prompt` array is joined from its text blocks).
-4. A `queue-operation` enqueue whose plain text appears nowhere else (kind `queued`).
+   whose text appears in no user entry and is not a slash command run later (kind `queued`; a `prompt` array is joined
+   from its text blocks).
+4. A `queue-operation` enqueue whose plain text appears nowhere else (kind `queued`): not as the text blocks of a user
+   entry (an image beside them does not count), in a `queued_command`, or as the name and arguments of a slash command
+   run later. An enqueue is not input when the next queue operation holding its text is a `popAll`, which puts the text
+   back into the prompt: what the user sends after that is recorded where it appears.
 5. An AskUserQuestion answer (kind `answer`: the question and the chosen labels or typed text), a tool rejection (kind
-   `denied`, with the user's feedback when there is any), and an ExitPlanMode decision (kind `plan`).
+   `denied`: the result starts `The user doesn't want to proceed with this tool use`; with the user's feedback when
+   there is any), and an ExitPlanMode decision (kind `plan`): `approved` when the result starts `User has approved`,
+   `rejected` when a rejected call is ExitPlanMode. Denials and approvals are read from the result line alone, as the
+   call can sit in an earlier session, and then name no tool; a rejection is a plan decision only beside its
+   ExitPlanMode call. An ExitPlanMode result that is a tool error is no decision.
 
 Related events that are not input: `interrupt` (`[Request interrupted by user…`), `output` (a slash or `!` command's
-stdout/stderr, attached to its command), and images, shown as `[image]` inside the input that carried them.
+stdout/stderr, in a user entry or a `system` `local_command` entry, attached to its command), and images, shown as
+`[image]` inside the input that carried them.
 
 Other user entries: tool results; `injected` (isMeta text: skill bodies, caveats, scheduled and auto-continuation prompts);
 `summary` (compaction summaries); `notification` (`<task-notification>` and similar); `peer` (messages from other sessions
@@ -216,25 +227,33 @@ lists.
 ## Tool calls and persisted outputs
 
 A tool call's status is `ok`, `error` (its result is marked `is_error` and is not a rejection), `denied` (the user
-rejected it: the result starts `The user doesn't want to proceed with this tool use`) or `none` (no result recorded). A
-denial is the user's choice, never counted as an error.
+rejected it: the result starts `The user doesn't want to proceed with this tool use`) or `none` (no result recorded);
+`tools` prints an ok result that is persisted (below) as `persisted`. A denial is the user's choice, never counted as an
+error.
+
+The status is the call's own outcome. An Agent, Task or Workflow call's result in `tools` names the agent or run it
+started and that one's status by `s::lifecycle_status`, the rule `agents` uses (see Sub-agents): the agent is linked by
+its id, its meta's `toolUseId`, or a teammate's team and name, and only its last lines are read for the transcript's
+end. An agent killed or failed after its call returned is therefore not an error of the call.
 
 A tool result is persisted only when its text **starts** with:
 
     <persisted-output>\nOutput too large (<n><B|KB|MB>). Full output saved to: <path>\n\nPreview (first <n><B|KB|MB>):\n
 
-A tool result's size is the length of its text in characters, text blocks joined by newlines. A persisted result's real
-size is the saved file's size on disk, in bytes, and is what commands print (`<n>B`) and rank by. When `<path>` does not
-exist, the file of the same name under the owning session's `tool-results/` is used; when neither exists, the size the
-marker states. Text that quotes the marker mid-result is not a persisted output.
+A tool result's size is the length of its text in characters, text blocks joined by newlines; an image block adds
+nothing, though the text shows it as `[image]`. A persisted result's real size is the saved file's size on disk, in
+bytes, and is what commands print (`<n>B`), sum and rank by. When `<path>` does not exist, the file of the same name
+under the owning session's `tool-results/` is used; when neither exists, the size the marker states. Text that quotes
+the marker mid-result is not a persisted output.
 
 ## Labels and origin
 
 - Session label: the last `custom-title`; else the last `ai-title` that contains a space (single-token titles are plan
-  slugs); else `agent-name`; else a legacy `summary`; else the first human input. Every command shows it on one line,
-  whitespace runs as one space, cut at 100 characters unless `--full`.
+  slugs); else `agent-name`; else a legacy `summary`; else the first human input of kind `prompt`, `slash`, `bash`,
+  `sdk` or `queued` (a decision on a call from an earlier session can come before it). Every command shows it on one
+  line, whitespace runs as one space, cut at 100 characters unless `--full`.
 - A listing's pattern matches the session id, every title entry (`custom-title`, `ai-title`, `agent-name`, `summary`)
-  and the first human input. `--cwd PATH` matches any cwd of the transcript equal to PATH or under it; PATH is made
+  and that first input. `--cwd PATH` matches any cwd of the transcript equal to PATH or under it; PATH is made
   absolute but not resolved through links.
 - Sub-agent label: its `.meta.json` `description` or `name`, else its journal label, else its delegation prompt, truncated.
 - Origin: `sdk` when `entrypoint` starts with `sdk` or a prompt's `promptSource` is `sdk`; otherwise the `entrypoint`
@@ -245,8 +264,9 @@ marker states. Text that quotes the marker mid-result is not a persisted output.
 
 ## Output
 
-- One record per line; fields separated by a tab; tabs, newlines and backslashes inside a field escaped as `\t`, `\n` and
-  `\\`; an empty field printed as `-`. No header line. Each command's `--help` names its fields in order.
+- One record per line; fields separated by a tab; tabs, newlines, carriage returns and backslashes inside a field
+  escaped as `\t`, `\n`, `\r` and `\\`, and every other control character (U+0000 to U+001F) and DEL as `\u00XX`
+  (lowercase hex); an empty field printed as `-`. No header line. Each command's `--help` names its fields in order.
 - Per-session records start with a handle: `L<line>` within the transcript, or within the file named by the record's
   `src` field. `entry` accepts
   a handle, a `uuid`, a `toolu_…` id or a `msg_…` id. `--since`/`--until` accept a handle, a timestamp, or a relative

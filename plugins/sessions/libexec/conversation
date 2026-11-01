@@ -35,6 +35,8 @@ Fields:
   text    cut at 600 characters for assistant records and 200 for others, unless --full
 With --tokens, five more fields, set on assistant records and - on others:
   input  cache_read  cache_creation  output  context (input + cache creation + cache read)
+A stderr notice says when output counts shown come from Claude Code 2.0.50 to 2.1.56, which often
+did not record a message's final count: they are lower bounds there.
 No default limit.
 
 Empty answer: nothing on stdout; on stderr "cc-sessions: no conversation records in <file>[ with
@@ -101,10 +103,8 @@ cc_resolve "${operands[0]}"
 files=("$CC_FILE")
 what=$CC_FILE
 if [ $agents -eq 1 ] && [ "$CC_KIND" = main ]; then
-  while IFS= read -r path; do
-    for seen in "${files[@]}"; do [ "$seen" = "$path" ] && continue 2; done
-    files+=("$path")
-  done < <(cc_session_agent_files "$CC_FILE")
+  cc_lines "$(cc_session_agent_files "$CC_FILE" | awk -v self="$CC_FILE" 'NF && $0 != self && !seen[$0]++')"
+  files+=(${CC_LINES[@]+"${CC_LINES[@]}"})
   [ ${#files[@]} -gt 1 ] && what+=" and its agent transcripts"
 fi
 

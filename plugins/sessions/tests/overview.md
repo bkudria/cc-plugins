@@ -52,6 +52,7 @@ checked
 ## A current-era session
 
 ALPHA: every fact from FACTS.md. `errors` counts calls with status error (L31, L33); the denied Edit (L29) is not one.
+The Bash results sum to 3553: 96 and 55 characters, and the 3402 bytes of the persisted output's saved file.
 
 ```scrut
 $ cc-sessions overview a7c3e9f | cc_test_rel
@@ -72,7 +73,7 @@ messages\t17\tsynthetic=1 (escaped)
 tokens\t22\t22930\t257200\t1487 (escaped)
 peak_context\t21731\tL34 (escaped)
 cost\tL83\t0.4321\tclaude-opus-5-5=21/22930/245300/1487\tclaude-haiku-5-5=12/6000/9000/230 (escaped)
-tool\tBash\t3\t2428\t1 (escaped)
+tool\tBash\t3\t3553\t1 (escaped)
 tool\tSkill\t3\t110\t1 (escaped)
 tool\tAgent\t2\t577\t0 (escaped)
 tool\tAskUserQuestion\t1\t153\t0 (escaped)
@@ -102,6 +103,15 @@ Nothing goes to stderr for a clean transcript.
 
 ```scrut {output_stream: stderr}
 $ cc-sessions overview a7c3e9f > /dev/null
+```
+
+Claude Code 2.0.50 through 2.1.56 often wrote a message's last entry before its output was counted; a notice says so
+when the session holds messages from those versions (FLAT is 2.0.76, ECHO and its agents 2.0.65).
+
+```scrut {output_stream: stderr}
+$ cc-sessions overview c4e6 > /dev/null; cc-sessions overview e2c4 --agents > /dev/null
+cc-sessions: output tokens are lower bounds for messages written by Claude Code 2.0.76: versions 2.0.50 through 2.1.56 often did not record a message's final output count
+cc-sessions: output tokens are lower bounds for messages written by Claude Code 2.0.65: versions 2.0.50 through 2.1.56 often did not record a message's final output count
 ```
 
 ## --agents
@@ -282,10 +292,44 @@ $ cc-sessions overview e5a7 | grep -E '^(cwd|label|tool|largest|persisted)\t' | 
 cwd\t/tmp/sessions-fixture/reloc\tL1 (escaped)
 cwd\t/tmp/sessions-fixture/elsewhere\tL4 (escaped)
 label\tShow the release notes\tai-title\tL2 (escaped)
-tool\tBash\t2\t2399\t0 (escaped)
+tool\tBash\t2\t2656\t0 (escaped)
 largest\tL5\tBash\t2502B\t<root>/projects/-tmp-sessions-fixture-reloc/e5a7c9b1-3d5f-4b7d-8f9a-0c1e2a3b4c5d/tool-results/c8n2v5x1q.txt (escaped)
 largest\tL7\tBash\t154\t- (escaped)
 persisted\t1 (escaped)
+```
+
+Without the saved file, a persisted result counts the size its marker states: 2.4KB is 2458 bytes.
+
+```scrut
+$ mkdir -p "$CC_TEST_TMP/alone" && cp "$RELOC.jsonl" "$CC_TEST_TMP/alone/"
+> cc-sessions overview "$CC_TEST_TMP/alone/e5a7c9b1-3d5f-4b7d-8f9a-0c1e2a3b4c5d.jsonl" | grep -E '^(tool|largest)\t'
+tool\tBash\t2\t2612\t0 (escaped)
+largest\tL5\tBash\t2.4KB\t/tmp/sessions-fixture/config/projects/-tmp-sessions-fixture-elsewhere/e5a7c9b1-3d5f-4b7d-8f9a-0c1e2a3b4c5d/tool-results/c8n2v5x1q.txt (escaped)
+largest\tL7\tBash\t154\t- (escaped)
+```
+
+FOXTROT: the label is the first human input that is not a decision, so the denial at L2 is counted but is not the
+label. The ExitPlanMode error (L11) is no plan decision, and the commands and text queued while Claude was busy are not
+counted again. A result's size counts its text only (the Read result at L35 is one image), and the Workflow call that
+failed (L39) started no run.
+
+```scrut
+$ cc-sessions overview f0d2 | grep -E '^(label|prompts|tool|largest|workflows|errors)\t'
+label\tSort the fixtures by era, then reload the skills.\tprompt\tL3 (escaped)
+prompts\t10\tprompt=4\tslash=3\tqueued=1\tdenied=1\tplan=1 (escaped)
+tool\tExitPlanMode\t2\t163\t1 (escaped)
+tool\tAgent\t1\t264\t0 (escaped)
+tool\tBash\t1\t22\t0 (escaped)
+tool\tRead\t1\t0\t0 (escaped)
+tool\tWorkflow\t1\t69\t1 (escaped)
+tool\tmcp__demo__click\t1\t19\t0 (escaped)
+largest\tL41\tAgent\t264\t- (escaped)
+largest\tL11\tExitPlanMode\t106\t- (escaped)
+largest\tL39\tWorkflow\t69\t- (escaped)
+largest\tL13\tExitPlanMode\t57\t- (escaped)
+largest\tL33\tBash\t22\t- (escaped)
+workflows\t0 (escaped)
+errors\t2 (escaped)
 ```
 
 SDK: the origin and the prompt kind.
@@ -379,11 +423,11 @@ project\t-tmp-sessions-fixture-flat (escaped)
 
 ## --since and --until
 
-A handle window counts only ALPHA's lines L59–L65; identity facts still describe the whole file. A handle bound applies to each file's own lines, so no agent transcript (each under ten lines) has entries in it.
+A handle window counts only ALPHA's lines L59–L65; identity facts, path to origin, still describe the whole file. A handle bound applies to each file's own lines, so no agent transcript (each under ten lines) has entries in it.
 
 ```scrut
 $ cc-sessions overview a7c3e9f --since L59 --until L65 | sed -n '/^cwd/,$p'
-cwd\t/tmp/sessions-fixture/alpha\tL59 (escaped)
+cwd\t/tmp/sessions-fixture/alpha\tL3 (escaped)
 label\talpha fixture session\tcustom-title\tL79 (escaped)
 origin\tcli (escaped)
 versions\t2.1.314 (escaped)
@@ -407,6 +451,14 @@ api_errors\t0 (escaped)
 persisted\t0 (escaped)
 skipped_lines\t0 (escaped)
 duplicate_entries\t0 (escaped)
+```
+
+So RELOC lists both of its working directories inside a window that holds only the second.
+
+```scrut
+$ cc-sessions overview e5a7 --since L4 | grep '^cwd'
+cwd\t/tmp/sessions-fixture/reloc\tL1 (escaped)
+cwd\t/tmp/sessions-fixture/elsewhere\tL4 (escaped)
 ```
 
 A time window applies to every transcript: 10:21–10:25 holds ALPHA L66–L70 and three agents.

@@ -1,9 +1,9 @@
 import "sessions" as s;
 
 # One-line descriptions of a tool call, shared by tools and conversation so both describe a call the
-# same way. Input: a record of s::tool_calls, optionally with agent_call (from s::agent_calls),
-# workflow_call (from s::workflow_calls) and answer (the s::human_inputs answer text). A width of 0
-# keeps text whole.
+# same way. Input: a record of s::tool_calls, optionally with started ({id, status}: the agent or run
+# that an Agent, Task or Workflow call started and its status, which tools computes) and answer (the
+# s::human_inputs answer text). A width of 0 keeps text whole.
 
 def _fit($w; $tail):
   (if $w > 0 then s::trunc([$w - ($tail | length), 1] | max) else . end) + $tail;
@@ -20,13 +20,15 @@ def _chars: if type == "string" then length else 0 end;
 
 def _first_line: tostring | split("\n") | map(select(test("\\S"))) | first // "";
 
+def _background: .run_in_background | . == true or . == "true";
+
 def _compact: if type == "string" then (try (fromjson | tojson) catch .) else tojson end;
 
 def _bash:
   (.command | tostring | sub("\\s+$"; "") | split("\n")) as $lines
   | {main: $lines[0],
      tail: ([(if ($lines | length) > 1 then "+\(($lines | length) - 1) lines" else null end),
-             (if .run_in_background == true then "bg" else null end),
+             (if _background then "bg" else null end),
              (if .timeout != null then "timeout=\(.timeout | _ms)" else null end)] | _flags)};
 
 def _read:
@@ -54,7 +56,7 @@ def _questions:
 def _agent:
   {main: ([(.subagent_type // empty), (.description | strings | "\"\(.)\"")] | join(" ")),
    tail: ([(if .name then "name=\(.name)" else null end), (if .model then "model=\(.model)" else null end),
-           (if .resume then "resume=\(.resume)" else null end), (if .run_in_background == true then "bg" else null end)] | _flags)};
+           (if .resume then "resume=\(.resume)" else null end), (if _background then "bg" else null end)] | _flags)};
 
 def _workflow:
   {main: ([(.name // .scriptPath), (if .args != null then .args | _compact else empty end)] | join(" ")), tail: ""};
@@ -101,10 +103,7 @@ def size:
 def result($w):
   if .status == "none" then null
   elif .name == "AskUserQuestion" and .answer != null then .answer | s::trunc($w)
-  elif (.name == "Agent" or .name == "Task") and .agent_call.agent_id != null then
-    "\(.agent_call.agent_id) \(.agent_call.notification.status // .agent_call.status // "unknown")"
-  elif .name == "Workflow" and .workflow_call.run_id != null then
-    "\(.workflow_call.run_id) \(.workflow_call.notification.status // .workflow_call.status // "unknown")"
+  elif (.name | IN("Agent", "Task", "Workflow")) and .started != null then "\(.started.id) \(.started.status)"
   elif .status == "denied" and .feedback != null then .feedback | s::trunc($w)
   elif .persisted != null then .persisted.path // .persisted.stated_path
   else .text | s::trunc($w) end;

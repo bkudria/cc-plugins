@@ -423,7 +423,7 @@ $ SYM=$CC_TEST_TMP/symcfg && mkdir -p "$SYM" && ln -s "$P" "$SYM/projects"
 > CLAUDE_CONFIG_DIR=$SYM cc-sessions search CONTENT_TERM_ALPHA | cut -f 1
 > CLAUDE_CONFIG_DIR=$SYM cc-sessions schema --since 100000d 2>/dev/null | grep -c '^files'
 <root>/projects/-tmp-sessions-fixture-alpha/a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e.jsonl
-11
+12
 a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e
 a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e
 9
@@ -435,8 +435,8 @@ A relative `CLAUDE_CONFIG_DIR` is made absolute, even one whose name starts with
 $ mkdir -p "$CC_TEST_TMP/-cfg" && cp -Rp "$CLAUDE_CONFIG_DIR/." "$CC_TEST_TMP/-cfg/"
 > (cd "$HOME" && CLAUDE_CONFIG_DIR=.claude cc-sessions list no-session-has-this 2>&1) | cc_test_rel "$HOME"
 > (cd "$CC_TEST_TMP" && CLAUDE_CONFIG_DIR=-cfg cc-sessions list --origin all) | wc -l | tr -d ' '
-cc-sessions: no sessions match "no-session-has-this" with --origin cli; 12 sessions checked in <root>/.claude/projects
-11
+cc-sessions: no sessions match "no-session-has-this" with --origin cli; 13 sessions checked in <root>/.claude/projects
+12
 ```
 
 A missing data root means the command could not answer: exit 1.
@@ -932,7 +932,7 @@ $ PATH="$JQ17:$PATH" cc-sessions overview a7c3e9f --until 1s | grep -c '^tokens'
 > PATH="$JQ17:$PATH" cc-sessions list --since 100000d | wc -l | tr -d ' '; PATH="$JQ17:$PATH" cc-sessions prompts a7c3e9f --until 1s | wc -l | tr -d ' '
 1
 entry\tL4 (escaped)
-10
+11
 18
 ```
 

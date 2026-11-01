@@ -1,7 +1,7 @@
 import "sessions" as s;
 
 def _text:
-  if .kind == "denied" then .tool + (if (.text // "") != "" then ": " + .text else "" end)
+  if .kind == "denied" then [.tool, .text] | map(select(. != null and . != "")) | join(": ")
   else .text end;
 
 # Outputs sit right after their command in file order, so sorting by line keeps each one behind it.

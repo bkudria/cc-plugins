@@ -21,7 +21,7 @@ def _marker($bodies; $triggers):
     elif .class == "summary" then "[compaction summary \($x | length) chars]"
     else $x end;
 
-def _messages($o; $time):
+def _messages($o; $time; $versions):
   select(.synthetic | not)
   | [.blocks[] | select(.block.type == "text" and ((.block.text // "") | length) > 0)] as $texts
   | (if $o.thinking then
@@ -31,7 +31,7 @@ def _messages($o; $time):
     (if ($texts | length) > 0 or $o.tokens then
        ($texts[0].l // .l) as $l
        | _record($l; 1; $time["\($l)"]; "assistant"; ($texts | map(.block.text) | join("\n")))
-         + {tokens: [.usage.input, .usage.cache_read, .usage.cache_creation, .usage.output, .context]}
+         + {tokens: [.usage.input, .usage.cache_read, .usage.cache_creation, .usage.output, .context], version: $versions["\(.lines[-1])"]}
      else empty end);
 
 def _seconds: (. / 100 | round) / 10;
@@ -91,6 +91,7 @@ def _records($o; $fi):
   | r::src($fi) as $src
   | .lines as $lines
   | (reduce s::entries[] as $r ({}; .["\($r.l)"] = $r.t)) as $time
+  | (if $o.tokens then reduce (s::entries[] | select(.e.type == "assistant")) as $r ({}; .["\($r.l)"] = $r.e.version) else {} end) as $versions
   | [s::skill_events] as $skills
   | ($skills | map(select(.body_l != null)) | INDEX(.body_l)) as $bodies
   | ($skills | map(select(.event == "load" and .body_l != null and .body_l != .l)) | INDEX(.l)) as $triggers
@@ -100,7 +101,7 @@ def _records($o; $fi):
       (s::user_entries | select(.class | IN("injected", "summary", "peer", "from-parent"))
         | _record(.l; 0; .t; .class; _marker($bodies; $triggers))),
       (s::notifications | _record(.l; 0; .ts; "notification"; _notification_marker)),
-      (s::messages | _messages($o; $time)),
+      (s::messages | _messages($o; $time; $versions)),
       (s::tool_calls | _record(.l; 2; .ts; "tool"; r::call($o.width))),
       (if $o.events then _events else empty end) ]
   | map(select(s::within($o.since; $o.until)) + {src: $src, fi: $fi})
@@ -129,4 +130,8 @@ def main($o):
     else . end
   | map(.records) | r::by_time | _around($o)
   | if length == 0 then ("cc-sessions: no conversation records in \($o.what)\($o.filters)\n" | stderr | empty)
-    else .[] | _row($o) end;
+    else
+      (if $o.tokens then [.[] | .version | select(s::partial_output_version)] | s::lower_bound_notice | "\(.)\n" | stderr | empty
+       else empty end),
+      (.[] | _row($o))
+    end;

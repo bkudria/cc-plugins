@@ -46,6 +46,7 @@ c4e6a8b0-2d4f-4a6c-9e8a-0b2c4d6e8f1a\t2026-01-03T12:00:00Z\t5.8K\tcli\t-\t/tmp/s
 e2c4a6b8-0d2f-4b4d-8e6f-1a3b5c7d9e0f\t2025-12-08T09:06:00Z\t15K\tcli\t-\t/tmp/sessions-fixture/echo\tExplore the schema code and the state updates in the background. (escaped)
 d5e7f9a1-3b5c-4d7e-9f1a-2b4c6d8e0f13\t2025-12-06T10:06:00Z\t17K\tcli\t-\t/tmp/sessions-fixture/delta\tRun the audit workflow, then check the log and bring in a reviewer. (escaped)
 f3a5c7e9-1b3d-4f5a-8c7e-9a1b3c5d7e9f\t2025-12-06T10:01:02Z\t3.3K\tcli\t-\t/tmp/sessions-fixture/delta\t- (escaped)
+f0d2b4c6-8e0a-4b2c-9d4e-6f8a0b2c4d6e\t2025-11-20T12:00:00Z\t23K\tcli\t-\t/tmp/sessions-fixture/foxtrot\tSort the fixtures by era, then reload the skills. (escaped)
 ```
 
 `size` is the main transcript's size: bytes below 1K, one decimal below 10 of a unit, whole units above.
@@ -65,7 +66,7 @@ $ touch -t 202610311200.00 "$ALPHA/subagents/agent-a7c3e9b2d4f6a8c01.jsonl" && c
 2026-10-30T11:30:00Z
 ```
 
-The label follows the SPEC order: a later custom title wins (ALPHA), a single-token ai-title is skipped for the agent name (GAMMA), a legacy summary labels FLAT, and the first human input labels BETA and RESUMED.
+The label follows the SPEC order: a later custom title wins (ALPHA), a single-token ai-title is skipped for the agent name (GAMMA), a legacy summary labels FLAT, and the first human input labels BETA and RESUMED; FOXTROT's begins with a denial, which is never the label.
 
 ```scrut
 $ cc-sessions list | cut -f 7
@@ -79,6 +80,7 @@ Flat era config loader search
 Explore the schema code and the state updates in the background.
 Run the audit workflow, then check the log and bring in a reviewer.
 -
+Sort the fixtures by era, then reload the skills.
 ```
 
 `mark` is `*` for the current session.
@@ -114,13 +116,14 @@ c4e6a8b0-2d4f-4a6c-9e8a-0b2c4d6e8f1a\tcli (escaped)
 e2c4a6b8-0d2f-4b4d-8e6f-1a3b5c7d9e0f\tcli (escaped)
 d5e7f9a1-3b5c-4d7e-9f1a-2b4c6d8e0f13\tcli (escaped)
 f3a5c7e9-1b3d-4f5a-8c7e-9a1b3c5d7e9f\tcli (escaped)
+f0d2b4c6-8e0a-4b2c-9d4e-6f8a0b2c4d6e\tcli (escaped)
 ```
 
 Another origin name selects sessions with that entrypoint; here there are none.
 
 ```scrut
 $ cc-sessions list --origin claude-vscode 2>&1 | cc_test_rel
-cc-sessions: no sessions with --origin claude-vscode; 12 sessions checked in <root>/projects
+cc-sessions: no sessions with --origin claude-vscode; 13 sessions checked in <root>/projects
 ```
 
 A malformed origin is a usage error.
@@ -162,8 +165,8 @@ A later human input does not match, and neither does an assistant reply.
 
 ```scrut
 $ cc-sessions list 'wrap up' 2>&1 | cc_test_rel; cc-sessions list 'forty fixes' 2>&1 | cc_test_rel
-cc-sessions: no sessions match "wrap up" with --origin cli; 12 sessions checked in <root>/projects
-cc-sessions: no sessions match "forty fixes" with --origin cli; 12 sessions checked in <root>/projects
+cc-sessions: no sessions match "wrap up" with --origin cli; 13 sessions checked in <root>/projects
+cc-sessions: no sessions match "forty fixes" with --origin cli; 13 sessions checked in <root>/projects
 ```
 
 It matches the session id.
@@ -187,14 +190,14 @@ The pattern is literal: `.` is not a wildcard.
 
 ```scrut
 $ cc-sessions list 'alpha.fixture' 2>&1 | cc_test_rel
-cc-sessions: no sessions match "alpha.fixture" with --origin cli; 12 sessions checked in <root>/projects
+cc-sessions: no sessions match "alpha.fixture" with --origin cli; 13 sessions checked in <root>/projects
 ```
 
 A stub's title never makes it a row.
 
 ```scrut
 $ cc-sessions list 'Stub session title' --origin all 2>&1 | cc_test_rel
-cc-sessions: no sessions match "Stub session title" with --origin all; 12 sessions checked in <root>/projects
+cc-sessions: no sessions match "Stub session title" with --origin all; 13 sessions checked in <root>/projects
 ```
 
 A pattern that starts with `-` goes after `--`.
@@ -240,9 +243,9 @@ A failed Skill call, a skill that is only listed, and a slash command without a 
 
 ```scrut
 $ cc-sessions list --skill nope 2>&1 | cc_test_rel; cc-sessions list --skill gamma-helper 2>&1 | cc_test_rel; cc-sessions list --skill effort 2>&1 | cc_test_rel
-cc-sessions: no sessions with --skill nope --origin cli; 12 sessions checked in <root>/projects
-cc-sessions: no sessions with --skill gamma-helper --origin cli; 12 sessions checked in <root>/projects
-cc-sessions: no sessions with --skill effort --origin cli; 12 sessions checked in <root>/projects
+cc-sessions: no sessions with --skill nope --origin cli; 13 sessions checked in <root>/projects
+cc-sessions: no sessions with --skill gamma-helper --origin cli; 13 sessions checked in <root>/projects
+cc-sessions: no sessions with --skill effort --origin cli; 13 sessions checked in <root>/projects
 ```
 
 `SKILLS` is a copy of the fixtures where BETA has one sub-agent that loads `beta-helper` and an internal compaction agent that loads `beta-helper` and `hidden-helper`.
@@ -272,7 +275,7 @@ b2d4f6a8-1c3e-4a5b-8d7f-9e0a1b2c3d4e\tbeta-helper tool +1 agents (escaped)
 
 ```scrut
 $ CLAUDE_CONFIG_DIR=$SKILLS cc-sessions list --skill hidden-helper 2>&1 | cc_test_rel "$SKILLS"
-cc-sessions: no sessions with --skill hidden-helper --origin cli; 12 sessions checked in <root>/projects
+cc-sessions: no sessions with --skill hidden-helper --origin cli; 13 sessions checked in <root>/projects
 ```
 
 A data root without any agent transcript still finds main-transcript loads.
@@ -303,7 +306,7 @@ f6b8d0e2-4a6c-4e8a-b0c2-d4e6f8a0b2c4\tList the files with spaces in their names.
 
 ```scrut
 $ cc-sessions list --cwd /tmp/sessions-fixture/bet 2>&1 | cc_test_rel
-cc-sessions: no sessions with --cwd /tmp/sessions-fixture/bet --origin cli; 12 sessions checked in <root>/projects
+cc-sessions: no sessions with --cwd /tmp/sessions-fixture/bet --origin cli; 13 sessions checked in <root>/projects
 ```
 
 Any cwd of the transcript counts: RELOC moved to `elsewhere` mid-session; its `cwd` field is still the first one.
@@ -345,7 +348,7 @@ An age counts back from now.
 
 ```scrut
 $ cc-sessions list --since 100000d | wc -l | tr -d ' '; cc-sessions list --since 0s 2>/dev/null | wc -l | tr -d ' '
-10
+11
 0
 ```
 
@@ -379,9 +382,9 @@ cc-sessions: output stopped at --limit 3 after 3 sessions; older sessions were n
 No notice when exactly the limit qualifies; `--limit 0` lists everything.
 
 ```scrut {output_stream: combined}
-$ cc-sessions list --limit 10 2>&1 | wc -l | tr -d ' '; cc-sessions list --limit 0 2>&1 | wc -l | tr -d ' '
-10
-10
+$ cc-sessions list --limit 11 2>&1 | wc -l | tr -d ' '; cc-sessions list --limit 0 2>&1 | wc -l | tr -d ' '
+11
+11
 ```
 
 `--max-chars` works the same way: listing stops at the last whole row that fits, and says where to continue.

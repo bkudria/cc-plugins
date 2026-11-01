@@ -30,6 +30,7 @@ entry of each `message.id`; context = input + cache creation + cache read.
 | `DELTA` | `projects/-tmp-sessions-fixture-delta/d5e7f9a1-3b5c-4d7e-9f1a-2b4c6d8e0f13` |
 | `MATE` | `projects/-tmp-sessions-fixture-delta/f3a5c7e9-1b3d-4f5a-8c7e-9a1b3c5d7e9f` |
 | `ECHO` | `projects/-tmp-sessions-fixture-echo/e2c4a6b8-0d2f-4b4d-8e6f-1a3b5c7d9e0f` |
+| `FOXTROT` | `projects/-tmp-sessions-fixture-foxtrot/f0d2b4c6-8e0a-4b2c-9d4e-6f8a0b2c4d6e` |
 
 `X.jsonl` is the main transcript; `X/` is its session directory.
 
@@ -49,8 +50,9 @@ entry of each `message.id`; context = input + cache creation + cache read.
 | ECHO | `e2c4a6b8-0d2f-4b4d-8e6f-1a3b5c7d9e0f` | 19 | `/tmp/sessions-fixture/echo` | 2.0.65 | cli (no entrypoint) | `Explore the schema code and the state updates in the background.` (first human input L1) | yes | 2025-12-08 09:06:00 |
 | DELTA | `d5e7f9a1-3b5c-4d7e-9f1a-2b4c6d8e0f13` | 18 | `/tmp/sessions-fixture/delta` | 2.1.220 | cli | `Run the audit workflow, then check the log and bring in a reviewer.` (first human input L1) | yes | 2025-12-06 10:06:00 |
 | MATE | `f3a5c7e9-1b3d-4f5a-8c7e-9a1b3c5d7e9f` | 6 | `/tmp/sessions-fixture/delta` | 2.1.220 | cli | none (no title and no human input) | yes | 2025-12-06 10:01:02 |
+| FOXTROT | `f0d2b4c6-8e0a-4b2c-9d4e-6f8a0b2c4d6e` | 43 | `/tmp/sessions-fixture/foxtrot` | 2.1.312 | cli | `Sort the fixtures by era, then reload the skills.` (first human input that is not a decision, L3) | yes | 2025-11-20 12:00:00 |
 
-- Default listing (cli only), newest first: ALPHA, RELOC, UNDER, GAMMA, RESUMED, BETA, FLAT, ECHO, DELTA, MATE. With sdk
+- Default listing (cli only), newest first: ALPHA, RELOC, UNDER, GAMMA, RESUMED, BETA, FLAT, ECHO, DELTA, MATE, FOXTROT. With sdk
   admitted, SDK sits between ALPHA and RELOC. STUB is newest of all and must never appear. `projects/-tmp-sessions-fixture-flat/agent-*.jsonl` are
   flat sub-agents, never sessions.
 - Project directory names follow Claude Code's encoding (every character outside `[A-Za-z0-9]` becomes `-`):
@@ -84,6 +86,7 @@ entry of each `message.id`; context = input + cache creation + cache read.
 | `d5e7`, `e2c4`, `f3a5` | the one session with that prefix | DELTA, ECHO, MATE |
 | `areviewer`, `a1e3`, `a2b4`, `a5c7`, `a6d8` | the one agent file in `DELTA/` with that id | DELTA's agents |
 | `a1d2`, `a4b5`, `a7e8`, `a0b1`, `a3c4` | the one flat agent file beside ECHO | ECHO's agents |
+| `f0d2` | `FOXTROT.jsonl` | FOXTROT (no session directory) |
 | `ALPHA/tool-results/b4k7m2q9x.txt` (as a path) | — | ALPHA |
 | `RELOC/tool-results/c8n2v5x1q.txt` (as a path) | — | RELOC |
 
@@ -617,6 +620,58 @@ carries `teamName` `session-d5e7f9a1` and `agentName` `fixer`. Two messages: inp
 | `a0b1c2d` | L1 prompt (T4's), L2 tool_use Read, L3 result, L4 text, L5 from-parent `Add the rule for nullable fields.` (T5's), L6 text `Six rules now: the five before, and nullable fields say so.` | T4 and T5 `agentId` | text | 40 + 3 + 2 = 45 in the transcript; T5 reports 650 for the final message, so 40 + 3 + 650 = 693 |
 | `a3c4d5e` | L1 prompt (T6's), L2 tool_use Glob, L3 user `[Request interrupted by user]` | T6 by prompt text | a user entry | 1 |
 
+## FOXTROT (2.1.312: human-input edge cases, odd tool results)
+
+| L | Entry | Notes |
+|---|---|---|
+| 1 | `permission-mode` (`default`) | state |
+| 2 | user tool_result for `toolu_01FxFoxtrotPrior00000001`, a call in an earlier session: rejection with feedback `Start from the fixture notes instead.`, `is_error` true, `toolDenialKind` user-rejected; parentUuid null | H1 `denied` (no call in this file) |
+| 3 | user, origin human: `Sort the fixtures by era, then reload the skills.` | H2; the label |
+| 4 | assistant M1: text `Reloading the skills first.` | |
+| 5 | user isMeta `<local-command-caveat>…` | injected |
+| 6 | user `<command-name>/reload-skills</command-name>` (empty args) | H3 `slash` |
+| 7 | system `local_command` `<local-command-stdout>Reloaded skills: 12 skills available</local-command-stdout>` (`commandRun`) | output of H3 |
+| 8 | system `local_command` `<command-name>/model</command-name>`, args `opus` | H4 `slash` |
+| 9 | system `local_command` `<local-command-stdout>Set model to opus</local-command-stdout>` | output of H4 |
+| 10 | assistant M2: tool_use P1 ExitPlanMode (plan `# Plan\n\n1. Sort the fixtures by era.`) | |
+| 11 | user tool_result P1 `<tool_use_error>You are not in plan mode. …</tool_use_error>`, `is_error` true | a tool error, not a decision |
+| 12 | assistant M3: tool_use P2 ExitPlanMode (same plan) | |
+| 13 | user tool_result P2 `User has approved exiting plan mode. You can now proceed.` (`toolUseResult.plan`) | H5 `plan` approved |
+| 14–17 | `queue-operation` enqueue `/effort`, popAll `/effort`, enqueue `/effort`, popAll `/effort` | not input: the command runs at L20 |
+| 18 | assistant M4: text `Sorted the fixtures by era.` | |
+| 19 | user isMeta `<local-command-caveat>…` | injected |
+| 20 | user `<command-name>/effort</command-name>` (empty args) | H6 `slash` |
+| 21 | user `<local-command-stdout>Set effort level to high</local-command-stdout>` | output of H6 |
+| 22, 23 | `queue-operation` enqueue `Also check the screenshot.`, dequeue | not input: L24 delivers it |
+| 24 | user, origin human: text block `Also check the screenshot.` + one image block | H7 `prompt` |
+| 25–27 | `queue-operation` enqueue `Then tidy the notes.`, popAll of it, enqueue it again; never delivered | H8 `queued`, at L27 only |
+| 28 | user, origin human: `Why does <command-name> show up in the transcript?` | H9 `prompt` |
+| 29 | user, origin human: `Explain the tag <command-name>/clear</command-name> please.` | H10 `prompt`, not a slash command |
+| 30 | `api-request-blob`, role assistant: a copy of the B1 tool_use | never an entry of the call |
+| 31 | `api-request-blob`, role user: a copy of the B1 tool_result | never an entry of the result |
+| 32 | assistant M5: tool_use B1 Bash `./progress.sh` | |
+| 33 | user tool_result B1 `step 1\rstep 2\r\n\u0000\u0007done\u007f` (22 characters: CR, NUL, BEL, DEL) | |
+| 34 | assistant M6: tool_use R1 Read `/tmp/sessions-fixture/foxtrot/screen.png` | |
+| 35 | user tool_result R1: one image block, no text | size 0 |
+| 36 | assistant M7: tool_use C1 `mcp__demo__click` `{"x":10,"y":20}` | |
+| 37 | user tool_result C1: text `Clicked at (10, 20)` (19 characters) + one image block | size 19 |
+| 38 | assistant M8: tool_use W1 Workflow `{"name":"fixture-missing"}` | |
+| 39 | user tool_result W1 `<tool_use_error>Workflow "fixture-missing" not found</tool_use_error>`, `is_error` true; no run id | no run started |
+| 40 | assistant M9: tool_use A1 Agent (Explore, `Survey the fixture eras`, `run_in_background` the **string** `"true"`) | background |
+| 41 | user tool_result A1: `async_launched`, `agentId` `a0f2c4e6a8b0d2f4a` | no transcript exists |
+| 42 | user `<task-notification>` for A1: `<status>killed</status>`, no `<result>` (origin `task-notification`) | notification |
+| 43 | assistant M10: text `The survey agent was stopped; the eras are sorted.` | |
+
+- Tool ids `toolu_01FxFoxtrot00000000000NN`: P1 01, P2 02, B1 03, R1 04, C1 05, W1 06, A1 07. Messages M1–M10
+  `msg_01FxFoxtrot00000000000NN` (NN = 01–10), one entry each: input 13, cache creation 5800, cache read 43470, output
+  368; peak context 5801 (M10, L43). Model claude-opus-5-5. Entry timestamps 2025-11-20T10:00:02Z to 10:03:05Z.
+- Human input (10): L2 denied, L3 prompt, L6 slash, L8 slash, L13 plan, L20 slash, L24 prompt, L27 queued, L28 prompt,
+  L29 prompt. Outputs: L7 (of L6), L9 (of L8), L21 (of L20).
+- Tool calls (7; 2 errors): P1 error, P2 ok, B1 ok (22), R1 ok (0), C1 ok (19), W1 error, A1 ok. No workflow run, no
+  sub-agent file, no session directory.
+- Parent chain of L32: L29, L28, L24, L21, L20, L19, L18, L13, L12, L11, L10, L9, L8, L7, L6, L5, L4, L3, L2 (19
+  entries; L2 has no parent).
+
 ## STUB
 
 One line: `{"type":"ai-title","aiTitle":"Stub session title",…}`. No user or assistant entry; skipped by listings.
@@ -685,3 +740,5 @@ ALPHA L42; `recap` ALPHA L76.
   `effort`.
 - DELTA and MATE (2.1.220) carry December 2025 timestamps and file times, months before that version; the times keep
   them out of the windows the other tests use. Their entries, like ECHO's, carry a subset of the real top-level keys.
+- FOXTROT (2.1.312) carries November 2025 times for the same reason. Its ExitPlanMode approval (L13) has the wording
+  of 2.0.69 and 2.1.37 (`User has approved exiting plan mode`); later versions write `User has approved your plan`.

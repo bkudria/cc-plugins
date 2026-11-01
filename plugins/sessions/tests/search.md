@@ -64,7 +64,7 @@ Text that appears only in harness copies (skill listing, instructions, request b
 ```scrut
 $ out=$(cc-sessions search NOISE_ONLY_TERM 2> err.txt); echo "exit $? stdout ${#out}"; cc_test_rel < err.txt
 exit 0 stdout 0
-cc-sessions: no session has "NOISE_ONLY_TERM" in the default kinds with --origin cli; 12 sessions searched in <root>/projects
+cc-sessions: no session has "NOISE_ONLY_TERM" in the default kinds with --origin cli; 13 sessions searched in <root>/projects
 ```
 
 A file the user edited is content of kind `file`.
@@ -103,6 +103,7 @@ c4e6a8b0-2d4f-4a6c-9e8a-0b2c4d6e8f1a\t2026-01-03T12:00:00Z\t/tmp/sessions-fixtur
 e2c4a6b8-0d2f-4b4d-8e6f-1a3b5c7d9e0f\t2025-12-08T09:06:00Z\t/tmp/sessions-fixture/echo\tExplore the schema code and the state updates in the background. (escaped)
 d5e7f9a1-3b5c-4d7e-9f1a-2b4c6d8e0f13\t2025-12-06T10:06:00Z\t/tmp/sessions-fixture/delta\tRun the audit workflow, then check the log and bring in a reviewer. (escaped)
 f3a5c7e9-1b3d-4f5a-8c7e-9a1b3c5d7e9f\t2025-12-06T10:01:02Z\t/tmp/sessions-fixture/delta\t- (escaped)
+f0d2b4c6-8e0a-4b2c-9d4e-6f8a0b2c4d6e\t2025-11-20T12:00:00Z\t/tmp/sessions-fixture/foxtrot\tSort the fixtures by era, then reload the skills. (escaped)
 ```
 
 The current session is searched and marked.
@@ -116,8 +117,8 @@ Internal agents are left out of corpus search: the transcripts fork and the prom
 
 ```scrut
 $ cc-sessions search '[cc-sessions:transcripts-fork]' 2>&1 | cc_test_rel; cc-sessions search 'SUGGESTION MODE' 2>&1 | cc_test_rel
-cc-sessions: no session has "[cc-sessions:transcripts-fork]" in the default kinds with --origin cli; 12 sessions searched in <root>/projects
-cc-sessions: no session has "SUGGESTION MODE" in the default kinds with --origin cli; 12 sessions searched in <root>/projects
+cc-sessions: no session has "[cc-sessions:transcripts-fork]" in the default kinds with --origin cli; 13 sessions searched in <root>/projects
+cc-sessions: no session has "SUGGESTION MODE" in the default kinds with --origin cli; 13 sessions searched in <root>/projects
 ```
 
 A flat-layout sub-agent's hits count toward its session; the copies in `progress` entries do not.
@@ -513,13 +514,14 @@ c4e6a8b0-2d4f-4a6c-9e8a-0b2c4d6e8f1a
 e2c4a6b8-0d2f-4b4d-8e6f-1a3b5c7d9e0f
 d5e7f9a1-3b5c-4d7e-9f1a-2b4c6d8e0f13
 f3a5c7e9-1b3d-4f5a-8c7e-9a1b3c5d7e9f
+f0d2b4c6-8e0a-4b2c-9d4e-6f8a0b2c4d6e
 ```
 
 An age counts back from now, for sessions and for records.
 
 ```scrut
 $ cc-sessions search the --since 100000d | wc -l | tr -d ' '; cc-sessions search symbol b2d4 --until 100000d 2>/dev/null | wc -l | tr -d ' '
-10
+11
 0
 ```
 

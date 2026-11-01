@@ -26,8 +26,8 @@ Fields, by key in output order:
   peak_context        the largest input + cache_creation + cache_read, with its handle
   cost                each cost-state (one per process run): handle, USD, then for each model
                       <model>=input/cache_creation/cache_read/output
-  tool                per tool, most calls first: name, calls, result characters, errors
-  largest             the 5 largest results: result handle, tool, size (as in tools), saved file
+  tool                per tool, most calls first: name, calls, result size (as in tools), errors
+  largest             the 5 largest results: result handle, tool, size, saved file
   compaction          handle, trigger, pre_tokens, post_tokens
   skill               each skill load: handle, name, how (tool skill bundled orphan)
   agents              (main) the session's agent transcripts: count, kind=count (agent teammate
@@ -40,6 +40,7 @@ Fields, by key in output order:
 Options: --agents adds tokens_with_agents and the agent lines. --since T and --until T count only
 entries inside the bounds (a handle bound applies to each file's own lines); path to origin
 describe the whole file. --full: whole labels (default 100 characters, as in list). No limit.
+A stderr notice says when output tokens count Claude Code 2.0.50 to 2.1.56: lower bounds there.
 Empty answer: when no entry is inside the bounds, nothing on stdout and on stderr "cc-sessions:
 no entries in <file> with <options>".
 Exit status: 0 answered, also when empty; 1 the transcript cannot be read; 2 usage error.

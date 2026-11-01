@@ -130,11 +130,19 @@ def duplicates:
       else .first[$u] = $r.l end)
   | .out[];
 
-#: One TSV field: "-" for null or "", otherwise the string (other values as JSON) with backslash, TAB and newline written \\, \t and \n.
+def _hex_digit: if . < 10 then 48 + . else 87 + . end;
+
+def _control_escape:
+  if . == 13 then 92, 114
+  elif . < 32 or . == 127 then 92, 117, 48, 48, (. / 16 | floor | _hex_digit), (. % 16 | _hex_digit)
+  else . end;
+
+#: One TSV field: "-" for null or "", otherwise the string (other values as JSON) with backslash, TAB, newline and CR written \\, \t, \n and \r, and every other control character and DEL as \u00XX.
 def field:
   if . == null or . == "" then "-"
   # split and join, because gsub takes time quadratic in the number of matches
   else (if type == "string" then . else tojson end) | split("\\") | join("\\\\") | split("\t") | join("\\t") | split("\n") | join("\\n")
+    | if test("[\\x00-\\x1f\\x7f]") then explode | map(_control_escape) | implode else . end
   end;
 
 #: An array of values as one TSV record (each through s::field).
@@ -269,6 +277,11 @@ def _text:
   elif type == "array" then map(if .type == "text" then .text elif .type == "image" then "[image]" else empty end) | join("\n")
   else "" end;
 
+def _plain_text:
+  if type == "string" then .
+  elif type == "array" then map(select(.type == "text") | .text) | join("\n")
+  else "" end;
+
 #: A raw message.usage object as {input, cache_creation, cache_read, output}; absent counts are 0. Input: a usage object.
 def usage:
   {input: (.input_tokens // 0), cache_creation: (.cache_creation_input_tokens // 0),
@@ -349,6 +362,18 @@ def content_text: _text;
 
 def _starts_any($prefixes): . as $text | any($prefixes[]; . as $p | $text | startswith($p));
 
+# A command entry starts with its <command-name> element, which a <command-message> element can
+# precede; typed text that only mentions the tag is not one.
+def _command_head: "^\\s*(?:<command-message>[\\s\\S]*?</command-message>\\s*)?<command-name>";
+
+def _is_command: test(_command_head);
+
+def _is_slash_command: test(_command_head + "/");
+
+def _is_output: _starts_any(["<local-command-stdout>", "<local-command-stderr>", "<bash-stdout>", "<bash-stderr>"]);
+
+def _local_command(f): .e.type == "system" and .e.subtype == "local_command" and ((.e.content // "") | type == "string" and f);
+
 def _tool_results_only:
   (.message.content | type) == "array" and (.message.content | length) > 0 and all(.message.content[]; .type == "tool_result");
 
@@ -363,17 +388,17 @@ def _user_class($agent; $first):
     elif $origin == "peer" or ($text | _starts_any(["Another Claude session sent a message", "<teammate-message", "<agent-message"])) then
       (if $agent and ($text | startswith("<teammate-message")) then "from-parent" else "peer" end)
     elif $text | startswith("[Request interrupted by user") then "interrupt"
-    elif $text | _starts_any(["<local-command-stdout>", "<local-command-stderr>", "<bash-stdout>", "<bash-stderr>"]) then "output"
+    elif $text | _is_output then "output"
     elif $e.isMeta or $e.isVisibleInTranscriptOnly then "injected"
     elif $origin != null and $origin != "human" then "injected"
     elif $text | _starts_any(["[Usage limit", "<local-command-caveat>", "Caveat:"]) then "injected"
-    elif ($text | test("<command-name>")) and ($text | test("<command-name>/") | not) then "injected"
+    elif ($text | _is_command) and ($text | _is_slash_command | not) then "injected"
     elif $agent then "from-parent"
     else "human" end;
 
 def _human_kind:
   (.e.message.content | _text) as $text
-  | if $text | test("<command-name>/") then "slash"
+  | if $text | _is_slash_command then "slash"
     elif $text | startswith("<bash-input>") then "bash"
     elif .e.promptSource == "sdk" or .e.promptSource == "system" then "sdk"
     else "prompt" end;
@@ -427,37 +452,51 @@ def _answer_text($result):
     [_result_text | scan("\"([^\"]+)\"=\"([^\"]*)\"") | "\(.[0]) → \(.[1])"] | join("\n")
   end;
 
+def _approved: _result_text | startswith("User has approved");
+
+# Denials and plan approvals are read from the result alone, as their call can sit in an earlier
+# session; only a rejection needs its call to be told apart as a plan decision.
 def _tool_decisions:
   _tool_uses as $uses
   | entries[] | select(.e.type == "user" and (.e | _tool_results_only)) | . as $r
   | .e.message.content[] | select(.type == "tool_result") | . as $block
-  | $uses[$block.tool_use_id] as $use
-  | select($use != null)
-  | if $use.name == "ExitPlanMode" then
-      (if $block | _rejected then "rejected" elif ($block | _result_text | startswith("User has approved your plan")) then "approved" else "rejected" end) as $decision
-      | ($use.input.plan // $r.e.toolUseResult.plan? // "") as $plan
-      | ($block | _feedback) as $feedback
-      | _record($r; "plan"; (if $decision == "approved" then "approved: \($plan)" elif $feedback != "" then "rejected: \($feedback)" else "rejected" end))
-        + {tool: $use.name, tool_use_id: $use.id, decision: $decision}
+  | ($uses[$block.tool_use_id] // null) as $use
+  | {tool: ($use.name // null), tool_use_id: $block.tool_use_id} as $call
+  | if $block | _approved then
+      ($use.input.plan? // $r.e.toolUseResult.plan? // "") as $plan
+      | _record($r; "plan"; (if $plan != "" then "approved: \($plan)" else "approved" end)) + $call + {decision: "approved"}
     elif $block | _rejected then
-      _record($r; "denied"; ($block | _feedback)) + {tool: $use.name, tool_use_id: $use.id}
+      ($block | _feedback) as $feedback
+      | if $use.name == "ExitPlanMode" then
+          _record($r; "plan"; (if $feedback != "" then "rejected: \($feedback)" else "rejected" end)) + $call + {decision: "rejected"}
+        else _record($r; "denied"; $feedback) + $call end
     elif $use.name == "AskUserQuestion" and ($block.is_error | not) then
-      _record($r; "answer"; ($block | _answer_text($r.e.toolUseResult))) + {tool: $use.name, tool_use_id: $use.id}
+      _record($r; "answer"; ($block | _answer_text($r.e.toolUseResult))) + $call
     else empty end;
+
+def _trimmed: sub("^\\s+"; "") | sub("\\s+$"; "");
+
+def _runs_later($slashes): . as $q | ($q.text | _trimmed) as $text | any($slashes[]; .l > $q.l and .text == $text);
+
+# The next queue operation that holds the enqueue's text is a popAll: the text went back to the
+# prompt, and what the user then sent is recorded where it appears.
+def _withdrawn($ops):
+  . as $q | (first($ops[] | select(.l > $q.l and .text == $q.text and (.op == "enqueue" or .op == "popAll"))) | .op == "popAll") // false;
 
 def _attach_outputs($outputs):
   reduce $outputs[] as $o (.;
     (map(select((.kind == "slash" or .kind == "bash") and .l < $o.l)) | last | .l) as $owner
     | if $owner == null then . else map(if .l == $owner then .outputs += [{l: $o.l, text: $o.text}] else . end) end);
 
-#: Output events of slash and ! commands: {l, kind: "output", text, ts, of}, of being the line of the command it belongs to (null if none).
+#: Output events of slash and ! commands, from user entries and system local_command entries: {l, kind: "output", text, ts, of}, of being the line of the command it belongs to (null if none).
 def outputs:
   _memo_users
   | [user_entries] as $users
-  | [ $users[] | select(.class == "human" and (.kind == "slash" or .kind == "bash")) | .l ]
-    + [ entries[] | select(.e.type == "system" and .e.subtype == "local_command" and ((.e.content // "") | type == "string" and test("<command-name>"))) | .l ]
-  | sort as $commands
-  | $users[] | select(.class == "output")
+  | ([ $users[] | select(.class == "human" and (.kind == "slash" or .kind == "bash")) | .l ]
+     + [ entries[] | select(_local_command(_is_command)) | .l ] | sort) as $commands
+  | [ ($users[] | select(.class == "output") | {l, text, t}),
+      (entries[] | select(_local_command(_is_output)) | {l, text: .e.content, t}) ]
+  | sort_by(.l)[]
   | . as $o
   | {l, kind: "output", text: (.text | _output_text), ts: .t, of: ($commands | map(select(. < $o.l)) | last)};
 
@@ -466,27 +505,31 @@ def human_inputs:
   _memo_users
   | . as $t
   | [user_entries] as $users
-  | ([$users[] | .text]) as $user_texts
+  | ([$users[] | .e.message.content | _plain_text]) as $user_texts
   | ($users | map(select(.class == "human"))) as $human
   | ($users | map(select((.e.isMeta or .e.isCompactSummary or .e.isVisibleInTranscriptOnly) | not))) as $visible
+  | ([$human[] | select(.kind == "slash") | {l, text: (.text | _slash_text)}]
+     + [$t | entries[] | select(_local_command(_is_command)) | {l, text: (.e.content | _slash_text)}]) as $slashes
   | [
       ( $human[] | . as $u
         | if .kind == "slash" then _record($u; "slash"; (.text | _slash_text))
             + {also: [$visible | map(select(.l < $u.l)) | last | select(. != null and .kind == "prompt" and (.text | test("^/")) and ((.text | capture("^/(?<n>[^\\s]+)").n) == ($u.text | _slash_name | ltrimstr("/")))) | .l]}
           elif .kind == "bash" then _record($u; "bash"; ([.text | capture("<bash-input>(?<c>[\\s\\S]*?)</bash-input>")][0].c // .text))
           else _record($u; .kind; .text) end ),
-      ( $t | entries[] | select(.e.type == "system" and .e.subtype == "local_command" and ((.e.content // "") | type == "string" and test("<command-name>")))
-        | _record(.; "slash"; (.e.content | _slash_text)) ),
+      ( $t | entries[] | select(_local_command(_is_command)) | _record(.; "slash"; (.e.content | _slash_text)) ),
       ( $t | entries[] | select(.e.type == "attachment" and .e.attachment.type == "queued_command" and .e.attachment.commandMode == "prompt"
             and ((.e.attachment.origin.kind // "human") == "human"))
-        | (.e.attachment.prompt | _text) as $text
-        | select(($text | startswith("<agent-message") | not) and ($user_texts | index([$text]) | not))
-        | _record(.; "queued"; $text) ),
-      ( $t | ([entries[] | select(.e.type == "attachment" and .e.attachment.type == "queued_command") | .e.attachment.prompt | _text]) as $queued
+        | (.e.attachment.prompt | _plain_text) as $plain
+        | select(($plain | startswith("<agent-message") | not) and ($user_texts | index([$plain]) | not)
+            and ({l, text: $plain} | _runs_later($slashes) | not))
+        | _record(.; "queued"; (.e.attachment.prompt | _text)) ),
+      ( $t | ([entries[] | select(.e.type == "attachment" and .e.attachment.type == "queued_command") | .e.attachment.prompt | _plain_text]) as $queued
+        | [entries[] | select(.e.type == "queue-operation") | {l, op: .e.operation, text: .e.content}] as $ops
         | entries[] | select(.e.type == "queue-operation" and .e.operation == "enqueue" and (.e.content | type) == "string")
         | .e.content as $text
         | select(($text | test("\\S")) and ($text | startswith("<") | not) and ((try ($text | fromjson | type) catch "text") | IN("object", "array") | not)
-            and ($user_texts | index([$text]) | not) and ($queued | index([$text]) | not))
+            and ($user_texts | index([$text]) | not) and ($queued | index([$text]) | not)
+            and ({l, text: $text} | (_runs_later($slashes) or _withdrawn($ops)) | not))
         | _record(.; "queued"; $text) ),
       ( $t | _tool_decisions )
     ]
@@ -495,6 +538,9 @@ def human_inputs:
   | sort_by(.l)
   | _attach_outputs([$t | outputs])
   | .[];
+
+#: The first human input the user typed or queued (kind prompt, slash, bash, sdk or queued), not an answer, denial or plan decision; null if none.
+def first_input: first(human_inputs | select(.kind | IN("prompt", "slash", "bash", "sdk", "queued"))) // null;
 
 #: Interrupt events ([Request interrupted by user…]): {l, kind: "interrupt", text, ts, uuid, interrupted}, interrupted being the interrupted message id when recorded.
 def interrupts:
@@ -576,7 +622,7 @@ def _persisted($t):
       | $m + {path: $path, bytes: (if $path then $t.sizes[$path] else null end)}
     end;
 
-#: Tool calls paired with their results, in file order: {l, id, name, input, wire_input, message_id, ts, result_l, text, chars, is_error, status (ok, error, denied, none), feedback, persisted, result}; persisted is {stated_size, stated_path, preview_size, path, bytes}, path and bytes from the saved file (null when it is missing); result is toolUseResult.
+#: Tool calls paired with their results, in file order: {l, id, name, input, wire_input, message_id, ts, result_l, text, chars, is_error, status (ok, error, denied, none), feedback, persisted, result}; text shows each image as [image], chars counts the text blocks only; persisted is {stated_size, stated_path, preview_size, path, bytes}, path and bytes from the saved file (null when it is missing); result is toolUseResult.
 def tool_calls:
   _memo
   | . as $t
@@ -589,7 +635,7 @@ def tool_calls:
   | {
       l: $r.l, id: $use.id, name: $use.name, input: $use.input,
       wire_input: ($r.e.wireToolInputs[$use.id]? // null), message_id: ($r.e.message.id // null), ts: $r.t,
-      result_l: ($res.l // null), text: $text, chars: (if $text then $text | length else null end),
+      result_l: ($res.l // null), text: $text, chars: (if $res then $res.block.content | _plain_text | length else null end),
       is_error: (if $res and ($res.block | has("is_error")) then $res.block.is_error else null end),
       status: (if $res == null then "none" elif $rejected then "denied" elif $res.block.is_error == true then "error" else "ok" end),
       feedback: (if $rejected then ($res.block | _feedback | if . == "" then null else . end) else null end),
@@ -743,7 +789,7 @@ def agent_calls:
   | (.result | _object) as $r
   | ($r.agentId // $r.agent_id // ([(.text // "") | capture("agent_?[iI]d: (?<id>[A-Za-z0-9_-]+)")][0].id) // null) as $agent
   | {l, id, tool: .name, description: .input.description, subagent_type: .input.subagent_type, name: .input.name,
-     prompt: .input.prompt, background: (.input.run_in_background == true), agent_id: $agent,
+     prompt: .input.prompt, background: (.input.run_in_background | . == true or . == "true"), agent_id: $agent,
      team_name: ($r.team_name // null), teammate_name: (if $r.team_name then $r.name // .input.name else null end),
      status: ($r.status // .status), interrupted: ((.text // "") | startswith("[Request interrupted by user")),
      reported_output: (if $r.status == "completed" then $r.usage.output_tokens? // null else null end),
@@ -859,7 +905,7 @@ def agent_label($journal_label):
   else delegation | if . then {text, source: "prompt", l} else null end
   end;
 
-#: The label {text, source, l}: for a session the last custom-title, else the last ai-title containing a space, else agent-name, else a legacy summary, else the first human input (source prompt; untruncated); for an agent s::agent_label(null).
+#: The label {text, source, l}: for a session the last custom-title, else the last ai-title containing a space, else agent-name, else a legacy summary, else s::first_input (source prompt; untruncated); for an agent s::agent_label(null).
 def label_of:
   _memo_users
   | if .kind == "subagent" or .kind == "workflow-agent" or .kind == "flat" then agent_label(null)
@@ -872,7 +918,7 @@ def label_of:
       elif $ai then {text: $ai.e.aiTitle, source: "ai-title", l: $ai.l}
       elif $name then {text: $name.e.agentName, source: "agent-name", l: $name.l}
       elif $summary then {text: $summary.e.summary, source: "summary", l: $summary.l}
-      else first(human_inputs | {text, source: "prompt", l}) // null
+      else first_input | if . then {text, source: "prompt", l} else null end
       end
   end;
 
@@ -912,11 +958,13 @@ def compactions:
   | {l, trigger: $m.trigger, pre_tokens: $m.preTokens, post_tokens: $m.postTokens, dropped: $m.cumulativeDroppedTokens,
      duration_ms: $m.durationMs, summary_l: ($summary.l // null), logical_parent: (.e.logicalParentUuid // null), ts: .t};
 
-#: Rows matching $ref: a handle L<line> (any line, repeats included), a uuid, a toolu_… id (the call and its result) or a message id.
+#: Rows matching $ref: a handle L<line> (any line, repeats included), a uuid, a toolu_… id (the assistant entry of the call and the user entry of its result; copies in request entries are neither) or a message id.
 def lookup($ref):
   if $ref | test("^L[0-9]+$") then ($ref | line_of) as $n | .rows[] | select(.l == $n)
   elif $ref | startswith("toolu_") then
-    entries[] | select(any(.e.message.content? | arrays | .[]; (.type == "tool_use" and .id == $ref) or (.type == "tool_result" and .tool_use_id == $ref)))
+    entries[]
+    | select((.e.type == "assistant" and any(.e.message.content? | arrays | .[]; .type == "tool_use" and .id == $ref))
+        or (.e.type == "user" and any(.e.message.content? | arrays | .[]; .type == "tool_result" and .tool_use_id == $ref)))
   else entries[] | select(.e.uuid == $ref or .e.message.id? == $ref) end;
 
 #: The rows above $row, nearest first, following parentUuid (or logicalParentUuid where parentUuid is null, as after a compaction).

@@ -12,7 +12,7 @@ Sessions, newest first by modified time. Stub sessions (no user or assistant ent
 transcripts are never rows.
 
   <pattern>     literal text matched against the session id, every title (custom-title, ai-title,
-                agent-name, legacy summary) and the first human input; all-lowercase text matches
+                agent-name, legacy summary) and the first typed input; all-lowercase text matches
                 any case. Put a pattern that starts with - after --
   --skill NAME  sessions that loaded skill NAME, in the main transcript or a non-internal agent;
                 bare and namespaced names match by their last segment; adds the skill field
@@ -32,7 +32,7 @@ Fields, one session per record:
   mark      * for the current session (CLAUDE_CODE_SESSION_ID), else -
   cwd       first working directory
   label     custom title, else ai-title with a space, else agent name, else summary, else the
-            first human input
+            first typed input (a prompt, command or queued message; not a tool decision)
   skill     with --skill: <exact name> <how>[,<how>...] [+<n> agents], how being tool, skill,
             bundled or orphan; +<n> agents counts the agents that loaded it
 

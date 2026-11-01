@@ -78,6 +78,14 @@ parent\tL3\te0a00002-0000-4000-8000-000000000002\tattachment:hook_success\t2026-
 …[+1401 chars]
 ```
 
+The copies of a call and its result inside `api-request-blob` entries (FOXTROT L30, L31) are not the call or its result,
+so the parent chain still follows the tool_use entry.
+
+```scrut
+$ cc-sessions entry f0d2 toolu_01FxFoxtrot0000000000003 | grep -E '^(entry|parent)' | cut -f 1,2,4 | paste -s -d ' ' - | sed 's/\t/:/g'
+entry:L32:assistant entry:L33:user parent:L29:user parent:L28:user parent:L24:user parent:L21:user parent:L20:user parent:L19:user parent:L18:assistant parent:L13:user parent:L12:assistant parent:L11:user parent:L10:assistant parent:L9:system:local_command parent:L8:system:local_command parent:L7:system:local_command parent:L6:user parent:L5:user parent:L4:assistant parent:L3:user parent:L2:user
+```
+
 A `msg_…` id gives every entry of that API message, including entries split around a tool result.
 
 ```scrut

@@ -44,7 +44,7 @@ def main:
   | ($t | s::origin) as $origin
   | select($o.origin == "all" or $origin == $o.origin)
   | select($pat == null
-      or ([$c.id, ($t | titles), (first($t | s::human_inputs | .text) // empty)] | any(.[]; s::first_match($pat.re; $pat.ci) != null)))
+      or ([$c.id, ($t | titles), ($t | s::first_input | .text? // empty)] | any(.[]; s::first_match($pat.re; $pat.ci) != null)))
   | select($o.cwd == null or any($t | s::cwds[]; s::under($o.cwd)))
   | (if $o.skill then {main: $t, agents: $agents[$c.id]} | skill_field($o.skill) else null end) as $skill
   | select($o.skill == null or $skill != null)

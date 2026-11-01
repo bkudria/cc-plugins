@@ -468,7 +468,8 @@ cc_session_agent_files() {
 
 # cc_session_elsewhere_files <main-transcript> [--journals]: the agent transcripts that the session's Agent
 # and Workflow calls name but that sit elsewhere under the data root, as a resumed session's agents stay
-# with the original session; --journals adds those runs' journal.jsonl.
+# with the original session; --journals adds those runs' journal.jsonl. rg reads the transcript, as in
+# cc_teammate_sessions.
 cc_session_elsewhere_files() {
   local main=$1 journals=${2-} dir=${1%.jsonl} key id path found missing=() confirmed='' names=()
   while IFS=: read -r key id; do
@@ -481,7 +482,7 @@ cc_session_elsewhere_files() {
       done
     fi
     [ $found -eq 1 ] || missing+=("$key:$id")
-  done < <(grep -o -h -E '"(agentId|agent_id|runId)":"[A-Za-z0-9_-]+"' -- "$main" 2> /dev/null < /dev/null |
+  done < <(cc_rg -o -N --no-filename -e '"(agentId|agent_id|runId)":"[A-Za-z0-9_-]+"' -- "$main" |
     sed -E 's/^"(agentId|agent_id)":"/agent:/; s/^"runId":"/run:/; s/"$//' | LC_ALL=C sort -u)
   [ ${#missing[@]} -gt 0 ] || return 0
   # Only ids that the calls themselves name count, not ids quoted in some text of the transcript.
@@ -508,6 +509,42 @@ cc_session_elsewhere_files() {
         printf '%s\n' "$path"
       fi
     done | awk -F/ '!seen[$NF]++ || $NF == "journal.jsonl"'
+}
+
+# cc_agent_ends <transcript>...: enough of each agent transcript to link it to its call and to tell how
+# it ended, without reading it whole: "<path>TAB<what>TAB<json>" lines, what being meta (the line of
+# its .meta.json) or line (in file order). An agent transcript ends with its last message, so its last
+# line is enough; a split-pane teammate's session ends with up to a few dozen bookkeeping lines, so
+# its last lines that can be user or assistant entries are kept, at most 4.
+cc_agent_ends() {
+  local file metas=() agent_transcripts=() teammate_sessions=()
+  for file in "$@"; do
+    [ -f "${file%.jsonl}.meta.json" ] && metas+=("${file%.jsonl}.meta.json")
+    case $file in */agent-*.jsonl) agent_transcripts+=("$file") ;; *) teammate_sessions+=("$file") ;; esac
+  done
+  # shellcheck disable=SC2016 # awk program text
+  [ ${#metas[@]} -eq 0 ] || printf '%s\0' "${metas[@]}" |
+    xargs -0 awk '{ f = FILENAME; sub(/\.meta\.json$/, ".jsonl", f); print f "\tmeta\t" $0 }' 2> /dev/null
+  # /dev/null comes first so that tail heads every file's lines with its name, even a file alone.
+  {
+    [ ${#agent_transcripts[@]} -eq 0 ] || printf '%s\0' "${agent_transcripts[@]}" | xargs -0 tail -n 1 /dev/null 2> /dev/null
+    [ ${#teammate_sessions[@]} -eq 0 ] || printf '%s\0' "${teammate_sessions[@]}" | xargs -0 tail -n 64 /dev/null 2> /dev/null
+  } | awk '
+    function flush(i) { for (i = (n > 4 ? n - 3 : 1); i <= n; i++) print file "\tline\t" kept[i]; n = 0 }
+    /^==> .* <==$/ { flush(); file = substr($0, 5, length($0) - 8); next }
+    /"type":"(user|assistant)"/ { kept[++n] = $0 }
+    END { flush() }'
+}
+
+# cc_run_records <session-dir>...: the workflow run records under each directory's workflows/, as
+# "<path>TABrecordTAB<json>" lines.
+cc_run_records() {
+  local dir file records=()
+  for dir in "$@"; do
+    for file in "$dir"/workflows/*.json; do [ -f "$file" ] && records+=("$file"); done
+  done
+  # shellcheck disable=SC2016 # awk program text
+  [ ${#records[@]} -eq 0 ] || printf '%s\0' "${records[@]}" | xargs -0 awk '{ print FILENAME "\trecord\t" $0 }' 2> /dev/null
 }
 
 # cc_resolve_all <session-reference>...: resolves each one (exiting like cc_resolve) into the array

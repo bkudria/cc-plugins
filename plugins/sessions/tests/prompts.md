@@ -169,6 +169,51 @@ L52\t2026-10-30T10:01:51Z\tplan\trejected: Keep the lenient default. (escaped)
 L52\t2026-10-30T10:01:51Z\tplan\trejected (escaped)
 ```
 
+## Inputs that are easy to misread
+
+FOXTROT: a rejection whose call is in an earlier session (L2) is still a denial, named without a tool. Slash-command
+output stored as a `system` entry (L7, L9) is output. An ExitPlanMode error (L11) is no decision, and the older approval
+wording (L13) is an approval. The `/effort` typed twice while Claude was busy (enqueued at L14 and L16, each taken back)
+is the command at L20, and the text queued at L22 is the prompt with an image at L24. Text queued, taken back and queued
+again (L25–L27) counts once, at its last enqueue. A typed prompt that mentions `<command-name>` stays a prompt (L28, L29).
+
+```scrut
+$ cc-sessions prompts f0d2
+L2\t2025-11-20T10:00:02Z\tdenied\tStart from the fixture notes instead. (escaped)
+L3\t2025-11-20T10:00:05Z\tprompt\tSort the fixtures by era, then reload the skills. (escaped)
+L6\t2025-11-20T10:00:12Z\tslash\t/reload-skills (escaped)
+L7\t2025-11-20T10:00:12Z\toutput\tReloaded skills: 12 skills available (escaped)
+L8\t2025-11-20T10:00:20Z\tslash\t/model opus (escaped)
+L9\t2025-11-20T10:00:20Z\toutput\tSet model to opus (escaped)
+L13\t2025-11-20T10:00:41Z\tplan\tapproved: # Plan\\n\\n1. Sort the fixtures by era. (escaped)
+L20\t2025-11-20T10:01:00Z\tslash\t/effort (escaped)
+L21\t2025-11-20T10:01:00Z\toutput\tSet effort level to high (escaped)
+L24\t2025-11-20T10:01:09Z\tprompt\tAlso check the screenshot.\\n[image] (escaped)
+L27\t2025-11-20T10:01:16Z\tqueued\tThen tidy the notes. (escaped)
+L28\t2025-11-20T10:01:30Z\tprompt\tWhy does <command-name> show up in the transcript? (escaped)
+L29\t2025-11-20T10:01:40Z\tprompt\tExplain the tag <command-name>/clear</command-name> please. (escaped)
+```
+
+A denial is read from its result line alone, so a file holding only that line still has it. The plain rejection of
+ALPHA's plan (L52 of the variant above) is a plan decision only beside its ExitPlanMode call; alone it is a denial.
+
+```scrut
+$ sed -n 2p "$P/-tmp-sessions-fixture-foxtrot/f0d2b4c6-8e0a-4b2c-9d4e-6f8a0b2c4d6e.jsonl" > "$V/orphan.jsonl"
+> sed -n 52p "$V/plain-rejection.jsonl" > "$V/rejection-only.jsonl"
+> cc-sessions prompts "$V/orphan.jsonl"; cc-sessions prompts "$V/rejection-only.jsonl"
+L1\t2025-11-20T10:00:02Z\tdenied\tStart from the fixture notes instead. (escaped)
+L1\t2026-10-30T10:01:51Z\tdenied\t- (escaped)
+```
+
+A message that a popAll puts back into the prompt is not input by itself, even when it is never queued again: what
+the user sends after editing it is recorded where it appears (FOXTROT L25 and L26 alone).
+
+```scrut
+$ sed -n 25,26p "$P/-tmp-sessions-fixture-foxtrot/f0d2b4c6-8e0a-4b2c-9d4e-6f8a0b2c4d6e.jsonl" > "$V/popped.jsonl"
+> cc-sessions prompts "$V/popped.jsonl" 2>/dev/null | wc -l | tr -d ' '
+0
+```
+
 ## Width and --full
 
 Text is cut to 300 characters, ending with `…`; `--full` keeps it whole.

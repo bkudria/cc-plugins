@@ -24,10 +24,13 @@ Kinds:
   slash      a slash command and its arguments (a typed /x and its command entry are one record)
   bash       a ! command
   sdk        a prompt sent through the SDK
-  queued     a message typed while Claude was working
+  queued     a message typed while Claude was working; one popped back to the prompt, or run as a
+             slash command, counts only where it is sent
   answer     an AskUserQuestion answer: <question> → <answer>
-  denied     a rejected tool call: <tool>, or <tool>: <feedback>
-  plan       an ExitPlanMode decision: approved: <plan>, rejected, or rejected: <feedback>
+  denied     a rejected tool call: <tool>, or <tool>: <feedback>; no <tool> when its call is in an
+             earlier session
+  plan       an ExitPlanMode decision: approved: <plan>, rejected, or rejected: <feedback> (a tool
+             error is none)
   interrupt  the user interrupted Claude
   output     the output of the slash or ! command just before it
 

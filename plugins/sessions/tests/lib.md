@@ -96,6 +96,20 @@ $ cc-sessions jq '[null, "", "a\tb\nc\\d", 12, true, {"k": "v"}] | map(s::field)
 - - a\tb\nc\\d 12 true {"k":"v"}
 ```
 
+A carriage return prints as `\r`, and every other control character, and DEL, as `\u00XX`; other text is unchanged.
+
+```scrut
+$ cc-sessions jq '["a\rb\r\n", "nul\u0000bel\u0007esc\u001b[2m\u001fdel\u007f", "é → ☃"] | map(s::field) | join(" ")' -- -n -r
+a\rb\r\n nul\u0000bel\u0007esc\u001b[2m\u001fdel\u007f é → ☃
+```
+
+A long text with many of them still escapes in time proportional to its length.
+
+```scrut {timeout: 5s}
+$ cc-sessions jq '[range(7000)] | map("step\r\u0000") | join("") | s::field | [length, .[:16]]' -- -n -c
+[84000,"step\\r\\u0000step"]
+```
+
 Escaping takes time in proportion to the text, so a long tool result with thousands of lines prints quickly.
 
 ```scrut {timeout: 5s}
@@ -402,6 +416,18 @@ L52\tplan\t-\t-\t-\tExitPlanMode\ttoolu_01FxAlpha000000000000010\tapproved\te0a0
 L57\tbash\t-\t58\tOn branch main\\nnothing to commit, working tree clean\t-\t-\t-\te0a00034-0000-4000-8000-000000000034 (escaped)
 ```
 
+Decisions are read from the result line: FOXTROT's denial of a call in an earlier session (L2) names no tool, and the
+approval at L13 is known by its wording; outputs stored as `system` entries attach to their commands.
+
+```scrut
+$ cc-sessions jq 's::human_inputs | select(.outputs != [] or .tool_use_id) | [s::handle, .kind, (.outputs | map("L\(.l)") | join(",")), .tool, .tool_use_id, .decision] | s::tsv' f0d2 -- -r
+L2\tdenied\t-\t-\ttoolu_01FxFoxtrotPrior00000001\t- (escaped)
+L6\tslash\tL7\t-\t-\t- (escaped)
+L8\tslash\tL9\t-\t-\t- (escaped)
+L13\tplan\t-\tExitPlanMode\ttoolu_01FxFoxtrot0000000000002\tapproved (escaped)
+L20\tslash\tL21\t-\t-\t- (escaped)
+```
+
 Other sessions: BETA's prompt that exists only in a `queue-operation` is `queued`, and its re-appended copies are not repeated; SDK prompts are `sdk`.
 
 ```scrut
@@ -509,6 +535,15 @@ L51\t10\tExitPlanMode\t52\tok\t319\t- (escaped)
 L60\t11\tAgent\t61\tok\t397\t- (escaped)
 L62\t12\tAgent\t63\tok\t180\t- (escaped)
 L64\t13\tWorkflow\t65\tok\t522\tfalse (escaped)
+```
+
+Images add nothing to chars, though the text shows each as `[image]`: FOXTROT's Read result is one image, its click
+result a 19-character text and an image.
+
+```scrut
+$ cc-sessions jq 's::tool_calls | select(.id | endswith("04", "05")) | [s::handle, .name, .chars, .text] | s::tsv' f0d2 -- -r
+L34\tRead\t0\t[image] (escaped)
+L36\tmcp__demo__click\t19\tClicked at (10, 20)\\n[image] (escaped)
 ```
 
 A rejection carries the user's feedback; `input` is the stored input, `wire_input` the form sent to the API, and `result` the `toolUseResult` when the file has one.
@@ -679,6 +714,13 @@ Without `toolUseResult` the agent id comes from the result text.
 ```scrut
 $ cc-sessions jq '.rows |= map(del(.e.toolUseResult)) | [s::agent_calls | .agent_id]' a7c3e9f -- -c
 ["a7c3e9b2d4f6a8c01","aplanner-5e1f0a2b3c4d5e6f"]
+```
+
+A call runs in the background also when `run_in_background` is stored as the string `"true"` (FOXTROT L40).
+
+```scrut
+$ cc-sessions jq 's::agent_calls | [s::handle, .background] | s::tsv' f0d2 -- -r
+L40\ttrue (escaped)
 ```
 
 `s::workflow_calls` lists Workflow calls with their run id, task id, stored transcript directory and completion.
@@ -1176,7 +1218,7 @@ first, as `<pos>TAB<mtime>TAB<bytes>TAB<path>`.
 
 ```scrut
 $ (. "$CC_TEST_ROOT/lib/common.sh"; cc_sessions_by_mtime '' '' | awk -F '\t' '{ n = split($4, p, "/"); print $1, substr(p[n], 1, 4) }' | paste -s -d ' ' -; cc_sessions_by_mtime 1793318400 1793404799 | cut -f 1,2)
-0 b5a7 1 a7c3 2 d1f3 3 e5a7 4 f6b8 5 c7d9 6 b9e1 7 b2d4 8 c4e6 9 e2c4 10 d5e7 11 f3a5
+0 b5a7 1 a7c3 2 d1f3 3 e5a7 4 f6b8 5 c7d9 6 b9e1 7 b2d4 8 c4e6 9 e2c4 10 d5e7 11 f3a5 12 f0d2
 0\t1793361600 (escaped)
 1\t1793359800 (escaped)
 ```

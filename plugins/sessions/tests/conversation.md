@@ -160,6 +160,26 @@ L3\tsdk\tRename the report generator skill to report-builder. (escaped)
 L5\tassistant\tRenamed the skill to report-builder. (escaped)
 ```
 
+FOXTROT: slash-command output stored as a `system` entry is output like any other, an ExitPlanMode error is a tool call
+and no plan decision, and a tool result's size counts its text, not its images.
+
+```scrut
+$ cc-sessions conversation f0d2 --since L4 --until L13 | cut -f1,4,5
+> cc-sessions conversation f0d2 --since L32 --until L37 | cut -f1,4,5
+L4\tassistant\tReloading the skills first. (escaped)
+L5?injected?[injected 217 chars: <local-command-caveat>The command below was run directly in…] (glob)
+L6\tslash\t/reload-skills (escaped)
+L7\toutput\tReloaded skills: 12 skills available (escaped)
+L8\tslash\t/model opus (escaped)
+L9\toutput\tSet model to opus (escaped)
+L10\ttool\tExitPlanMode {"plan":"# Plan\\\\n\\\\n1. Sort the fixtures by era."} → error 106 (escaped)
+L12\ttool\tExitPlanMode {"plan":"# Plan\\\\n\\\\n1. Sort the fixtures by era."} → ok 57 (escaped)
+L13\tplan\tapproved: # Plan\\n\\n1. Sort the fixtures by era. (escaped)
+L32\ttool\tBash ./progress.sh → ok 22 (escaped)
+L34\ttool\tRead /tmp/sessions-fixture/foxtrot/screen.png → ok 0 (escaped)
+L36\ttool\tmcp__demo__click {"x":10,"y":20} → ok 19 (escaped)
+```
+
 Split messages merge into one record, re-appended duplicates are read once, and the corrupt line is skipped with a notice.
 
 ```scrut
@@ -329,6 +349,17 @@ L7\t1\t12000\t200\t45\t12201 (escaped)
 L10\t2\t12300\t400\t80\t12702 (escaped)
 L13\t1\t12900\t300\t30\t13201 (escaped)
 L22\t1\t13200\t150\t12\t13351 (escaped)
+```
+
+Claude Code 2.0.50 through 2.1.56 often wrote a message's last entry before its output was counted, so with `--tokens` a
+notice says when the output counts shown come from those versions (FLAT is 2.0.76). Without `--tokens`, without an
+assistant record shown, or for other versions, there is no notice.
+
+```scrut {output_stream: stderr}
+$ cc-sessions conversation c4e6 --tokens > /dev/null
+> cc-sessions conversation c4e6 > /dev/null; cc-sessions conversation c4e6 --tokens --until L2 > /dev/null
+> cc-sessions conversation a7c3e9f --tokens > /dev/null
+cc-sessions: output tokens are lower bounds for messages written by Claude Code 2.0.76: versions 2.0.50 through 2.1.56 often did not record a message's final output count
 ```
 
 ## Around, since and until

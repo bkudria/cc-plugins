@@ -14,7 +14,8 @@ Options:
   --input REGEX   calls whose input matches: the rendered input, the input JSON or the wire form
   --result REGEX  calls whose result matches: its text (a persisted output: the preview) or the
                   rendered result
-  --errors        calls whose result is an error (a denial is the user's choice, not an error)
+  --errors        calls whose result is an error (a denial is the user's choice, not an error, and
+                  an agent killed or failed after its call returned is no error of the call)
   --agents        merge in the calls of the session's sub-agents and workflow agents, by time
                   (internal agents are left out)
   --since T       calls from T on: a handle L<n>, a timestamp, or an age (30m, 2h, 7d)
@@ -28,15 +29,16 @@ Fields:
   name    the tool; MCP tools in full (mcp__<server>__<tool>)
   status  ok, error, denied (the user rejected it), none (no result recorded), persisted (an ok
           result saved to a file)
-  size    the result's length in characters; persisted: the saved file's bytes, as <n>B
+  size    the length of the result's text in characters (images add nothing); persisted: the
+          saved file's bytes, as <n>B
   input   Bash the command's first line (+ [bg], [timeout=…]); Read, Write, Edit, NotebookEdit the
           path (+ range or edit sizes); Grep, Glob pattern and path; AskUserQuestion questions and
           options; Agent <type> "<description>" (+ name, model, [bg]); Workflow name or script and
           args; Skill name and args; WebFetch the URL; WebSearch, ToolSearch the query; SendMessage,
           TaskStop the target; MCP and other tools compact JSON
-  result  AskUserQuestion the answers; Agent the agent id and the status its notification or call
-          gives; Workflow the run id and status; denied the user's feedback; persisted the saved
-          file's path; else the text
+  result  AskUserQuestion the answers; Agent, Task, Workflow the agent or run it started and that
+          one's status as cc-sessions agents gives it (completed failed killed running denied
+          unknown); denied the user's feedback; persisted the saved file's path; else the text
 input and result are cut at 160 characters unless --full. No default limit.
 
 Empty answer: nothing on stdout; on stderr "cc-sessions: no tool calls in <file>[ with <options>]".
@@ -107,11 +109,27 @@ cc_one_session ${#operands[@]}
 cc_resolve "${operands[0]}"
 files=("$CC_FILE")
 what=$CC_FILE
+
+# An Agent, Task or Workflow call's result names what it started, with that agent's or run's status,
+# which needs the session's agent files and run records.
+linked=() dirs=() found=''
+if [ $agents -eq 1 ] || [ -n "$(cc_rg -l -e '"name":"(Agent|Task|Workflow)"' -- "$CC_FILE")" ]; then
+  if [ "$CC_KIND" = main ]; then
+    found=$(cc_session_agent_files "$CC_FILE" --journals)
+  elif [ -n "$CC_SESSION_DIR" ]; then
+    found=$(cc_agent_files "$CC_SESSION_DIR.jsonl")
+  fi
+  cc_lines "$(printf '%s\n' "$found" | awk -v self="$CC_FILE" 'NF && $0 != self && !seen[$0]++')"
+  dirs=(${CC_SESSION_DIR:+"$CC_SESSION_DIR"})
+  for path in ${CC_LINES[@]+"${CC_LINES[@]}"}; do
+    case $path in */journal.jsonl) ;; *) linked+=("$path") ;; esac
+    case $path in */subagents/*) dirs+=("${path%%/subagents/*}") ;; esac
+  done
+  cc_lines "$(printf '%s\n' ${dirs[@]+"${dirs[@]}"} | awk '!seen[$0]++')"
+  dirs=(${CC_LINES[@]+"${CC_LINES[@]}"})
+fi
 if [ $agents -eq 1 ] && [ "$CC_KIND" = main ]; then
-  while IFS= read -r path; do
-    for seen in "${files[@]}"; do [ "$seen" = "$path" ] && continue 2; done
-    files+=("$path")
-  done < <(cc_session_agent_files "$CC_FILE")
+  files+=(${linked[@]+"${linked[@]}"})
   [ ${#files[@]} -gt 1 ] && what+=" and its agent transcripts"
 fi
 
@@ -130,4 +148,6 @@ cc_jq_program "$(cc_module_program tools '
         width: $width, what: $what, filters: $filters})')" \
   -r --arg name "$name" --arg input "$input" --arg result "$result" --argjson errors "$errors" \
   --argjson since "$since" --argjson until "$until" --argjson width "$width" --arg what "$what" \
-  --arg filters "$filters" -- "${files[@]}" || cc_jq_failed $? "$CC_FILE"
+  --arg filters "$filters" \
+  --rawfile __ends <(cc_agent_ends ${linked[@]+"${linked[@]}"}; cc_run_records ${dirs[@]+"${dirs[@]}"}) \
+  -- "${files[@]}" || cc_jq_failed $? "$CC_FILE"

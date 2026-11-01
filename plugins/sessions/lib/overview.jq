@@ -80,13 +80,21 @@ def _cost:
     + [.models | to_entries[]
        | "\(.key)=\(.value.inputTokens // 0)/\(.value.cacheCreationInputTokens // 0)/\(.value.cacheReadInputTokens // 0)/\(.value.outputTokens // 0)"];
 
+def _stated_bytes:
+  [capture("^(?<n>[0-9.]+)(?<u>B|KB|MB)$")] | first
+  | if . then (.n | tonumber) * {B: 1, KB: 1024, MB: 1048576}[.u] | round else 0 end;
+
+# A persisted result counts its saved file's bytes, or the size its marker states when the file is gone.
+def _result_size:
+  if .persisted then .persisted.bytes // (.persisted.stated_size | _stated_bytes) else .chars // 0 end;
+
 def _tools($calls):
   ($calls | group_by(.name)
-    | map({name: .[0].name, calls: length, chars: (map(.chars // 0) | add),
+    | map({name: .[0].name, calls: length, size: (map(_result_size) | add),
            errors: (map(select(.status == "error")) | length)})
     | sort_by(-.calls, .name)[]
-    | ["tool", .name, .calls, .chars, .errors]),
-  ($calls | map(select(.result_l != null)) | sort_by(-(.persisted.bytes // .chars // 0), .result_l)[:5][]
+    | ["tool", .name, .calls, .size, .errors]),
+  ($calls | map(select(.result_l != null)) | sort_by(-_result_size, .result_l)[:5][]
     | ["largest", (.result_l | _handle_of), .name, r::size, (.persisted | if . then .path // .stated_path else null end)]);
 
 # The agent transcripts read with a main transcript, each with its kind; when they are windowed or
@@ -120,8 +128,11 @@ def overview($since; $until; $width; $with_agents):
   | ($t | s::totals) as $totals
   | [$t | s::tool_calls] as $calls
   | (if $whole.kind == "main" then _agent_set($all[1:]; $since; $until; $with_agents) else null end) as $agents
-  | ($whole | _identity),
-    ($t | _first_uses(.cwd) | ["cwd", .v, (.l | _handle_of)]),
+  | ([$t | s::partial_output_versions[]]
+     + (if $with_agents and $agents != null then [$agents[] | select(.kind != "internal") | .t | s::partial_output_versions[]] else [] end)
+     | s::lower_bound_notice | "\(.)\n" | stderr | empty),
+    ($whole | _identity),
+    ($whole | _first_uses(.cwd) | ["cwd", .v, (.l | _handle_of)]),
     ($whole | _label($width)),
     ($t | s::versions | select(length > 0) | ["versions"] + .),
     ($t | s::models | select(length > 0) | ["models"] + .),
@@ -143,7 +154,7 @@ def overview($since; $until; $width; $with_agents):
           | $agents[] | _agent_line($agent_calls; $journal; $width)
         else empty end)
      else empty end),
-    ["workflows", ([$t | s::workflow_calls | .run_id // .id] | unique | length)],
+    ["workflows", ([$t | s::workflow_calls | .run_id | strings] | unique | length)],
     ["errors", ($calls | map(select(.status == "error")) | length)],
     ["api_errors", ([$t | s::api_errors] | length)],
     ["persisted", ($calls | map(select(.persisted != null)) | length)],

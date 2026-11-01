@@ -14,14 +14,17 @@ Values come from `fixtures/FACTS.md`.
 $ render() { jq -r -L "$CC_TEST_ROOT/lib" "import \"sessions\" as s; import \"render\" as r; $1 | s::field"; }
 ```
 
-Bash shows the command's first line, how many lines follow, and the background and timeout flags.
+Bash shows the command's first line, how many lines follow, and the background and timeout flags; the background flag
+can be stored as the string `"true"`.
 
 ```scrut
 $ printf '%s\n' '{"name":"Bash","input":{"command":"make test","description":"Run the tests"}}' \
 >   '{"name":"Bash","input":{"command":"cd src &&\nmake\nmake install\n","run_in_background":true,"timeout":600000}}' \
+>   '{"name":"Bash","input":{"command":"make watch","run_in_background":"true"}}' \
 >   '{"name":"Bash","input":{"command":"sleep 90","timeout":90000}}' '{"name":"Bash","input":{"command":"true","timeout":1500}}' | render 'r::input(160)'
 make test
 cd src && [+2 lines] [bg] [timeout=10m]
+make watch [bg]
 sleep 90 [timeout=90s]
 true [timeout=1500ms]
 ```
@@ -69,11 +72,13 @@ Agent and Task show the agent type and description, then the name, model, resume
 $ printf '%s\n' '{"name":"Agent","input":{"description":"Survey tokenizer tests","subagent_type":"Explore","prompt":"p","run_in_background":true}}' \
 >   '{"name":"Agent","input":{"description":"Plan","name":"planner","subagent_type":"general-purpose","model":"haiku","prompt":"p"}}' \
 >   '{"name":"Task","input":{"description":"Locate config loader","subagent_type":"Explore","resume":"5f6a7b8c","prompt":"p"}}' \
->   '{"name":"Agent","input":{"subagent_type":"Explore","prompt":"p"}}' | render 'r::input(160)'
+>   '{"name":"Agent","input":{"subagent_type":"Explore","prompt":"p"}}' \
+>   '{"name":"Agent","input":{"subagent_type":"Explore","prompt":"p","run_in_background":"true"}}' | render 'r::input(160)'
 Explore "Survey tokenizer tests" [bg]
 general-purpose "Plan" [name=planner] [model=haiku]
 Explore "Locate config loader" [resume=5f6a7b8c]
 Explore
+Explore [bg]
 ```
 
 Workflow shows the name or the script path, then the arguments as compact JSON, whether stored as an object or a string.
@@ -143,22 +148,26 @@ denied 231
 none -
 ```
 
-The result shows the answers of AskUserQuestion, the agent id and final status of Agent, the run id and status of Workflow, the feedback of a denial, the saved path of a persisted output, and otherwise the text.
+The result shows the answers of AskUserQuestion, the agent or run that an Agent, Task or Workflow call started and its
+status (`started`, which `tools` computes), the feedback of a denial, the saved path of a persisted output, and otherwise
+the text: also for an Agent call that names no agent.
 
 ```scrut
 $ printf '%s\n' '{"name":"AskUserQuestion","status":"ok","text":"Your questions have been answered","answer":"Which mode? → Strict"}' \
->   '{"name":"Agent","status":"ok","text":"Async agent launched","agent_call":{"agent_id":"a1","status":"async_launched","notification":{"status":"completed"}}}' \
->   '{"name":"Task","status":"ok","text":"done","agent_call":{"agent_id":"5f6a7b8c","status":"completed","notification":null}}' \
->   '{"name":"Workflow","status":"ok","text":"Workflow launched","workflow_call":{"run_id":"wf_1","status":"async_launched","notification":null}}' \
+>   '{"name":"Agent","status":"ok","text":"Async agent launched","started":{"id":"a1","status":"killed"}}' \
+>   '{"name":"Task","status":"ok","text":"done","started":{"id":"5f6a7b8c","status":"completed"}}' \
+>   '{"name":"Workflow","status":"ok","text":"Workflow launched","started":{"id":"wf_1","status":"running"}}' \
+>   '{"name":"Agent","status":"error","text":"Agent type '"'"'x'"'"' not found","started":null}' \
 >   '{"name":"Edit","status":"denied","text":"The user doesn'"'"'t want to proceed","feedback":"Keep lenient."}' \
 >   '{"name":"Edit","status":"denied","text":"The user doesn'"'"'t want to proceed","feedback":null}' \
 >   '{"name":"Bash","status":"ok","text":"<persisted-output>…","persisted":{"path":"/r/t.txt","stated_path":"/s/t.txt"}}' \
 >   '{"name":"Bash","status":"ok","text":"<persisted-output>…","persisted":{"path":null,"stated_path":"/s/t.txt"}}' \
 >   '{"name":"Bash","status":"error","text":"Exit code 1\ncat: missing.txt"}' '{"name":"Bash","status":"none","text":null}' | render 'r::result(160)'
 Which mode? → Strict
-a1 completed
+a1 killed
 5f6a7b8c completed
-wf_1 async_launched
+wf_1 running
+Agent type 'x' not found
 Keep lenient.
 The user doesn't want to proceed
 /r/t.txt
@@ -212,6 +221,13 @@ $ cc-sessions tools --help | grep -E -c 'Empty answer|Exit status|160 characters
 3
 ```
 
+Help says that `--errors` is about the call: an agent killed or failed after its call returned is not an error.
+
+```scrut
+$ cc-sessions tools --help | grep -A 1 -e '^  --errors' | grep -c -e 'killed or failed'
+1
+```
+
 `-h` prints the same help, and the synopsis comes from `--synopsis`.
 
 ```scrut
@@ -240,7 +256,7 @@ L62\tmain\t2026-10-30T10:19:58Z\tAgent\tok\t180\tgeneral-purpose "Plan the stric
 L64\tmain\t2026-10-30T10:20:02Z\tWorkflow\tok\t522\tfixture-scan {"target":"src"} (escaped)
 ```
 
-The last field is the result: answers, the agent and its final status, the run, the feedback of a denial, the saved file of a persisted output, else the text.
+The last field is the result: answers, the agent and its status as `agents` gives it, the run, the feedback of a denial, the saved file of a persisted output, else the text. The teammate at L62 never sent a notification; its transcript ended with a finished message, so it completed.
 
 ```scrut
 $ cc-sessions tools a7c3e9f | cut -f1,8 | cc_test_rel
@@ -255,8 +271,53 @@ L45\tLaunching skill: alpha-helper (escaped)
 L48\tLaunching skill: alpha-helper (escaped)
 L51?User has approved your plan. * (glob)
 L60\ta7c3e9b2d4f6a8c01 completed (escaped)
-L62\taplanner-5e1f0a2b3c4d5e6f teammate_spawned (escaped)
+L62\taplanner-5e1f0a2b3c4d5e6f completed (escaped)
 L64\twf_5d1c9a7e-3b2 completed (escaped)
+```
+
+The status column is the call's own outcome, and the result names what the call started with the status `agents`
+gives it. In DELTA the run's record says the run completed, though the first call's notification said killed (L2); the
+teammates' ids are their transcripts' (L6 in process, L8 in a split pane, both finished); the agent of the interrupted
+call (L10) is found through its meta file.
+
+```scrut
+$ cc-sessions tools d5e7 --name '^(Agent|Workflow)$' | cut -f1,5,8
+> cc-sessions agents d5e7 | awk -F '\t' '$1 != "dir" { print $1 "\t" $3 " " $5 }'
+L2\tok\twf_8c2e4a6b-1d3 completed (escaped)
+L4\tok\ta1e3c5a7b9d1f3e5a completed (escaped)
+L6\tok\tareviewer-1a2b3c4d5e6f7a8b completed (escaped)
+L8\tok\tf3a5c7e9-1b3d-4f5a-8c7e-9a1b3c5d7e9f completed (escaped)
+L10\terror\ta2b4d6f8a0c2e4a6b killed (escaped)
+L15\tok\twf_8c2e4a6b-1d3 completed (escaped)
+L2\twf_8c2e4a6b-1d3 completed (escaped)
+L2\ta6d8f0b2c4e6a8b0d completed (escaped)
+L4\ta1e3c5a7b9d1f3e5a completed (escaped)
+L6\tareviewer-1a2b3c4d5e6f7a8b completed (escaped)
+L8\tf3a5c7e9-1b3d-4f5a-8c7e-9a1b3c5d7e9f completed (escaped)
+L10\ta2b4d6f8a0c2e4a6b killed (escaped)
+-\ta5c7e9a1b3c5d7e9f completed (escaped)
+```
+
+FOXTROT: the background flag stored as the string `"true"` still shows `[bg]`; a result's size counts its text only
+(an image-only Read result is 0, text plus an image 19); control characters print escaped (CR as `\r`, others as
+`\u00XX`); an Agent call whose agent was killed is `ok`, with the kill in its result.
+
+```scrut
+$ cc-sessions tools f0d2 | cut -f1,4-8
+L10\tExitPlanMode\terror\t106\t{"plan":"# Plan\\\\n\\\\n1. Sort the fixtures by era."}\t<tool_use_error>You are not in plan mode. To enter plan mode, call the EnterPlanMode tool</tool_use_error> (escaped)
+L12\tExitPlanMode\tok\t57\t{"plan":"# Plan\\\\n\\\\n1. Sort the fixtures by era."}\tUser has approved exiting plan mode. You can now proceed. (escaped)
+L32\tBash\tok\t22\t./progress.sh\tstep 1\\rstep 2\\r\\n\\u0000\\u0007done\\u007f (escaped)
+L34\tRead\tok\t0\t/tmp/sessions-fixture/foxtrot/screen.png\t[image] (escaped)
+L36\tmcp__demo__click\tok\t19\t{"x":10,"y":20}\tClicked at (10, 20)\\n[image] (escaped)
+L38\tWorkflow\terror\t69\tfixture-missing\t<tool_use_error>Workflow "fixture-missing" not found</tool_use_error> (escaped)
+L40\tAgent\tok\t264\tExplore "Survey the fixture eras" [bg]\ta0f2c4e6a8b0d2f4a killed (escaped)
+```
+
+Each record is one line for any line reader: no raw control character is left in it.
+
+```scrut
+$ cc-sessions tools f0d2 --full | LC_ALL=C tr -d '\n' | LC_ALL=C tr -dc '\000-\010\013-\037\177' | wc -c | tr -d ' '
+0
 ```
 
 A persisted output's size is the saved file's bytes, found under the session's `tool-results/` when the stored path is gone; a result that quotes the marker mid-text is not persisted.
@@ -360,19 +421,23 @@ L64
 `--result` matches the result text and the rendered result.
 
 ```scrut
-$ for re in 'Unknown skill' '^Launching skill' 'teammate_spawned'; do cc-sessions tools a7c3e9f --result "$re" | cut -f1 | paste -s -d ' ' -; done
+$ for re in 'Unknown skill' '^Launching skill' 'aplanner.* completed'; do cc-sessions tools a7c3e9f --result "$re" | cut -f1 | paste -s -d ' ' -; done
 L32
 L45 L48
 L62
 ```
 
-`--errors` selects failed calls only: a denial is the user's choice, not an error.
+`--errors` selects failed calls only: a denial is the user's choice, not an error, and an agent killed after its call
+returned (FOXTROT L40) is not one either.
 
 ```scrut
 $ cc-sessions tools a7c3e9f --errors | cut -f1,4,5 && cc-sessions tools a7c3e9f --errors --name Bash | cut -f1
+> cc-sessions tools f0d2 --errors | cut -f1,4,5
 L30\tBash\terror (escaped)
 L32\tSkill\terror (escaped)
 L30
+L10\tExitPlanMode\terror (escaped)
+L38\tWorkflow\terror (escaped)
 ```
 
 `--since` and `--until` take handles, inclusive.
