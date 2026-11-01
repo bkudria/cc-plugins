@@ -38,6 +38,22 @@
       "source": "./plugins/projects"
     },
     {
+      "name": "sessions",
+      "description": "Investigate past Claude Code sessions from their transcripts with cc-sessions, an agent-oriented CLI that reads the current transcript format correctly and keeps its output bounded.",
+      "license": "MIT",
+      "homepage": "https://github.com/bkudria/cc-plugins/tree/main/plugins/sessions",
+      "category": "productivity",
+      "keywords": [
+        "sessions",
+        "transcripts",
+        "history",
+        "jsonl",
+        "cli",
+        "claude-code"
+      ],
+      "source": "./plugins/sessions"
+    },
+    {
       "name": "triage",
       "source": "./plugins/triage",
       "description": "Assess a scope to produce findings, then address them one-by-one.",

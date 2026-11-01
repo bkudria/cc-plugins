@@ -22,6 +22,7 @@ Replace `<name>` with a plugin name from the catalog below. See per-plugin secti
 |--------|-------------|--------|
 | [`claudecraft`](plugins/claudecraft/) | Create, audit, and publish Claude Code skills and plugins. Bundles skillcraft (skill authoring discipline), claude-code-evals (eval pipeline reference), and plugincraft (plugin authoring + marketplace lifecycle). | [plugins/claudecraft/README.md](plugins/claudecraft/README.md) |
 | [`projects`](plugins/projects/) | Audit a project's standards compliance or scaffold a new one, driven by declarative project.yaml profiles. | [plugins/projects/README.md](plugins/projects/README.md) |
+| [`sessions`](plugins/sessions/) | Investigate past Claude Code sessions from their transcripts with cc-sessions, an agent-oriented CLI that reads the current transcript format correctly and keeps its output bounded. | [plugins/sessions/README.md](plugins/sessions/README.md) |
 | [`triage`](plugins/triage/) | Assess a scope to produce findings, then address them one-by-one. | [plugins/triage/README.md](plugins/triage/README.md) |
 
 ### claudecraft
@@ -46,6 +47,12 @@ One skill for project standards compliance:
 
 Auto-triggers on "audit this project", "check compliance", "new project", and similar. See [plugins/projects/README.md](plugins/projects/README.md) for the audit/scaffold workflows and the `project.yaml` schema.
 
+### sessions
+
+    /plugin install sessions@bkudria-cc-plugins
+
+Ships `cc-sessions`, a read-only CLI for answering questions about past sessions from their transcripts: which sessions exist, where text appears, what a session did, what the human asked, which tools and sub-agents ran and with what results. While the plugin is enabled, `cc-sessions` is on `PATH` in the session's Bash tool; `cc-sessions --help` is its reference. See [plugins/sessions/README.md](plugins/sessions/README.md).
+
 ### triage
 
     /plugin install triage@bkudria-cc-plugins
@@ -64,7 +71,9 @@ Invoke via the `/triage:assess` and `/triage:iterate` slash commands.
     │   └── marketplace.json          # marketplace manifest (auto-regenerated)
     ├── .github/
     │   └── workflows/
-    │       └── marketplace-sync.yml  # CI auto-sync
+    │       ├── marketplace-sync.yml  # CI auto-sync
+    │       ├── plugin-validate.yml   # CI plugin validation
+    │       └── sessions-tests.yml    # CI tests for the sessions plugin
     └── plugins/
         ├── claudecraft/
         │   ├── .claude-plugin/plugin.json
@@ -78,8 +87,16 @@ Invoke via the `/triage:assess` and `/triage:iterate` slash commands.
         │   ├── README.md
         │   └── skills/
         │       └── standards/
+        ├── sessions/
+        │   ├── .claude-plugin/plugin.json
+        │   ├── README.md
+        │   ├── bin/cc-sessions
+        │   ├── lib/
+        │   ├── libexec/
+        │   └── tests/
         └── triage/
             ├── .claude-plugin/plugin.json
+            ├── README.md
             └── skills/
                 ├── assess/
                 └── iterate/
