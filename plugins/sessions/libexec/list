@@ -14,8 +14,9 @@ transcripts are never rows.
   <pattern>     literal text matched against the session id, every title (custom-title, ai-title,
                 agent-name, legacy summary) and the first typed input; all-lowercase text matches
                 any case. Put a pattern that starts with - after --
-  --skill NAME  sessions that loaded skill NAME, in the main transcript or a non-internal agent;
-                bare and namespaced names match by their last segment; adds the skill field
+  --skill NAME  sessions that loaded skill NAME, in the main transcript or a non-internal agent
+                (also one stored with another session); bare and namespaced names match by their
+                last segment; adds the skill field
   --cwd PATH    sessions with any cwd equal to PATH or under it (PATH is not resolved through links)
   --since T     sessions modified at or after T: a timestamp (2026-10-30T10:00:04Z, 2026-10-30)
                 or an age (30m, 2h, 7d)
@@ -34,11 +35,12 @@ Fields, one session per record:
   label     custom title, else ai-title with a space, else agent name, else summary, else the
             first typed input (a prompt, command or queued message; not a tool decision)
   skill     with --skill: <exact name> <how>[,<how>...] [+<n> agents], how being tool, skill,
-            bundled or orphan; +<n> agents counts the agents that loaded it
+            bundled or orphan as the main transcript loaded it, - when only agents did; +<n>
+            agents counts the agents that loaded it
 
 When --limit or --max-chars stops the listing, it stops before sessions that share one modified
 time, or shows them all when they alone fill the page; a notice says to continue with --until
-<modified of the next session>.
+<modified of the next session>. A session that cannot be read is left out with a notice.
 Empty answer: nothing on stdout; a notice names the pattern, the options and how many sessions
 were checked.
 Exit status: 0 answered, also when empty; 1 no transcripts directory, or rg missing; 2 usage
@@ -73,10 +75,9 @@ cc_list_paths() {
   paths=(${CC_LINES[@]+"${CC_LINES[@]}"})
 }
 
-# The agent transcripts of the sessions in paths that left a load marker.
+# The agent transcripts of the sessions in paths that left a load marker, as "<main>TAB<file>" lines.
 cc_list_skill_agents() {
-  printf '%s\n' "${paths[@]}" | awk -F '\t' 'FILENAME == "-" { want[$0] = 1; next } FILENAME == hits { hit[$0] = 1; next }
-    ($1 in want) && ($2 in hit) { print $2 }' hits="$skill_hits" - "$skill_hits" "$agent_map"
+  awk -F '\t' 'FILENAME == ARGV[1] { want[$0] = 1; next } ($1 in want) && $2 != $1' <(printf '%s\n' "${paths[@]}") "$skill_hits"
 }
 
 patterns=() skill='' cwd='' since='' until='' origin=cli full=0
@@ -140,7 +141,7 @@ width=100
 
 plan=$("$(cc_jq_binary)" -n -r -L "$CC_SESSIONS_LIB" --arg pattern "$pattern" --arg skill "$skill" --arg cwd "$cwd" "$(cc_module_program list '
   (if $pattern != "" then $pattern | s::rg_literal else "" end),
-  (if $pattern != "" and ($pattern | s::smart_insensitive) then "-i" else "-s" end),
+  (if $pattern != "" and ($pattern | s::smart_insensitive(false)) then "-i" else "-s" end),
   (if $cwd != "" then $cwd | s::rg_cwd else "" end),
   (if $skill != "" then rg_skill_trigger($skill) else "" end),
   (if $skill != "" then rg_skill_markers($skill)[] else empty end)')" < /dev/null)
@@ -175,14 +176,20 @@ since_from=${since%% *} until_to=${until##* }
 cands=$(cc_sessions_by_mtime "$since_from" "$until_to")
 total=0
 [ -n "$cands" ] && total=$(($(printf '%s\n' "$cands" | wc -l)))
+work=$(mktemp -d "${TMPDIR:-/tmp}/cc-sessions-list.XXXXXX") || cc_fail "cannot create a temporary directory" "check TMPDIR"
+trap 'rm -rf "$work"' EXIT
+batch_agents=$work/batch-agents.tsv
 if [ -n "$skill" ] && [ -n "$cands" ]; then
-  work=$(mktemp -d "${TMPDIR:-/tmp}/cc-sessions-list.XXXXXX") || cc_fail "cannot create a temporary directory" "check TMPDIR"
-  trap 'rm -rf "$work"' EXIT
-  agent_map=$work/agents.tsv skill_hits=$work/hits.txt
-  cc_corpus_agent_map > "$agent_map"
-  cc_rg -l --no-ignore --hidden --glob '*.jsonl' --glob '!journal.jsonl' "${load_markers[@]}" -- "$root" > "$skill_hits"
+  skill_hits=$work/hits.tsv
+  # The candidates and their agents, also those their calls name in another session's directory, as
+  # "<main>TAB<file>" lines whose file left a load marker.
+  printf '%s\n' "$cands" | cut -f 4- > "$work/mains.txt"
+  cc_corpus_agent_map > "$work/agents.tsv"
+  { awk '{ print $0 "\t" $0 }' "$work/mains.txt"
+    awk -F '\t' 'FILENAME == ARGV[1] { want[$0] = 1; next } $1 in want' "$work/mains.txt" "$work/agents.tsv"; } > "$work/pairs.tsv"
+  cc_corpus_matching "$work/pairs.tsv" "$work/agents.tsv" "${load_markers[@]}" > "$skill_hits"
   keep=$cands
-  cc_list_keep "$(awk -F '\t' 'FILENAME == ARGV[1] { owner[$2] = $1; next } { print (($0 in owner) ? owner[$0] : $0) }' "$agent_map" "$skill_hits")"
+  cc_list_keep "$(cut -f 1 "$skill_hits")"
   cands=$keep
 fi
 rows=0
@@ -222,13 +229,16 @@ cc_list_batch() {
   [ ${#paths[@]} -gt 0 ] || return 0
   cc_list_keep "$(cc_rg -l -m 1 -e "$content_re" -- "${paths[@]}")"
   cc_list_paths
+  : > "$batch_agents"
   if [ -n "$skill" ] && [ ${#paths[@]} -gt 0 ]; then
-    cc_lines "$(cc_list_skill_agents)"
+    cc_list_skill_agents > "$batch_agents"
+    cc_lines "$(cut -f 2- "$batch_agents" | awk '!seen[$0]++')"
     agents=(${CC_LINES[@]+"${CC_LINES[@]}"})
   fi
   [ ${#paths[@]} -gt 0 ] || return 0
-  "$(cc_jq_binary)" -n -R -r -L "$CC_SESSIONS_LIB" --argjson opts "$opts" --arg candidates "$keep" \
-    "$(cc_module_program list main)" <(
+  # The candidates and their agent files reach jq as files, not arguments, so any number of them fits.
+  "$(cc_jq_binary)" -n -R -r -L "$CC_SESSIONS_LIB" --argjson opts "$opts" --rawfile candidates <(printf '%s\n' "$keep") \
+    --rawfile agents "$batch_agents" "$(cc_module_program list main)" <(
       cc_list_label_lines "${paths[@]}"
       cc_rg "${cc_list_lines[@]}" -m 1 "${sdk_res[@]}" -- "${paths[@]}"
       [ -z "$cwd" ] || cc_rg "${cc_list_lines[@]}" -m 1 -e "$cwd_re" -- "${paths[@]}"

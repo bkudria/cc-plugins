@@ -43,6 +43,38 @@ thinking injected summary notification peer
 thinking injected summary notification peer
 ```
 
+## Shapes beyond the fixtures
+
+`ODD` holds four sessions, newest first. `0dd00001` has a hook whose content is an array (L2), a hook that failed with
+only stderr (L3), and a Workflow call (L4, L5) whose run's journal and agent return structured results with quotes and
+a newline. `0dd00002` copies that call, so it names a run stored in `0dd00001`'s directory. `0dd00003` holds a text
+block whose text is an object, which no rule can read, and `0dd00004` an `ai-title` that is a number.
+
+```scrut
+$ ODD=$CC_TEST_TMP/odd && OP=$ODD/projects/-tmp-odd && OR=$OP/0dd00001-0000-4000-8000-000000000001/subagents/workflows/wf_0dd0000a-001
+> mkdir -p "$OR"
+> printf '%s\n' '{"type":"user","message":{"role":"user","content":"Odd one: the path is c:\\users\\me"},"uuid":"0dd10001-0000-4000-8000-000000000001","timestamp":"2026-09-10T10:00:01.000Z","sessionId":"0dd00001-0000-4000-8000-000000000001","cwd":"/tmp/odd"}' \
+>   '{"type":"attachment","attachment":{"type":"hook_additional_context","content":["ODD_HOOK_ARRAY context"],"hookName":"PostToolUse:Bash","hookEvent":"PostToolUse","toolUseID":"toolu_0dd0"},"uuid":"0dd10001-0000-4000-8000-000000000002","timestamp":"2026-09-10T10:00:02.000Z","sessionId":"0dd00001-0000-4000-8000-000000000001","cwd":"/tmp/odd"}' \
+>   '{"type":"attachment","attachment":{"type":"hook_non_blocking_error","hookName":"Stop","stdout":"","stderr":"ODD_HOOK_STDERR went wrong","exitCode":1},"uuid":"0dd10001-0000-4000-8000-000000000003","timestamp":"2026-09-10T10:00:03.000Z","sessionId":"0dd00001-0000-4000-8000-000000000001","cwd":"/tmp/odd"}' \
+>   '{"type":"assistant","message":{"id":"msg_0dd1","role":"assistant","model":"claude-opus-5-5","content":[{"type":"tool_use","id":"toolu_0dd1","name":"Workflow","input":{"name":"odd-scan"}}],"usage":{"input_tokens":1,"output_tokens":1}},"uuid":"0dd10001-0000-4000-8000-000000000004","timestamp":"2026-09-10T10:00:04.000Z","sessionId":"0dd00001-0000-4000-8000-000000000001","cwd":"/tmp/odd"}' \
+>   '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_0dd1","content":"Workflow odd-scan launched."}]},"toolUseResult":{"status":"async_launched","runId":"wf_0dd0000a-001","taskId":"w0dd0001"},"uuid":"0dd10001-0000-4000-8000-000000000005","timestamp":"2026-09-10T10:00:05.000Z","sessionId":"0dd00001-0000-4000-8000-000000000001","cwd":"/tmp/odd"}' \
+>   > "$OP/0dd00001-0000-4000-8000-000000000001.jsonl"
+> printf '%s\n' '{"type":"started","agentId":"a0dd00000000000a1","key":"scan","label":"scan","phase":"Scan"}' \
+>   '{"type":"result","agentId":"a0dd00000000000a1","key":"scan","result":{"note":"a grep for \"snoot\" across\nthe tree"}}' > "$OR/journal.jsonl"
+> printf '%s\n' '{"type":"user","isSidechain":true,"agentId":"a0dd00000000000a1","message":{"role":"user","content":"Scan the odd tree."},"uuid":"0dd1a001-0000-4000-8000-000000000001","timestamp":"2026-09-10T10:00:06.000Z","sessionId":"0dd00001-0000-4000-8000-000000000001","cwd":"/tmp/odd"}' \
+>   '{"type":"attachment","isSidechain":true,"agentId":"a0dd00000000000a1","attachment":{"type":"structured_output","data":{"verdict":"said \"done\" twice"}},"uuid":"0dd1a001-0000-4000-8000-000000000002","timestamp":"2026-09-10T10:00:07.000Z","sessionId":"0dd00001-0000-4000-8000-000000000001","cwd":"/tmp/odd"}' \
+>   > "$OR/agent-a0dd00000000000a1.jsonl"
+> { printf '%s\n' '{"type":"user","message":{"role":"user","content":"Odd two picks up the scan."},"uuid":"0dd10002-0000-4000-8000-000000000001","timestamp":"2026-09-10T11:00:01.000Z","sessionId":"0dd00002-0000-4000-8000-000000000002","cwd":"/tmp/odd"}'
+>   sed -n 4,5p "$OP/0dd00001-0000-4000-8000-000000000001.jsonl"; } > "$OP/0dd00002-0000-4000-8000-000000000002.jsonl"
+> printf '%s\n' '{"type":"user","message":{"role":"user","content":[{"type":"text","text":{"odd":3}}]},"uuid":"0dd10003-0000-4000-8000-000000000001","timestamp":"2026-09-10T11:10:01.000Z","sessionId":"0dd00003-0000-4000-8000-000000000003","cwd":"/tmp/odd"}' \
+>   '{"type":"user","message":{"role":"user","content":"Odd three mentions ODD_BROKEN_TERM."},"uuid":"0dd10003-0000-4000-8000-000000000002","timestamp":"2026-09-10T11:10:02.000Z","sessionId":"0dd00003-0000-4000-8000-000000000003","cwd":"/tmp/odd"}' \
+>   > "$OP/0dd00003-0000-4000-8000-000000000003.jsonl"
+> printf '%s\n' '{"type":"ai-title","aiTitle":4,"sessionId":"0dd00004-0000-4000-8000-000000000004"}' \
+>   '{"type":"user","message":{"role":"user","content":"Odd four mentions ODD_BROKEN_TERM too."},"uuid":"0dd10004-0000-4000-8000-000000000001","timestamp":"2026-09-10T11:20:01.000Z","sessionId":"0dd00004-0000-4000-8000-000000000004","cwd":"/tmp/odd"}' \
+>   > "$OP/0dd00004-0000-4000-8000-000000000004.jsonl"
+> for n in 1 2 3 4; do touch -t "20260910120$((5 - n)).00" "$OP/0dd0000$n-0000-4000-8000-00000000000$n.jsonl"; done
+```
+
 ## Corpus search
 
 Without a session, one record per session: hits in sub-agents, workflow agents and the run journal count toward ALPHA, and `agent` ends the kinds when agents had hits.
@@ -136,6 +168,24 @@ b2d4f6a8-1c3e-4a5b-8d7f-9e0a1b2c3d4e\t3\tprompt,assistant (escaped)
 0
 ```
 
+A run that a session's Workflow call names counts for that session wherever the run is stored: `0dd00002`'s copy of
+the call names the run in `0dd00001`'s directory.
+
+```scrut
+$ CLAUDE_CONFIG_DIR=$ODD cc-sessions search 'the tree' | rows
+0dd00001-0000-4000-8000-000000000001\t1\tagent-result,agent (escaped)
+0dd00002-0000-4000-8000-000000000002\t1\tagent-result,agent (escaped)
+```
+
+A session that a rule cannot read is left out with a notice, and the sessions after it are still searched; an
+`ai-title` that is not a string is no title.
+
+```scrut
+$ CLAUDE_CONFIG_DIR=$ODD cc-sessions search ODD_BROKEN_TERM 2> err.txt | cut -f 1,3,4,7; cat err.txt
+0dd00004-0000-4000-8000-000000000004\t1\tprompt\tOdd four mentions ODD_BROKEN_TERM too. (escaped)
+cc-sessions: left out session 0dd00003-0000-4000-8000-000000000003, which could not be read (*) (glob)
+```
+
 ## Text matching
 
 Text is matched decoded: the quotes are `\"` on disk.
@@ -187,6 +237,22 @@ cc-sessions: --regex "lib(" is not a valid regex; fix it, or drop --regex to sea
 [2]
 ```
 
+A bracket expression is one character, also when it holds a POSIX class.
+
+```scrut
+$ cc-sessions search --regex '[l]exer' a7c3e9f | hits; echo; cc-sessions search --regex '[[:alpha:]]exer' a7c3e9f | hits
+> echo; cc-sessions search --regex '[[:alpha:]]exer' | rows
+L69\tmain\tprompt (escaped)
+L70\tmain\tassistant (escaped)
+L71\tmain\tprompt (escaped)
+
+L69\tmain\tprompt (escaped)
+L70\tmain\tassistant (escaped)
+L71\tmain\tprompt (escaped)
+
+a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e\t5\tprompt,assistant,tool-result,from-parent,agent (escaped)
+```
+
 Smart case: all-lowercase text matches any case; text with a capital letter matches exactly.
 
 ```scrut
@@ -203,6 +269,14 @@ L14\tmain\tassistant (escaped)
 done
 ```
 
+In literal text a backslash is a character like any other, so the capital letter after it counts.
+
+```scrut
+$ CLAUDE_CONFIG_DIR=$ODD cc-sessions search '\users' 0dd00001 | hits; CLAUDE_CONFIG_DIR=$ODD cc-sessions search '\Users' 0dd00001 2>&1
+L1\tmain\tprompt (escaped)
+cc-sessions: no hits for "\\Users" in the default kinds of 1 transcript (session 0dd00001-0000-4000-8000-000000000001)
+```
+
 ## Kinds
 
 `--kind` takes a comma-separated list; each kind finds only its own records.
@@ -217,11 +291,54 @@ L76\tmain\trecap (escaped)
 L41\tmain\tfile (escaped)
 ```
 
-`hook` content is the hook's output.
+`hook` content is the hook's output: its stdout, its stderr and its content, which can be an array of strings.
 
 ```scrut
 $ cc-sessions search 'fixture hook ready' a7c3e9f | hits
+> CLAUDE_CONFIG_DIR=$ODD cc-sessions search ODD_HOOK_ARRAY 0dd00001 | hits; CLAUDE_CONFIG_DIR=$ODD cc-sessions search ODD_HOOK_STDERR 0dd00001 | hits
 L3\tmain\thook (escaped)
+L2\tmain\thook (escaped)
+L3\tmain\thook (escaped)
+```
+
+`agent-result` text is the string values of a structured result, decoded as `tool-input`'s are: quotes and newlines
+match as written, and key names are not text.
+
+```scrut
+$ CLAUDE_CONFIG_DIR=$ODD cc-sessions search 'for "snoot" across' 0dd00001 --agents | hits; CLAUDE_CONFIG_DIR=$ODD cc-sessions search 'said "done" twice' 0dd00001 --agents | hits
+> CLAUDE_CONFIG_DIR=$ODD cc-sessions search --regex 'across\nthe tree' 0dd00001 --agents | hits; CLAUDE_CONFIG_DIR=$ODD cc-sessions search verdict 0dd00001 --agents 2>&1
+L2\twf_0dd0000a-001\tagent-result (escaped)
+L2\ta0dd00000000000a1\tagent-result (escaped)
+L2\twf_0dd0000a-001\tagent-result (escaped)
+cc-sessions: no hits for "verdict" in the default kinds of 3 transcripts (session 0dd00001-0000-4000-8000-000000000001)
+```
+
+## Decisions
+
+An answer, a denial or a plan decision is human input, so its result line is one `prompt` record. Like every record,
+it is matched in the transcript's text, the result as Claude Code wrote it, not in the `question → answer` or
+`approved: plan` forms that other commands print.
+
+```scrut
+$ cc-sessions search 'Strict (Recommended)' a7c3e9f | hits; cc-sessions search 'the user said' a7c3e9f | hits; cc-sessions search 'start coding' a7c3e9f | hits
+> cc-sessions search 'review target? → Strict' a7c3e9f 2>&1
+L26\tmain\ttool-input (escaped)
+L27\tmain\tprompt (escaped)
+L29\tmain\tprompt (escaped)
+L52\tmain\tprompt (escaped)
+cc-sessions: no hits for "review target? → Strict" in the default kinds of 1 transcript (session a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e)
+```
+
+Across sessions only the lines that hold the text are read, so a decision is told by its result line alone: an answer
+by the questions and answers it records, a denial or an approval by how its text starts. FOXTROT's L2 denies a call
+from an earlier session.
+
+```scrut
+$ cc-sessions search 'continue with these answers' | rows; cc-sessions search 'the user said' | rows; cc-sessions search 'exiting plan mode' | rows
+a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e\t1\tprompt (escaped)
+a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e\t1\tprompt (escaped)
+f0d2b4c6-8e0a-4b2c-9d4e-6f8a0b2c4d6e\t1\tprompt (escaped)
+f0d2b4c6-8e0a-4b2c-9d4e-6f8a0b2c4d6e\t1\tprompt (escaped)
 ```
 
 An unknown kind is a usage error that lists the kinds.
@@ -328,12 +445,13 @@ L1\t5f6a7b8c\tfrom-parent (escaped)
 L8\tmain\tassistant (escaped)
 ```
 
-The resumed copy is its own session: it holds a copy of BETA's Agent call, but BETA's sub-agent counts only for BETA.
+The resumed copy is its own session, and its copy of BETA's Agent call names BETA's sub-agent, so across sessions that
+agent's hits count for both.
 
 ```scrut
 $ cc-sessions search 'include path' | rows; cc-sessions search 'missing beta.h header' | rows
 b9e1c3a5-7d2f-4e6a-8b0c-1d3e5f7a9b2c\t2\tprompt,assistant (escaped)
-b9e1c3a5-7d2f-4e6a-8b0c-1d3e5f7a9b2c\t1\ttool-input (escaped)
+b9e1c3a5-7d2f-4e6a-8b0c-1d3e5f7a9b2c\t2\ttool-input,from-parent,agent (escaped)
 b2d4f6a8-1c3e-4a5b-8d7f-9e0a1b2c3d4e\t2\ttool-input,from-parent,agent (escaped)
 ```
 
@@ -437,6 +555,27 @@ $ CLAUDE_CONFIG_DIR=$GEN cc-sessions search 'prompt 10' | cut -f 1,3; CLAUDE_CON
 cc-sessions: output stopped at --limit 30 after 30 sessions; older sessions were not all examined; continue with --until 2026-09-01T12:21:00Z
 ```
 
+That pass reads only the remaining sessions' files; past `CC_SESSIONS_RG_FILES` of them (5000 by default) it reads
+the data root once instead, with the same answer.
+
+```scrut
+$ CLAUDE_CONFIG_DIR=$GEN CC_SESSIONS_RG_FILES=0 cc-sessions search 'prompt 10' | cut -f 1,3
+00000000-0000-4000-8000-000000000010\t1 (escaped)
+```
+
+That pass also finds the agents and runs that a session's calls name in another session's directory: `GENODD` is
+`GEN` with `ODD`'s first two sessions added, older than the rest.
+
+```scrut
+$ GENODD=$CC_TEST_TMP/genodd && cp -R "$GEN" "$GENODD" && cp -R "$OP"/0dd00001-0000-4000-8000-000000000001* "$OP"/0dd00002-0000-4000-8000-000000000002.jsonl "$GENODD/projects/-tmp-gen/"
+> touch -t 202608011201.00 "$GENODD/projects/-tmp-gen/0dd00001-0000-4000-8000-000000000001.jsonl"; touch -t 202608011200.00 "$GENODD/projects/-tmp-gen/0dd00002-0000-4000-8000-000000000002.jsonl"
+> CLAUDE_CONFIG_DIR=$GENODD cc-sessions search 'the tree' | rows; CLAUDE_CONFIG_DIR=$GENODD CC_SESSIONS_RG_FILES=0 cc-sessions search 'the tree' | rows
+0dd00001-0000-4000-8000-000000000001\t1\tagent-result,agent (escaped)
+0dd00002-0000-4000-8000-000000000002\t1\tagent-result,agent (escaped)
+0dd00001-0000-4000-8000-000000000001\t1\tagent-result,agent (escaped)
+0dd00002-0000-4000-8000-000000000002\t1\tagent-result,agent (escaped)
+```
+
 Only the first 100 matching lines of a file are read in corpus search, and `hits` then ends with `+`; within a session every hit counts.
 
 ```scrut
@@ -536,7 +675,7 @@ cc-sessions: --since L5 is a handle, which only per-session records have; pass a
 ```scrut
 $ cc-sessions search report-builder 2>/dev/null | rows; cc-sessions search report-builder --origin sdk | rows; cc-sessions search header --cwd /tmp/sessions-fixture/beta | rows
 d1f3b5d7-9e0a-4c2e-a4b6-c8d0e2f4a6b8\t2\tprompt,assistant (escaped)
-b9e1c3a5-7d2f-4e6a-8b0c-1d3e5f7a9b2c\t5\tprompt,assistant,tool-input,tool-result (escaped)
+b9e1c3a5-7d2f-4e6a-8b0c-1d3e5f7a9b2c\t7\tprompt,assistant,tool-input,tool-result,from-parent,agent (escaped)
 b2d4f6a8-1c3e-4a5b-8d7f-9e0a1b2c3d4e\t9\tprompt,assistant,tool-input,tool-result,from-parent,agent (escaped)
 ```
 

@@ -248,7 +248,9 @@ cc-sessions: no sessions with --skill gamma-helper --origin cli; 13 sessions che
 cc-sessions: no sessions with --skill effort --origin cli; 13 sessions checked in <root>/projects
 ```
 
-`SKILLS` is a copy of the fixtures where BETA has one sub-agent that loads `beta-helper` and an internal compaction agent that loads `beta-helper` and `hidden-helper`.
+`SKILLS` is a copy of the fixtures where BETA has one sub-agent that loads `beta-helper` and an internal compaction
+agent that loads `beta-helper` and `hidden-helper`, and BETA's Explore agent, which RESUMED's copied call names too,
+ends by loading `explore-helper`.
 
 ```scrut
 $ SKILLS=$CC_TEST_TMP/skills && cc_test_install_config "$SKILLS"
@@ -264,13 +266,35 @@ $ SKILLS=$CC_TEST_TMP/skills && cc_test_install_config "$SKILLS"
 > }
 > loads a1b2c3d4e5f6a7b8c "$SD/agent-a1b2c3d4e5f6a7b8c.jsonl" beta-helper
 > loads acompact-0b1c2d "$SD/agent-acompact-0b1c2d.jsonl" beta-helper hidden-helper
+> printf '%s\n' '{"parentUuid":null,"isSidechain":true,"agentId":"a4c6e8f0a2b4c6d8e","type":"assistant","uuid":"f1000009-0000-4000-8000-00000000000a","timestamp":"2026-07-15T09:02:10.000Z","message":{"id":"msg_fx9","type":"message","role":"assistant","model":"claude-haiku-5-5","content":[{"type":"tool_use","id":"toolu_fx9","name":"Skill","input":{"skill":"explore-helper"}}],"usage":{"input_tokens":1,"output_tokens":1}}}' \
+>   '{"parentUuid":null,"isSidechain":true,"agentId":"a4c6e8f0a2b4c6d8e","type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_fx9","content":"Launching skill: explore-helper"}]},"uuid":"f1000009-0000-4000-8000-00000000000b","timestamp":"2026-07-15T09:02:11.000Z"}' \
+>   >> "$SD/agent-a4c6e8f0a2b4c6d8e.jsonl"
 ```
 
-A load in a sub-agent lists the session and counts the agents it happened in; internal agents are left out.
+A load in a sub-agent lists the session and counts the agents it happened in; internal agents are left out. The how
+is the main transcript's, `-` when only agents loaded the skill.
 
 ```scrut
 $ CLAUDE_CONFIG_DIR=$SKILLS cc-sessions list --skill beta-helper | cut -f 1,8
-b2d4f6a8-1c3e-4a5b-8d7f-9e0a1b2c3d4e\tbeta-helper tool +1 agents (escaped)
+b2d4f6a8-1c3e-4a5b-8d7f-9e0a1b2c3d4e\tbeta-helper - +1 agents (escaped)
+```
+
+A session's agents include those its calls name in another session's directory: RESUMED's copy of BETA's Agent call
+names the Explore agent.
+
+```scrut
+$ CLAUDE_CONFIG_DIR=$SKILLS cc-sessions list --skill explore-helper | cut -f 1,8
+b9e1c3a5-7d2f-4e6a-8b0c-1d3e5f7a9b2c\texplore-helper - +1 agents (escaped)
+b2d4f6a8-1c3e-4a5b-8d7f-9e0a1b2c3d4e\texplore-helper - +1 agents (escaped)
+```
+
+Load markers are looked for in the candidate sessions and their agents only; past `CC_SESSIONS_RG_FILES` of those
+files (5000 by default), one pass over the data root finds them instead, with the same answer.
+
+```scrut
+$ CLAUDE_CONFIG_DIR=$SKILLS CC_SESSIONS_RG_FILES=0 cc-sessions list --skill explore-helper | cut -f 1,8
+b9e1c3a5-7d2f-4e6a-8b0c-1d3e5f7a9b2c\texplore-helper - +1 agents (escaped)
+b2d4f6a8-1c3e-4a5b-8d7f-9e0a1b2c3d4e\texplore-helper - +1 agents (escaped)
 ```
 
 ```scrut
@@ -510,6 +534,22 @@ An empty answer exits 0 with nothing on stdout and a notice naming the filters a
 $ out=$(cc-sessions list zzz-none --since 2026-10-01 2> err.txt); echo "exit $? stdout ${#out}"; cc_test_rel < err.txt
 exit 0 stdout 0
 cc-sessions: no sessions match "zzz-none" with --since 2026-10-01 --origin cli; 6 sessions checked in <root>/projects
+```
+
+A session that a rule cannot read is left out with a notice, and the listing goes on. `BAD` holds three sessions,
+newest first: an ordinary one, one whose text block holds an object instead of text, and one whose `ai-title` is a
+number, which is no title.
+
+```scrut
+$ BAD=$CC_TEST_TMP/bad && mkdir -p "$BAD/projects/-tmp-bad"
+> bad() { printf '%s\n' "$2" '{"type":"user","message":{"role":"user","content":"'"$3"'"},"uuid":"0bad100'"$1"'-0000-4000-8000-000000000002","timestamp":"2026-09-11T10:00:0'"$1"'.000Z","sessionId":"0bad000'"$1"'-0000-4000-8000-00000000000'"$1"'","cwd":"/tmp/bad"}' > "$BAD/projects/-tmp-bad/0bad000$1-0000-4000-8000-00000000000$1.jsonl"; touch -t "20260911120$((4 - $1)).00" "$BAD/projects/-tmp-bad/0bad000$1-0000-4000-8000-00000000000$1.jsonl"; }
+> bad 1 '{"type":"mode","mode":"normal"}' 'The first bad-config session.'
+> bad 2 '{"type":"user","message":{"role":"user","content":[{"type":"text","text":{"odd":2}}]},"uuid":"0bad1002-0000-4000-8000-000000000001","sessionId":"0bad0002-0000-4000-8000-000000000002"}' 'The second one.'
+> bad 3 '{"type":"ai-title","aiTitle":3,"sessionId":"0bad0003-0000-4000-8000-000000000003"}' 'The third, titled with a number.'
+> CLAUDE_CONFIG_DIR=$BAD cc-sessions list 2> err.txt | ids; cat err.txt
+0bad0001-0000-4000-8000-000000000001\tThe first bad-config session. (escaped)
+0bad0003-0000-4000-8000-000000000003\tThe third, titled with a number. (escaped)
+cc-sessions: left out session 0bad0002-0000-4000-8000-000000000002, which could not be read (*) (glob)
 ```
 
 A missing data root means the command could not answer.

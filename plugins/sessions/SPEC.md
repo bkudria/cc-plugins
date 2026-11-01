@@ -62,6 +62,9 @@ Every `<session>` argument accepts, in this order:
 
 - Lines are parsed tolerantly (`jq -R 'fromjson?'`). Unparseable lines are skipped and counted in a stderr notice per
   file. `list` and `search` across sessions report sessions, not lines, and print none; `schema` sums them in one notice.
+  A session holding an entry that a rule cannot read (a text block whose text is an object) is left out of `list` and
+  `search` across sessions with a notice naming it, and the other sessions are still answered. A value of the wrong
+  type where a rule expects text, such as a title that is a number, is no value.
 - jq and rg always get absolute paths and never read stdin (project directory names start with `-`). Files reach jq
   as one text through a pipe, never as arguments, so any number of them fits.
 - Entries are de-duplicated by `uuid`, keeping the first occurrence: some files re-append an earlier block of history.
@@ -109,9 +112,11 @@ After de-duplication, an entry is human input when it is one of:
 5. An AskUserQuestion answer (kind `answer`: the question and the chosen labels or typed text), a tool rejection (kind
    `denied`: the result starts `The user doesn't want to proceed with this tool use`; with the user's feedback when
    there is any), and an ExitPlanMode decision (kind `plan`): `approved` when the result starts `User has approved`,
-   `rejected` when a rejected call is ExitPlanMode. Denials and approvals are read from the result line alone, as the
-   call can sit in an earlier session, and then name no tool; a rejection is a plan decision only beside its
-   ExitPlanMode call. An ExitPlanMode result that is a tool error is no decision.
+   `rejected` when a rejected call is ExitPlanMode. Denials, approvals and answers are read from the result line
+   alone, as the call can sit in an earlier session and `search` reads only the lines holding its text: an answer
+   without its call is a result that is not an error and whose `toolUseResult` holds `questions` and `answers`. Read
+   so, they name no tool; a rejection is a plan decision only beside its ExitPlanMode call. An ExitPlanMode result
+   that is a tool error is no decision.
 
 Related events that are not input: `interrupt` (`[Request interrupted by user…`), `output` (a slash or `!` command's
 stdout/stderr, in a user entry or a `system` `local_command` entry, attached to its command), and images, shown as
@@ -135,7 +140,8 @@ A load is one of:
 A repeat call that injects only "Skill /x was loaded earlier…" is a `re-invoked` event. `invoked_skills` attachments are
 restored state after compaction, not loads. `attributionSkill` names the active skill of the session that spawned an agent;
 it is never a load. Bare and namespaced names (`skillcraft`, `claudecraft:skillcraft`) match by their last segment; output
-shows the exact name.
+shows the exact name. `list --skill` finds loads in a session and its agents, as Search counts them across sessions,
+and shows how the main transcript loaded each name, `-` when only agents did.
 
 ## Content kinds
 
@@ -143,15 +149,15 @@ shows the exact name.
 
 | Kind | Source | Searched by default |
 |---|---|---|
-| `prompt` | human input (all kinds above) | yes |
+| `prompt` | human input (all kinds above); an answer, denial or plan decision is the text of its tool result, one record | yes |
 | `assistant` | assistant text blocks | yes |
 | `tool-input` | tool_use input, plus the wire form in `wireToolInputs` | yes |
-| `tool-result` | tool_result text | yes |
+| `tool-result` | tool_result text, apart from those decisions | yes |
 | `from-parent` | a sub-agent's delegation prompt and SendMessage deliveries | yes |
-| `agent-result` | `attachment.structured_output` and workflow journal results | yes |
+| `agent-result` | the string values of `attachment.structured_output` data and of workflow journal results | yes |
 | `plan` | `attachment.plan_file_reference` | yes |
 | `file` | `attachment.file` and `attachment.edited_text_file` (user-referenced files) | yes |
-| `hook` | hook attachment stdout/content | yes |
+| `hook` | hook attachment stdout, stderr and content (each string of a content array) | yes |
 | `recap` | `system.away_summary` | yes |
 | `thinking` | non-empty thinking blocks | no |
 | `injected`, `summary`, `notification`, `peer` | as defined under Human input; a notification can also be an attachment (see Sub-agents) | no |
@@ -166,19 +172,25 @@ lists.
 
 ## Search
 
-- `<text>` is literal and matched in the decoded text, or a jq (Oniguruma) regex with `--regex`. Smart case: text with
-  no uppercase letter (a regex's backslash escapes do not count) matches any case.
+- `<text>` is literal and matched in the decoded text, or a jq (Oniguruma) regex with `--regex`. The text is the
+  transcript's own, as the Content kinds table gives it, never another command's rendering of it: an answer is found
+  by its tool result's words, not by the `question → answer` line `prompts` prints, and a plan decision not by
+  `approved: …`. Smart case: text with no uppercase letter matches any case; a regex's backslash escapes do not count,
+  while in literal text a backslash is a character like any other.
 - Within sessions: one record per hit. With several sessions `src` names each session's own transcript by its id;
   `--agents` adds each session's agents and run journals (a split-pane teammate's session named by its id).
 - Across sessions: one record per session. Hits in its agents and run journals count toward it (`agent` ends the kinds
-  list); internal agents are left out. `hits` ends in `+`, a lower bound, when a file had more matching lines than
+  list): those of the agents and runs in its directory, beside it with its `sessionId`, and stored with another
+  session but named by its own calls' `agentId` or `runId`, so that a resumed copy and its original both count them.
+  A split-pane teammate's session is a row of its own; internal agents are left out. `hits` ends in `+`, a lower bound, when a file had more matching lines than
   were read from it (100 after the noise filter, 300 before).
 
 ## Sub-agents and workflows
 
 - A session's agents are its nested and flat-layout agent transcripts, those its Agent and Workflow calls name
   elsewhere under the root (a resumed copy's agents stay in the original's directory), and the sessions of the
-  split-pane teammates it spawned. Every command that reads a session's agents uses this set.
+  split-pane teammates it spawned. Every command that reads a session's agents uses this set; across sessions
+  (`list --skill`, `search` without `<session>`) a split-pane teammate's session is a row of its own instead.
 - Agent call → transcript: `toolUseResult.agentId` (or `agent_id` for teammates) names `subagents/agent-<id>.jsonl` in the
   session directory; if absent there, any `agent-<id>.jsonl` under the root (resumed sessions keep the original's directory).
   The sub-agent's `.meta.json` `toolUseId`, when present, confirms the link.

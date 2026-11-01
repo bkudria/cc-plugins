@@ -321,13 +321,6 @@ adoes-the-lexer-0a1b2c3d4e5f6a7b\t-\tfalse (escaped)
 a0f1e2d3c4b5a6978\t-\tfalse (escaped)
 ```
 
-`s::internal_agent_id` tells from an id alone.
-
-```scrut
-$ cc-sessions jq '["acompact-3f9a1c", "aprompt_suggestion-8d2e4b", "a7c3e9b2d4f6a8c01"] | map(s::internal_agent_id)' -- -n -c
-[true,true,false]
-```
-
 `s::rollup` totals an array of transcripts, skipping internal ones and counting each `message.id` once.
 
 ```scrut
@@ -1154,12 +1147,30 @@ main\ts1\t[2,4]\t[9]\t512\tA short title (escaped)
 flat\ts1\t[1]\t[]\t512\tGo. (escaped)
 ```
 
+`s::line_json` is the JSON of one such line from its tab-split pieces, joined again when the JSON holds a raw tab.
+
+```scrut
+$ cc-sessions jq '["/r/p/s1.jsonl","4","{\"a\":1}"], ["/r/p/s1.jsonl","5","{\"a\":","1}"] | s::line_json' -- -n -c
+"{\"a\":1}"
+"{\"a\":\t1}"
+```
+
 `s::candidates` reads the candidate list a cross-session command passes: `<pos>TAB<mtime>TAB<bytes>TAB<path>` lines.
 
 ```scrut
 $ cc-sessions jq 's::candidates("0\t1793354400\t2458\t/r/p/s1.jsonl\n1\t1793350000\t12\t/r/p/s 2.jsonl\n")[] | [.pos, .mtime, .bytes, .path, .id] | s::tsv' -- -n -r
 0\t1793354400\t2458\t/r/p/s1.jsonl\ts1 (escaped)
 1\t1793350000\t12\t/r/p/s 2.jsonl\ts 2 (escaped)
+```
+
+`s::agent_map` reads the `<main>TAB<file>` lines that map agent transcripts to their sessions into each session's agent
+files, sorted and without repeats; `s::unreadable_notice(id)` reports a session a rule failed on and emits nothing.
+
+```scrut
+$ cc-sessions jq 's::agent_map("/r/p/s1.jsonl\t/r/p/s1/subagents/agent-b.jsonl\n/r/p/s2.jsonl\t/r/p/agent-5f.jsonl\n/r/p/s1.jsonl\t/r/p/s1/subagents/agent-a.jsonl\n/r/p/s1.jsonl\t/r/p/s1/subagents/agent-b.jsonl\n")' -- -n -c
+> cc-sessions jq '"boom" | s::unreadable_notice("s1")' -- -n -c 2>&1
+{"/r/p/s1.jsonl":["/r/p/s1/subagents/agent-a.jsonl","/r/p/s1/subagents/agent-b.jsonl"],"/r/p/s2.jsonl":["/r/p/agent-5f.jsonl"]}
+cc-sessions: left out session s1, which could not be read (boom)
 ```
 
 `s::display(width)` shows text on one line: whitespace runs as one space, cut to the width with `…`; 0 keeps it exact.
@@ -1171,13 +1182,22 @@ $ cc-sessions jq '"  Two\n  lines,\tspaced  " | s::display(100), s::display(9), 
 "  Two\n  lines,\tspaced  "
 ```
 
-Smart case: text with no capital letter matches any case (`s::smart_insensitive`; a regex's backslash escapes do not
-count). `s::literal_regex` makes literal text an Oniguruma regex, and `s::first_match(re; ci)` finds its first match.
+`s::one_space` makes every whitespace run of a string one space.
 
 ```scrut
-$ cc-sessions jq '["make test", "Make", "\\d+ files"] | map(s::smart_insensitive)' -- -n -c
+$ cc-sessions jq '"a \t\n b  c\u00a0d e\r\nf" | s::one_space' -- -n -c
+"a b c d e f"
+```
+
+Smart case: text with no capital letter matches any case (`s::smart_insensitive(regex)`; a regex's backslash escapes
+do not count, while in literal text a backslash is a character). `s::literal_regex` makes literal text an Oniguruma
+regex, and `s::first_match(re; ci)` finds its first match.
+
+```scrut
+$ cc-sessions jq '["make test", "Make", "\\d+ files", "c:\\Users"] | map(s::smart_insensitive(true)), map(s::smart_insensitive(false))' -- -n -c
 > cc-sessions jq '"a.b (c)" | s::literal_regex as $re | ["xa.b (c)", "axb (c)"] | map(s::first_match($re; false) | if . then .offset else null end)' -- -n -c
-[true,false,true]
+[true,false,true,true]
+[true,false,true,false]
 [1,null]
 ```
 

@@ -88,10 +88,13 @@ def path_info:
   | if .session_dir then .session = (.session_dir | sub("^.*/"; "")) | .project_dir = (.session_dir | sub("/[^/]*$"; "")) else . end
   | if .kind | IN("subagent", "workflow-agent", "flat") then .agent = ($base | ltrimstr("agent-") | sub("\\.jsonl$"; "")) else . end;
 
+#: The JSON of an rg output line split on tabs ("<path>TAB<line>TAB<json>"): JSON writes a tab inside text as \t, so it is one piece, and only a line holding a raw tab needs joining, which is slow on long lines. Input: the pieces.
+def line_json: if length == 3 then .[2] else .[2:] | join("\t") end;
+
 #: rg output lines grouped by file: {<path>: {<line>: <raw json>}}; a line seen twice is kept once. Input: a stream of "<path>TAB<line>TAB<json>" strings.
 def group_lines(lines):
   reduce (lines | select(length > 0) | split("\t") | select(length >= 3)) as $p ({};
-    .[$p[0]][$p[1]] = ($p[2:] | join("\t")));
+    .[$p[0]][$p[1]] = ($p | line_json));
 
 #: A transcript object of one file's selected lines, like s::transcripts but lines is null and sizes empty; $stat is {mtime, bytes} or null. Input: {<line>: <raw json>}.
 def from_lines($path; $stat):
@@ -152,21 +155,25 @@ def tsv: map(field) | join("\t");
 def trunc($n): if type == "string" and $n > 0 and length > $n then .[:($n - 1)] + "…" else . end;
 
 # jq's global regex functions (gsub, match "g") take time quadratic in the number of matches, so
-# long text is cut before any of them runs.
+# long text is cut before any of them runs, and whitespace runs are found by a regex that passes over
+# single spaces, most of them, which already read as one.
+
+#: Every whitespace run of the string as one space.
+def one_space: gsub("(?: \\s+|[^\\S ]\\s*)"; " ");
 
 #: Display text: whitespace runs as one space, cut to $width characters (ending with …); $width 0 keeps the text exactly.
 def display($width):
   if type != "string" then .
   elif $width > 0 then
     (length > $width * 8) as $long
-    | .[:($width * 8)] | gsub("\\s+"; " ") | sub("^ "; "") | sub(" $"; "")
+    | .[:($width * 8)] | one_space | sub("^ "; "") | sub(" $"; "")
     | if $long and length < $width then . + "…" else trunc($width) end
     | if $long and (endswith("…") | not) then .[:($width - 1)] + "…" else . end
     | sub(" …$"; "…")
   else . end;
 
-#: True when the query text holds no capital letter, so it matches case-insensitively (smart case); backslash escapes of a regex do not count.
-def smart_insensitive: gsub("\\\\."; "") | test("\\p{Lu}") | not;
+#: True when the query text holds no capital letter, so it matches case-insensitively (smart case); with $regex true, its backslash escapes do not count, while in literal text a backslash is a character.
+def smart_insensitive($regex): (if $regex then gsub("\\\\."; "") else . end) | test("\\p{Lu}") | not;
 
 #: The literal text as an Oniguruma regex.
 def literal_regex: gsub("(?<c>[.*+?^${}()|\\[\\]\\\\/#-])"; "\\\(.c)");
@@ -204,6 +211,16 @@ def candidates($text):
   $text | split("\n") | map(select(length > 0) | split("\t")
     | {pos: (.[0] | tonumber), mtime: (.[1] | tonumber), bytes: (.[2] | tonumber), path: (.[3:] | join("\t"))}
     | .id = (.path | sub("^.*/"; "") | sub("\\.jsonl$"; "")));
+
+#: The agent files of sessions, from "<main>TAB<file>" lines as cc_corpus_agent_map and cc_corpus_elsewhere print them, as {<main>: [<file>...]}, each list sorted and without repeats.
+def agent_map($text):
+  reduce (($text // "") | split("\n")[] | select(length > 0) | split("\t") | {main: .[0], file: (.[1:] | join("\t"))}) as $m ({};
+    .[$m.main] += [$m.file])
+  | map_values(unique);
+
+#: Prints on stderr that a listing left out session $id because a rule failed on it, the input being the error; emits nothing.
+def unreadable_notice($id):
+  "cc-sessions: left out session \($id), which could not be read (\(if type == "string" then . else tojson end))\n" | stderr | empty;
 
 #: A timestamp as YYYY-MM-DDTHH:MM:SSZ (UTC, milliseconds dropped); takes an ISO string or epoch seconds or milliseconds; null stays null.
 def ts:
@@ -330,9 +347,6 @@ def lower_bound_notice:
     else "cc-sessions: output tokens are lower bounds for messages written by Claude Code \(join(", ")): versions 2.0.50 through 2.1.56 often did not record a message's final output count"
     end;
 
-#: True for an internal agent id (acompact-…, aprompt_suggestion-…). Input: an agent id string.
-def internal_agent_id: type == "string" and (startswith("acompact-") or startswith("aprompt_suggestion-"));
-
 #: Why an agent transcript is internal: compaction, prompt-suggestion, warmup (first prompt "Warmup") or transcripts-fork (first prompt carries [cc-sessions:transcripts-fork]); null otherwise and for main transcripts.
 def internal_reason:
   if .kind == "main" then null
@@ -454,8 +468,11 @@ def _answer_text($result):
 
 def _approved: _result_text | startswith("User has approved");
 
-# Denials and plan approvals are read from the result alone, as their call can sit in an earlier
-# session; only a rejection needs its call to be told apart as a plan decision.
+def _answers_result: type == "object" and (.questions | type) == "array" and (.answers | type) == "object";
+
+# Denials, plan approvals and answers are read from the result alone, as their call can sit in an
+# earlier session and search reads only the lines that hold its text; only a rejection needs its call
+# to be told apart as a plan decision.
 def _tool_decisions:
   _tool_uses as $uses
   | entries[] | select(.e.type == "user" and (.e | _tool_results_only)) | . as $r
@@ -470,7 +487,7 @@ def _tool_decisions:
       | if $use.name == "ExitPlanMode" then
           _record($r; "plan"; (if $feedback != "" then "rejected: \($feedback)" else "rejected" end)) + $call + {decision: "rejected"}
         else _record($r; "denied"; $feedback) + $call end
-    elif $use.name == "AskUserQuestion" and ($block.is_error | not) then
+    elif ($block.is_error | not) and ($use.name == "AskUserQuestion" or ($use == null and ($r.e.toolUseResult | _answers_result))) then
       _record($r; "answer"; ($block | _answer_text($r.e.toolUseResult))) + $call
     else empty end;
 
@@ -653,26 +670,31 @@ def default_kinds: content_kinds[:10];
 
 def _strings: [.. | strings];
 
+def _string_values: _strings | join("\n");
+
 def _attachment_content:
   (.type // "") as $type
-  | if $type == "structured_output" then {kind: "agent-result", text: (.data | if type == "string" then . else tojson end)}
+  | if $type == "structured_output" then {kind: "agent-result", text: (.data | _string_values)}
     elif $type == "plan_file_reference" then {kind: "plan", text: (.planContent // "")}
     elif $type == "file" then {kind: "file", text: ([.content.file.content?, (.content | strings)] | map(strings) | join("\n"))}
     elif $type == "edited_text_file" then {kind: "file", text: ([.snippet, .content] | map(strings) | join("\n"))}
     elif $type == "queued_command" and .commandMode == "task-notification" then {kind: "notification", text: (.prompt | _text)}
     elif ($type | startswith("hook_")) or $type == "async_hook_response" then
-      {kind: "hook", text: ([.stdout, .content, .stderr] | map(strings | select(length > 0)) | _uniq | join("\n"))}
+      {kind: "hook", text: ([.stdout, (.content | if type == "array" then .[] else . end), .stderr] | map(strings | select(length > 0)) | _uniq | join("\n"))}
     else empty end;
 
-#: Searchable content in file order, one record per piece: {l, kind, text, ts}; kinds as in s::content_kinds. Everything else (api-request*, progress, queue-operation, titles, state markers, other attachments) is never content.
+#: Searchable content in file order, one record per piece: {l, kind, text, ts}; kinds as in s::content_kinds. The text is the transcript's: a structured result's string values, and an answer, denial or plan decision as its tool result's text, one prompt record. Everything else (api-request*, progress, queue-operation, titles, state markers, other attachments) is never content.
 def content:
   _memo_users
   | . as $t
+  | [human_inputs] as $inputs
+  | ($inputs | map(select(.kind | IN("answer", "denied", "plan")) | {key: "\(.l) \(.tool_use_id)", value: true}) | from_entries) as $decided
   | [
-      (human_inputs | {l, kind: "prompt", text, ts}),
+      ($inputs[] | select(.kind | IN("answer", "denied", "plan") | not) | {l, kind: "prompt", text, ts}),
       (user_entries | select(.class | IN("from-parent", "injected", "summary", "notification", "peer")) | {l, kind: .class, text, ts: .t}),
       (user_entries | select(.class == "tool-result") | . as $u
-        | .e.message.content[] | select(.type == "tool_result") | {l: $u.l, kind: "tool-result", text: _result_text, ts: $u.t}),
+        | .e.message.content[] | select(.type == "tool_result")
+        | {l: $u.l, kind: (if $decided["\($u.l) \(.tool_use_id)"] then "prompt" else "tool-result" end), text: _result_text, ts: $u.t}),
       (entries[] | select(.e.type == "assistant") | . as $r | .e.message.content | arrays | .[]
         | if .type == "text" and ((.text // "") | length) > 0 then {l: $r.l, kind: "assistant", text, ts: $r.t}
           elif .type == "thinking" and ((.thinking // "") | length) > 0 then {l: $r.l, kind: "thinking", text: .thinking, ts: $r.t}
@@ -684,7 +706,7 @@ def content:
         | .e.attachment | _attachment_content | select(.text != "") | {l: $r.l, kind, text, ts: $r.t}),
       (entries[] | select(.e.type == "system" and .e.subtype == "away_summary") | {l, kind: "recap", text: (.e.content // ""), ts: .t}),
       (if $t.kind == "journal" then
-         entries[] | select(.e.type == "result") | {l, kind: "agent-result", text: (.e.result | if type == "string" then . else tojson end), ts: .t}
+         entries[] | select(.e.type == "result") | {l, kind: "agent-result", text: (.e.result | _string_values), ts: .t}
        else empty end)
     ]
   | sort_by(.l) | .[];
@@ -910,10 +932,10 @@ def label_of:
   _memo_users
   | if .kind == "subagent" or .kind == "workflow-agent" or .kind == "flat" then agent_label(null)
   else
-    _last_entry(.e.type == "custom-title" and ((.e.customTitle // "") | length) > 0) as $custom
-    | _last_entry(.e.type == "ai-title" and ((.e.aiTitle // "") | test(" "))) as $ai
-    | _last_entry(.e.type == "agent-name" and ((.e.agentName // "") | length) > 0) as $name
-    | _last_entry(.e.type == "summary" and ((.e.summary // "") | length) > 0) as $summary
+    _last_entry(.e.type == "custom-title" and ((.e.customTitle | strings) // "" | length) > 0) as $custom
+    | _last_entry(.e.type == "ai-title" and ((.e.aiTitle | strings) // "" | test(" "))) as $ai
+    | _last_entry(.e.type == "agent-name" and ((.e.agentName | strings) // "" | length) > 0) as $name
+    | _last_entry(.e.type == "summary" and ((.e.summary | strings) // "" | length) > 0) as $summary
     | if $custom then {text: $custom.e.customTitle, source: "custom-title", l: $custom.l}
       elif $ai then {text: $ai.e.aiTitle, source: "ai-title", l: $ai.l}
       elif $name then {text: $name.e.agentName, source: "agent-name", l: $name.l}

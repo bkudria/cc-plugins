@@ -8,17 +8,19 @@ cc_search_help() {
 Usage: cc-sessions search <text> [<session>...] [--regex] [--kind K[,K...]|all] [--agents]
                           [--since T] [--until T] [--cwd PATH] [--origin O] [--full] [--limit N]
 
-Where text appears in what was said and done. <text> is literal, matched in the decoded text,
-unless --regex makes it a jq (Oniguruma) regex; all-lowercase text matches any case. Put text
-that starts with - after --.
+Where text appears in what was said and done. <text> is literal, matched in the transcript's own
+decoded text (an answer or a denial as its tool result reads, not as prompts shows it), unless
+--regex makes it a jq (Oniguruma) regex; all-lowercase text matches any case. Put text that
+starts with - after --.
   --kind K,...  content kinds to search, or all. Default: prompt assistant tool-input tool-result
                 from-parent agent-result plan file hook recap; all adds thinking injected summary
                 notification peer
   --full        whole texts (default: snippets of 160 characters around the first match)
 
 Without <session>: one record per session, newest first by modified time; default --limit 20
-(0: no limit). Hits in sub-agents, workflow agents and run journals count toward their session,
-so --agents changes nothing; internal agents are left out; the current session is marked.
+(0: no limit). Hits in its sub-agents, workflow agents and run journals, also those stored with
+another session, count toward a session, so --agents changes nothing; internal agents are left
+out; the current session is marked; a session that cannot be read is left out with a notice.
   Fields: id  modified  hits  kinds  mark  cwd  label  snippet
   hits      matching records; N+ when a file had more matches than the 100 read from it
   kinds     their content kinds, then agent when agents had hits
@@ -190,20 +192,17 @@ if [ ${#sessions[@]} -gt 0 ]; then
   fi
   cc_lines "$(cc_rg -l "$rg_case" "${match_res[@]}" -- "${files[@]}")"
   hit_files=(${CC_LINES[@]+"${CC_LINES[@]}"})
-  sessions_text=$(printf '%s, ' "${ids[@]}")
   opts=$("$jq_bin" -c --argjson since "${since:-null}" --argjson until "${until:-null}" --argjson width "$width" \
-    --arg text "$text" --argjson multi "$([ ${#ids[@]} -gt 1 ] && echo true || echo false)" --arg sessions "${sessions_text%, }" --arg bounds "${since_text:+ --since $since_text}${until_text:+ --until $until_text}" \
-    --arg files "$(for i in "${!files[@]}"; do printf '%s\t%s\n' "${explicit[i]}" "${files[i]}"; done)" \
-    --arg hits "$(printf '%s\n' ${hit_files[@]+"${hit_files[@]}"})" --argjson plan "$plan" -n '
-    ($hits | split("\n") | map(select(length > 0))) as $hit
-    | $plan + {since: $since, until: $until, width: $width, text: $text, multi: $multi, sessions_text: $sessions, bounds: $bounds,
-       files: ($files | split("\n") | map(select(length > 0) | split("\t") | {explicit: (.[0] == "true"), path: (.[1:] | join("\t"))}
-         | .hit = (.path as $p | $hit | index([$p]) != null)))}' < /dev/null)
+    --arg text "$text" --argjson multi "$([ ${#ids[@]} -gt 1 ] && echo true || echo false)" --arg bounds "${since_text:+ --since $since_text}${until_text:+ --until $until_text}" \
+    --argjson plan "$plan" -n '$plan + {since: $since, until: $until, width: $width, text: $text, multi: $multi, bounds: $bounds}' < /dev/null)
   agent_files=()
   for i in "${!files[@]}"; do
     [ "${explicit[i]}" = false ] && agent_files+=("${files[i]}")
   done
+  # The file lists reach jq as files, not arguments, so any number of them fits.
   "$jq_bin" -n -R -r -L "$CC_SESSIONS_LIB" --argjson opts "$opts" \
+    --rawfile files <(for i in "${!files[@]}"; do printf '%s\t%s\n' "${explicit[i]}" "${files[i]}"; done) \
+    --rawfile hits <(printf '%s\n' ${hit_files[@]+"${hit_files[@]}"}) --rawfile sessions <(printf '%s\n' "${ids[@]}") \
     "$(cc_module_program search within)" <(
       [ ${#hit_files[@]} -eq 0 ] || cc_search_content_lines "${hit_files[@]}"
       [ ${#agent_files[@]} -eq 0 ] || cc_rg "${cc_search_lines[@]}" -m 1 -e "$human_re" -- "${agent_files[@]}"
@@ -225,7 +224,7 @@ cwd_re=''
 [ -n "$cwd" ] && cwd_re=$("$jq_bin" -n -r -L "$CC_SESSIONS_LIB" --arg cwd "$cwd" 'import "sessions" as s; $cwd | s::rg_cwd' < /dev/null)
 opts=$("$jq_bin" -c --argjson width "$width" --argjson label_width "$label_width" --arg origin "$origin" --arg cwd "$cwd" \
   --arg current "${CLAUDE_CODE_SESSION_ID-}" --argjson plan "$plan" -n \
-  '$plan + {width: $width, label_width: $label_width, origin: $origin, cwd: (if $cwd == "" then null else $cwd end), current: $current}' < /dev/null)
+  '$plan + {width: $width, label_width: $label_width, origin: $origin, cwd: (if $cwd == "" then null else $cwd end), current: $current, line_cap: 100}' < /dev/null)
 kinds_text=$("$jq_bin" -n -r --argjson plan "$plan" '$plan.kinds_text' < /dev/null)
 limit=${CC_SESSIONS_LIMIT:-20}
 max_chars=${CC_SESSIONS_MAX_CHARS:-20000}
@@ -238,52 +237,68 @@ work=$(mktemp -d "${TMPDIR:-/tmp}/cc-sessions-search.XXXXXX") || cc_fail "cannot
 trap 'rm -rf "$work"' EXIT
 
 cc_corpus_agent_map --journals > "$work/agents.tsv"
+printf '%s\n' "$cands" | awk -F '\t' 'NF { path = $0; sub(/^[^\t]*\t[^\t]*\t[^\t]*\t/, "", path); print $1 "\t" path }' > "$work/mains.tsv"
 
-# Every transcript of every candidate session as "<pos>TAB<file>", in session order.
-awk -F '\t' 'FILENAME == ARGV[1] { path = $0; sub(/^[^\t]*\t[^\t]*\t[^\t]*\t/, "", path); pos[path] = $1; print $1 "\t" path; next }
-  ($1 in pos) { print pos[$1] "\t" $2 }' <(printf '%s\n' "$cands") "$work/agents.tsv" | LC_ALL=C sort -t $'\t' -k1,1n -s > "$work/files.tsv"
+# Every transcript of every candidate session as "<pos>TAB<file>", in session order: its main transcript
+# and the agent files under its directory or carrying its id. The agents its calls name in another
+# session's directory are added per batch: by cc_search_elsewhere, and in the rare-text pass by
+# cc_corpus_matching.
+awk -F '\t' 'FILENAME == ARGV[1] { pos[$2] = $1; print; next } ($1 in pos) { print pos[$1] "\t" $2 }' \
+  "$work/mains.tsv" "$work/agents.tsv" | LC_ALL=C sort -t $'\t' -k1,1n -s > "$work/files.tsv"
+
+# cc_search_elsewhere <first> <end>: the "<pos>TAB<file>" rows of the agent files that the main
+# transcripts of the sessions at positions <first> up to <end> name but that sit with another session.
+cc_search_elsewhere() {
+  sed -n "$(($1 + 1)),$2p" "$work/mains.tsv" > "$work/batch-mains.tsv"
+  cc_lines "$(cut -f 2- "$work/batch-mains.tsv")"
+  [ ${#CC_LINES[@]} -gt 0 ] || return 0
+  awk -F '\t' 'FILENAME == ARGV[1] { pos[$2] = $1; next } ($1 in pos) { print pos[$1] "\t" $2 }' \
+    "$work/batch-mains.tsv" <(cc_corpus_elsewhere "$work/agents.tsv" "${CC_LINES[@]}")
+}
 
 # Prints the rows ("<pos>TAB<record>") of the sessions whose files are listed in $1 ("<pos>TAB<file>").
 # A file's matching lines are capped, so that a common text costs a bounded amount of jq work; a
-# session with a capped file reports its hits as a lower bound.
+# session with a capped file reports its hits as a lower bound. rg reads at most read_cap of them,
+# counting them in a pass of its own, as lines can be megabytes long and only rg and jq read those
+# fast; jq keeps line_cap of those that are not noise.
 cc_search_batch() {
   local listing=$1 keep files=() mains=() agents=()
-  if [ -n "$cwd" ]; then
-    cc_lines "$(awk -F '\t' 'FILENAME == ARGV[1] { want[$0] = 1; next } $2 in want' <(printf '%s\n' "$cands" | cut -f 4-) "$listing" | cut -f 2)"
-    [ ${#CC_LINES[@]} -gt 0 ] || return 0
-    awk -F '\t' 'FILENAME == ARGV[1] { owner[$2] = $1; next } ($1 in owner) { keep[owner[$1]] = 1 } END { for (k in keep) print k }' "$listing" \
-      <(cc_rg -l -e "$cwd_re" -- "${CC_LINES[@]}") > "$work/cwd-pos.txt"
-    awk -F '\t' 'FILENAME == ARGV[1] { want[$0] = 1; next } $1 in want' "$work/cwd-pos.txt" "$listing" > "$work/listing-cwd.tsv"
-    listing=$work/listing-cwd.tsv
-  fi
   keep=$(awk -F '\t' 'FILENAME == ARGV[1] { want[$1] = 1; next } $1 in want' "$listing" <(printf '%s\n' "$cands"))
   [ -n "$keep" ] || return 0
+  if [ -n "$cwd" ]; then
+    cc_lines "$(printf '%s\n' "$keep" | cut -f 4-)"
+    keep=$(printf '%s\n' "$keep" | awk -F '\t' 'FILENAME == ARGV[1] { want[$0] = 1; next }
+      { path = $0; sub(/^[^\t]*\t[^\t]*\t[^\t]*\t/, "", path) } path in want' <(cc_rg -l -e "$cwd_re" -- "${CC_LINES[@]}") -)
+    [ -n "$keep" ] || return 0
+  fi
   if [ "$origin" = cli ] || [ "$origin" = sdk ]; then
     cc_lines "$(printf '%s\n' "$keep" | cut -f 4-)"
     keep=$(printf '%s\n' "$keep" | awk -F '\t' -v sdk="$([ "$origin" = sdk ] && echo 1 || echo 0)" 'FILENAME == ARGV[1] { marked[$0] = 1; next }
       { path = $0; sub(/^[^\t]*\t[^\t]*\t[^\t]*\t/, "", path) } (path in marked) == sdk' \
       <(cc_rg -l -m 1 -e '"entrypoint":"sdk' -e '"promptSource":"sdk"' -- "${CC_LINES[@]}") -)
     [ -n "$keep" ] || return 0
-    awk -F '\t' 'FILENAME == ARGV[1] { want[$1] = 1; next } $1 in want' <(printf '%s\n' "$keep") "$listing" > "$work/listing-origin.tsv"
-    listing=$work/listing-origin.tsv
   fi
-  cc_lines "$(cut -f 2- "$listing")"
+  awk -F '\t' 'FILENAME == ARGV[1] { want[$1] = 1; next } $1 in want' <(printf '%s\n' "$keep") "$listing" > "$work/listing-kept.tsv"
+  listing=$work/listing-kept.tsv
+  cc_lines "$(cut -f 2- "$listing" | awk '!seen[$0]++')"
   files=("${CC_LINES[@]}")
-  rg --no-config --text --no-messages -v "${noise_res[@]}" -- <(cc_rg "${cc_search_lines[@]}" -m "$read_cap" "$rg_case" "${match_res[@]}" -- "${files[@]}" |
-    awk -F '\t' -v cap="$read_cap" -v over="$work/capped-read.txt" '{ print } ++n[$1] == cap { print $1 >> over }') 2> /dev/null < /dev/null |
-    awk -F '\t' -v cap="$line_cap" -v over="$work/capped.txt" '++n[$1] <= cap { print; next } n[$1] == cap + 1 { print $1 >> over }' > "$work/hits.tsv"
-  cat "$work/capped-read.txt" >> "$work/capped.txt" 2> /dev/null
+  cc_rg -c --with-filename -m "$read_cap" "$rg_case" "${match_res[@]}" -- "${files[@]}" |
+    awk -v cap="$read_cap" '{ n = $0; sub(/^.*:/, "", n) } n + 0 >= cap { sub(/:[0-9]+$/, ""); print }' >> "$work/capped.txt"
+  rg --no-config --text --no-messages -v "${noise_res[@]}" -- \
+    <(cc_rg "${cc_search_lines[@]}" -m "$read_cap" "$rg_case" "${match_res[@]}" -- "${files[@]}") > "$work/hits.tsv" 2> /dev/null < /dev/null
   [ -s "$work/hits.tsv" ] || return 0
-  cut -f 1 "$work/hits.tsv" | LC_ALL=C sort -u > "$work/hit-files.txt"
-  awk -F '\t' 'FILENAME == ARGV[1] { owner[$2] = $1; next } $0 in owner { print owner[$0] }' "$listing" "$work/hit-files.txt" | LC_ALL=C sort -u > "$work/hit-pos.txt"
+  rg --no-config --text --no-messages -o -N -e '^[^\t]+' -- "$work/hits.tsv" 2> /dev/null < /dev/null | LC_ALL=C sort -u > "$work/hit-files.txt"
+  awk -F '\t' 'FILENAME == ARGV[1] { hit[$0] = 1; next } ($2 in hit) { print $1 }' "$work/hit-files.txt" "$listing" | LC_ALL=C sort -u > "$work/hit-pos.txt"
   keep=$(printf '%s\n' "$keep" | awk -F '\t' 'FILENAME == ARGV[1] { want[$0] = 1; next } $1 in want' "$work/hit-pos.txt" -)
   cc_lines "$(printf '%s\n' "$keep" | cut -f 4-)"
   mains=(${CC_LINES[@]+"${CC_LINES[@]}"})
   [ ${#mains[@]} -gt 0 ] || return 0
   cc_lines "$(grep -e '/subagents/' -e '/agent-[^/]*\.jsonl$' "$work/hit-files.txt")"
   agents=(${CC_LINES[@]+"${CC_LINES[@]}"})
-  "$jq_bin" -n -R -r -L "$CC_SESSIONS_LIB" --argjson opts "$opts" --arg candidates "$keep" --rawfile capped "$work/capped.txt" \
-    "$(cc_module_program search corpus)" "$work/hits.tsv" <(
+  # The candidates and their agent files reach jq as files, not arguments, so any number of them fits.
+  "$jq_bin" -n -R -r -L "$CC_SESSIONS_LIB" --argjson opts "$opts" --rawfile candidates <(printf '%s\n' "$keep") \
+    --rawfile agents <(awk -F '\t' 'FILENAME == ARGV[1] { main[$1] = $2; next } ($1 in main) && $2 != main[$1] { print main[$1] "\t" $2 }' "$work/mains.tsv" "$listing") \
+    --rawfile capped "$work/capped.txt" --arg hits "$work/hits.tsv" "$(cc_module_program search corpus)" "$work/hits.tsv" <(
       cc_rg "${cc_search_lines[@]}" -m 16 -e "$human_re" -e "$local_command_re" -- "${mains[@]}"
       cc_rg "${cc_search_lines[@]}" -e "$titles_re" -- "${mains[@]}"
       cc_rg "${cc_search_lines[@]}" -m 1 -e '"entrypoint":"sdk' -e '"promptSource":"sdk"' -- "${mains[@]}"
@@ -293,11 +308,11 @@ cc_search_batch() {
 }
 
 # The newest sessions are searched whole, in growing batches, so that a common text answers
-# quickly. When they show the text to be rare (under one session in eight), one rg pass over the
-# remaining transcripts lists the files that can hold a match, and only those are searched.
-read_cap=300 line_cap=100
+# quickly. When they show the text to be rare (under one session in eight), one rg pass
+# (cc_corpus_matching) lists the remaining sessions' files that can hold a match, and only those are
+# searched.
+read_cap=300
 : > "$work/capped.txt"
-: > "$work/capped-read.txt"
 cc_page_start "$limit" "$max_chars"
 first=0 size=8
 while [ $first -lt "$total" ] && [ -z "$CC_PAGE_STOP" ]; do
@@ -305,13 +320,15 @@ while [ $first -lt "$total" ] && [ -z "$CC_PAGE_STOP" ]; do
     break
   fi
   awk -F '\t' -v a=$first -v b=$((first + size)) '$1 >= a && $1 < b' "$work/files.tsv" > "$work/listing.tsv"
+  cc_search_elsewhere $first $((first + size)) >> "$work/listing.tsv"
   cc_page_take <<< "$(cc_search_batch "$work/listing.tsv")"
   first=$((first + size))
   [ $size -lt 1024 ] && size=$((size * 2))
 done
 if [ -z "$CC_PAGE_STOP" ] && [ $first -lt "$total" ]; then
-  awk -F '\t' 'FILENAME == ARGV[1] { want[$0] = 1; next } $2 in want' \
-    <(cc_rg -l --no-ignore --hidden --glob '*.jsonl' "$rg_case" "${match_res[@]}" -- "$root") <(awk -F '\t' -v a=$first '$1 >= a' "$work/files.tsv") > "$work/rest.tsv"
+  awk -F '\t' -v a=$first 'FILENAME == ARGV[1] { main[$1] = $2; next } $1 >= a { print main[$1] "\t" $2 }' "$work/mains.tsv" "$work/files.tsv" > "$work/remaining.tsv"
+  cc_corpus_matching "$work/remaining.tsv" "$work/agents.tsv" "$rg_case" "${match_res[@]}" |
+    awk -F '\t' 'FILENAME == ARGV[1] { pos[$2] = $1; next } { print pos[$1] "\t" $2 }' "$work/mains.tsv" - | LC_ALL=C sort -t $'\t' -k1,1n -s > "$work/rest.tsv"
   cut -f 1 "$work/rest.tsv" | uniq > "$work/rest-pos.txt"
   count=$(($(wc -l < "$work/rest-pos.txt")))
   at=0 size=64

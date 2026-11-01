@@ -88,18 +88,18 @@ cc_lines() {
   set +f
 }
 
-# cc_rg <rg-option>... -- <file>...: rg over the files, a thousand per run so that long file lists stay
-# under the argument limit; finding nothing is not an error, and without files nothing runs.
+# cc_rg <rg-option>... -- <file>...: rg over the files, as many per run as xargs fits under the argument
+# limit; finding nothing is not an error, and without files nothing runs. An option that names a file
+# must name a regular one, as each run reads it.
 cc_rg() {
-  local options=() i
+  local options=()
   while [ $# -gt 0 ] && [ "$1" != -- ]; do
     options+=("$1")
     shift
   done
   shift
-  for ((i = 1; i <= $#; i += 1000)); do
-    rg --no-config --text --no-messages --color=never "${options[@]}" -- "${@:i:1000}" 2> /dev/null < /dev/null
-  done
+  [ $# -gt 0 ] || return 0
+  printf '%s\0' "$@" | xargs -0 rg --no-config --text --no-messages --color=never "${options[@]}" -- 2> /dev/null
   return 0
 }
 
@@ -469,7 +469,7 @@ cc_session_agent_files() {
 # cc_session_elsewhere_files <main-transcript> [--journals]: the agent transcripts that the session's Agent
 # and Workflow calls name but that sit elsewhere under the data root, as a resumed session's agents stay
 # with the original session; --journals adds those runs' journal.jsonl. rg reads the transcript, as in
-# cc_teammate_sessions.
+# cc_teammate_sessions, and jq only the lines of its calls and their results.
 cc_session_elsewhere_files() {
   local main=$1 journals=${2-} dir=${1%.jsonl} key id path found missing=() confirmed='' names=()
   while IFS=: read -r key id; do
@@ -477,9 +477,12 @@ cc_session_elsewhere_files() {
     if [ "$key" = run ]; then
       [ -d "$dir/subagents/workflows/$id" ] && found=1
     else
-      for path in "$dir/subagents/agent-$id.jsonl" "${main%/*}/agent-$id.jsonl" "$dir"/subagents/workflows/*/"agent-$id.jsonl"; do
+      for path in "$dir/subagents/agent-$id.jsonl" "$dir"/subagents/workflows/*/"agent-$id.jsonl"; do
         [ -f "$path" ] && found=1 && break
       done
+      # A flat-layout agent beside the transcript is the session's own only when it carries its id.
+      path=${main%/*}/agent-$id.jsonl
+      [ $found -eq 0 ] && [ -f "$path" ] && [ "$(cc_flat_session_id "$path")" = "${dir##*/}" ] && found=1
     fi
     [ $found -eq 1 ] || missing+=("$key:$id")
   done < <(cc_rg -o -N --no-filename -e '"(agentId|agent_id|runId)":"[A-Za-z0-9_-]+"' -- "$main" |
@@ -487,9 +490,13 @@ cc_session_elsewhere_files() {
   [ ${#missing[@]} -gt 0 ] || return 0
   # Only ids that the calls themselves name count, not ids quoted in some text of the transcript.
   # shellcheck disable=SC2016 # jq program text
-  confirmed=$(cc_jq_program 'import "sessions" as s; s::transcripts | s::memo
-    | (s::agent_calls | .agent_id // empty | "agent:\(.)"), (s::workflow_calls | .run_id // empty | "run:\(.)")' \
-    -r -- "$main" 2> /dev/null)
+  confirmed=$("$(cc_jq_binary)" -n -R -r -L "$CC_SESSIONS_LIB" 'import "sessions" as s; s::group_lines(inputs) | to_entries[]
+    | .key as $path | .value | s::from_lines($path; null) | s::memo
+    | (s::agent_calls | .agent_id // empty | "agent:\(.)"), (s::workflow_calls | .run_id // empty | "run:\(.)")' <(
+      rg --no-config --text --no-messages -v -e '"type":"progress","data":\{' -- <(
+        cc_rg --no-heading --with-filename --line-number --field-match-separator=$'\t' \
+          -e '"name":"(?:Agent|Task|Workflow)"' -e '"(?:agentId|agent_id|runId)":"' -- "$main") 2> /dev/null < /dev/null
+    ) 2> /dev/null < /dev/null)
   for key in "${missing[@]}"; do
     case $'\n'$confirmed$'\n' in *$'\n'$key$'\n'*) ;; *) continue ;; esac
     id=${key#*:}
@@ -709,17 +716,133 @@ cc_sessions_by_mtime() {
 }
 
 # cc_corpus_agent_map [--journals]: every agent transcript under the data root (with --journals, every run
-# journal too) with the main transcript it belongs to, as "<main>TAB<file>" lines: nested ones by their
-# session directory, flat ones by their first sessionId.
+# journal too) with the main transcript it belongs to, as "<main>TAB<file>" lines sorted by file: nested
+# ones by their session directory, flat ones by their first sessionId.
 cc_corpus_agent_map() {
   local root names=(-name 'agent-*.jsonl')
   root=$(cc_data_root)
   [ "${1-}" = --journals ] && names=(\( -name 'agent-*.jsonl' -o -name journal.jsonl \))
-  find -H "$root" -mindepth 3 -path '*/subagents/*' -type f "${names[@]}" 2> /dev/null < /dev/null |
-    awk '{ main = $0; sub(/\/subagents\/.*$/, ".jsonl", main); print main "\t" $0 }'
-  cc_lines "$(find -H "$root" -mindepth 2 -maxdepth 2 -type f -name 'agent-*.jsonl' 2> /dev/null < /dev/null)"
-  cc_rg -m 1 -o --no-heading --with-filename --field-match-separator=$'\t' -e '"sessionId":"[^"]*"' -- ${CC_LINES[@]+"${CC_LINES[@]}"} |
-    awk -F '\t' '{ id = $2; gsub(/"sessionId":"|"/, "", id); dir = $1; sub(/\/[^\/]*$/, "", dir); print dir "/" id ".jsonl\t" $1 }'
+  {
+    find -H "$root" -mindepth 3 -path '*/subagents/*' -type f "${names[@]}" 2> /dev/null < /dev/null |
+      awk '{ main = $0; sub(/\/subagents\/.*$/, ".jsonl", main); print main "\t" $0 }'
+    cc_lines "$(find -H "$root" -mindepth 2 -maxdepth 2 -type f -name 'agent-*.jsonl' 2> /dev/null < /dev/null)"
+    cc_rg -m 1 -o --no-heading --with-filename --field-match-separator=$'\t' -e '"sessionId":"[^"]*"' -- ${CC_LINES[@]+"${CC_LINES[@]}"} |
+      awk -F '\t' '{ id = $2; gsub(/"sessionId":"|"/, "", id); dir = $1; sub(/\/[^\/]*$/, "", dir); print dir "/" id ".jsonl\t" $1 }'
+  } | LC_ALL=C sort -t $'\t' -k 2
+}
+
+# cc_corpus_elsewhere <agent-map> <main>... [-- <file>...]: the files of the map (cc_corpus_agent_map's)
+# that the mains name by agentId (the agent's transcript) or runId (the run's files) but that the map
+# gives to another session, as "<main>TAB<file>" lines: a resumed copy's agents stay in the original's
+# directory. With files after --, only those are looked for, which spares reading every id the mains
+# name. Only JSON keys name an id, as quotes inside text are escaped. Where the map holds an agent or a
+# run twice, the one first in path order is taken.
+cc_corpus_elsewhere() {
+  local map=$1 mains=() files=() ids named
+  shift
+  while [ $# -gt 0 ] && [ "$1" != -- ]; do
+    mains+=("$1")
+    shift
+  done
+  [ $# -gt 0 ] && shift && files=("$@")
+  [ ${#mains[@]} -gt 0 ] || return 0
+  if [ ${#files[@]} -gt 0 ]; then
+    ids=$(mktemp "${TMPDIR:-/tmp}/cc-sessions-ids.XXXXXX") || return 1
+    # shellcheck disable=SC2016 # awk program text
+    printf '%s\n' "${files[@]}" | awk '{
+        base = $0
+        sub(/^.*\//, "", base)
+        if (base ~ /^agent-.*\.jsonl$/) print "\"agentId\":\"" substr(base, 7, length(base) - 12) "\""
+        if (match($0, /\/subagents\/workflows\/[^\/]+\//)) print "\"runId\":\"" substr($0, RSTART + 21, RLENGTH - 22) "\""
+      }' | LC_ALL=C sort -u > "$ids"
+    named=$(cc_rg_mains -o --no-heading --with-filename -N --field-match-separator=$'\t' -F -f "$ids" -- "${mains[@]}")
+    rm -f "$ids"
+  else
+    named=$(cc_rg_mains -o --no-heading --with-filename -N --field-match-separator=$'\t' -e '"(?:agentId|runId)":"[A-Za-z0-9_-]+"' -- "${mains[@]}")
+  fi
+  named=$(printf '%s\n' "$named" | sed -E 's/\t"agentId":"(.*)"$/\tagent:\1/; s/\t"runId":"(.*)"$/\trun:\1/' | LC_ALL=C sort -u)
+  [ -n "$named" ] || return 0
+  # Only the map's lines of the ids named reach awk, which reads a long map slowly.
+  # shellcheck disable=SC2016 # awk program text
+  LC_ALL=C awk -F '\t' -v wanted_only=$((${#files[@]} > 0)) '
+    FILENAME == ARGV[1] {
+      file = $2
+      base = file
+      sub(/^.*\//, "", base)
+      if (file ~ /\/subagents\/workflows\/[^\/]+\/[^\/]+$/) {
+        dir = substr(file, 1, length(file) - length(base))
+        run = dir
+        sub(/\/$/, "", run)
+        sub(/^.*\//, "", run)
+        own[$1 SUBSEP "run:" run] = 1
+        if (!(("run:" run) in run_dir)) run_dir["run:" run] = dir
+        if (run_dir["run:" run] == dir) run_files["run:" run] = run_files["run:" run] "\n" file
+      }
+      if (base ~ /^agent-.*\.jsonl$/) {
+        id = "agent:" substr(base, 7, length(base) - 12)
+        own[$1 SUBSEP id] = 1
+        if (!(id in agent_file)) agent_file[id] = file
+      }
+      next
+    }
+    FILENAME == ARGV[2] { wanted[$0] = 1; next }
+    {
+      key = $2
+      if (($1 SUBSEP key) in own) next
+      if (key in agent_file) out = agent_file[key]
+      else if (key in run_files) out = substr(run_files[key], 2)
+      else next
+      n = split(out, list, "\n")
+      for (i = 1; i <= n; i++) if ((!wanted_only || list[i] in wanted) && !seen[$1 SUBSEP list[i]]++) print $1 "\t" list[i]
+    }' <(rg --no-config --text --no-messages -F -f <(printf '%s\n' "$named" |
+      sed -E 's|^.*\tagent:(.*)$|/agent-\1.jsonl|; s|^.*\trun:(.*)$|/workflows/\1/|' | LC_ALL=C sort -u) -- "$map" 2> /dev/null < /dev/null) \
+    <(printf '%s\n' ${files[@]+"${files[@]}"}) <(printf '%s\n' "$named")
+}
+
+# cc_rg_mains <rg-option>... -- <main>...: cc_rg over main transcripts, for output whose lines start with
+# the path and a tab. Past CC_SESSIONS_RG_FILES of them (5000), one rg over every main transcript under
+# the data root, keeping the lines of those given, is faster.
+cc_rg_mains() {
+  local options=()
+  while [ $# -gt 0 ] && [ "$1" != -- ]; do
+    options+=("$1")
+    shift
+  done
+  shift
+  if [ $# -le "${CC_SESSIONS_RG_FILES:-5000}" ]; then
+    cc_rg "${options[@]}" -- "$@"
+    return 0
+  fi
+  awk -F '\t' 'FILENAME == ARGV[1] { want[$0] = 1; next } $1 in want' <(printf '%s\n' "$@") \
+    <(cc_rg --max-depth 2 --no-ignore --hidden --glob '*.jsonl' --glob '!agent-*.jsonl' "${options[@]}" -- "$(cc_data_root)")
+}
+
+# cc_corpus_matching <pairs> <agent-map> <rg-option>...: of the "<main>TAB<file>" lines of the file <pairs>
+# (sessions' main transcripts, each paired with itself, and the agent files the map gives them) and of
+# those cc_corpus_elsewhere adds, the ones whose file rg finds a match in. Up to CC_SESSIONS_RG_FILES
+# files (5000) are read as they are; past that, one rg over the data root is faster than rg over them in
+# groups, and the mains are read for ids only when an agent file matched.
+cc_corpus_matching() {
+  local pairs=$1 map=$2 mains=() agent_files=() extra='' matching
+  shift 2
+  [ -s "$pairs" ] || return 0
+  if [ "$(awk -F '\t' '!seen[$2]++ { n++ } END { print n + 0 }' "$pairs")" -le "${CC_SESSIONS_RG_FILES:-5000}" ]; then
+    cc_lines "$(cut -f 1 "$pairs" | awk '!seen[$0]++')"
+    extra=$(cc_corpus_elsewhere "$map" "${CC_LINES[@]}")
+    cc_lines "$({ cut -f 2- "$pairs"; printf '%s\n' "$extra" | cut -f 2-; } | awk 'NF && !seen[$0]++')"
+    matching=$(cc_rg -l "$@" -- "${CC_LINES[@]}")
+  else
+    matching=$(cc_rg -l --no-ignore --hidden --glob '*.jsonl' "$@" -- "$(cc_data_root)")
+    cc_lines "$(awk -F '\t' 'FILENAME == ARGV[1] { want[$0] = 1; next } ($2 in want) && !seen[$2]++ { print $2 }' <(printf '%s\n' "$matching") "$map")"
+    agent_files=(${CC_LINES[@]+"${CC_LINES[@]}"})
+    if [ ${#agent_files[@]} -gt 0 ]; then
+      cc_lines "$(cut -f 1 "$pairs" | awk '!seen[$0]++')"
+      mains=("${CC_LINES[@]}")
+      extra=$(cc_corpus_elsewhere "$map" "${mains[@]}" -- "${agent_files[@]}")
+    fi
+  fi
+  [ -n "$matching" ] || return 0
+  awk -F '\t' 'FILENAME == ARGV[1] { want[$0] = 1; next } ($2 in want) && !seen[$0]++' <(printf '%s\n' "$matching") "$pairs" <(printf '%s\n' "$extra")
 }
 
 # cc_readable <file>...: exits 1 unless each file is a readable regular file.
@@ -737,6 +860,17 @@ cc_readable() {
 cc_jq_failed() {
   case $1 in 1 | 2 | 141) exit "$1" ;; esac
   cc_fail "could not read $2" "check that it is a Claude Code transcript"
+}
+
+# cc_saved_output_paths <file>...: the text "Full output saved to: <path>" of each persisted-output marker
+# in the files, one per line. rg reads long lines many times faster than grep, which serves when rg
+# is missing.
+cc_saved_output_paths() {
+  if command -v rg > /dev/null 2>&1; then
+    cc_rg -o -N --no-filename -e 'Full output saved to: [^"\\]*' -- "$@"
+  else
+    printf '%s\0' "$@" | xargs -0 grep -h -o -e 'Full output saved to: [^"\\]*' -- 2> /dev/null
+  fi
 }
 
 # cc_jq_program <program> [<jq-option>...] -- <file|->...
@@ -789,7 +923,7 @@ cc_jq_program() {
     --rawfile __sizes <(
       [ ${#dirs[@]} -eq 0 ] || printf '%s\n' "${dirs[@]}" | LC_ALL=C sort -u | tr '\n' '\0' |
         xargs -0 sh -c 'find "$@" -type f -exec stat -f "%z%t%N" {} +' sh 2> /dev/null
-      [ ${#files[@]} -eq 0 ] || printf '%s\0' "${files[@]}" | xargs -0 grep -h -o -e 'Full output saved to: [^"\\]*' -- 2> /dev/null |
+      [ ${#files[@]} -eq 0 ] || cc_saved_output_paths "${files[@]}" |
         LC_ALL=C sort -u | while IFS= read -r file; do
           file=${file#Full output saved to: }
           [ -f "$file" ] && printf '%s\0' "$file"
