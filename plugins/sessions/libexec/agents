@@ -7,7 +7,8 @@ agents_help() {
 Usage: cc-sessions agents <session> [--since T] [--until T] [--full]
 
 The sub-agents, teammates, forks and workflow runs a transcript started, where their transcripts
-are and what they returned. For a session, agent files that no call links to are listed last.
+are and what they returned: rows follow their calls, each run's agents right after it; a call that
+resumes an agent or run adds no row. For a session, agent files no call links to come last.
 
 Options:
   --since T    rows from T on: a handle (L120), a timestamp, or an age (30m, 2h, 7d)
@@ -18,22 +19,25 @@ agent's first time.
 
 The first record is: dir  <absolute session directory>. Then one record per agent or run.
 Fields:
-  handle         L<line> of the Agent, Task or Workflow call, or of a fork's launch; - if none
+  handle         L<line> of the first Agent, Task or Workflow call, or of a fork's launch; - if none
   kind           agent, teammate, fork, flat (older layout), workflow (a run), workflow-agent
                  (after its run), internal (compaction, prompt suggestion, Warmup, transcripts fork)
-  id             agent id, or run id
+  id             agent id (a split-pane teammate: its own session's id), or run id
   type           agent type; for a run, the workflow name
-  status         completed, failed, killed, running, denied or unknown: from the journal, the run
-                 record, the notification, the call's result, else the transcript's end
+  status         completed, failed, killed (also an interrupted call), running, denied or unknown:
+                 from the journal, the run record, the last call's notification or result, else
+                 the transcript's end
   model          models of its messages; for a run, its default model
-  output_tokens  output tokens of its transcript; for a run, the sum over its agents
+  output_tokens  output tokens of its transcript, the final message counted as its call reports it;
+                 for a run, the sum over its agents
   label          description or name, else journal label, else delegation prompt
   path           its transcript (a run: its directory), relative to dir when under it, else
                  absolute; - when not found
-  result         the notification's result, else the journal's, else structured output, else
-                 the last text
+  result         the last call's notification result, else the journal's, else structured output,
+                 else the last text
 
-No default limit.
+No default limit. A stderr notice says when output_tokens draw on Claude Code 2.0.50 to 2.1.56,
+which often did not record a message's final count: they are lower bounds there.
 Empty answer: nothing on stdout; on stderr
 "cc-sessions: no sub-agent or workflow calls in <transcript> and no agent files under <dir>".
 Exit status: 0 answered, also when empty; 1 a transcript cannot be read; 2 usage error
@@ -84,45 +88,24 @@ cc_resolve "${operands[0]}"
 subject=$CC_FILE subject_kind=$CC_KIND session_dir=$CC_SESSION_DIR
 
 documents=() agent_files=()
-
-agents_add() {
-  local list=$1 path=$2 seen
-  case $list in
-    documents) for seen in ${documents[@]+"${documents[@]}"}; do [ "$seen" = "$path" ] && return 0; done ;;
-    *) for seen in ${agent_files[@]+"${agent_files[@]}"}; do [ "$seen" = "$path" ] && return 0; done ;;
-  esac
-  [ "$path" = "$subject" ] && return 0
-  case $list in
-    documents) documents+=("$path") ;;
-    *) agent_files+=("$path") ;;
-  esac
-}
-
-agents_add_run_dir() {
-  local path
-  [ -f "$1/journal.jsonl" ] && agents_add documents "$1/journal.jsonl"
-  for path in "$1"/agent-*.jsonl; do
-    [ -f "$path" ] && agents_add agent_files "$path"
-  done
-  return 0
-}
-
 if [ "$subject_kind" = main ]; then
   for path in "$session_dir"/subagents/workflows/*/journal.jsonl "$session_dir"/workflows/*.json; do
-    [ -f "$path" ] && agents_add documents "$path"
+    [ -f "$path" ] && documents+=("$path")
   done
-  while IFS= read -r path; do
-    agents_add agent_files "$path"
-  done < <(cc_agent_files "$subject")
+  cc_lines "$(cc_agent_files "$subject"; cc_teammate_sessions "$subject")"
+  agent_files=(${CC_LINES[@]+"${CC_LINES[@]}"})
 fi
 
-# Journals and run records come before agent transcripts: an agent's label can come from its journal.
+# Each file once, and never the transcript itself; journals and run records come before agent
+# transcripts, as an agent's label can come from its journal.
 agents_run() {
+  cc_lines "$(printf '%s\n' ${documents[@]+"${documents[@]}"} ${agent_files[@]+"${agent_files[@]}"} |
+    awk -v subject="$subject" 'NF && $0 != subject && !seen[$0]++')"
   # shellcheck disable=SC2016 # the $ names are jq variables
   cc_jq_program "$(cc_module_program agents 'main($since; $until; $label_width; $result_width; $final)')" -r \
     --argjson since "$since" --argjson until "$until" --argjson label_width "$label_width" \
     --argjson result_width "$result_width" --argjson final "$1" \
-    -- "$subject" ${documents[@]+"${documents[@]}"} ${agent_files[@]+"${agent_files[@]}"}
+    -- "$subject" ${CC_LINES[@]+"${CC_LINES[@]}"}
 }
 
 # Agents of a resumed copy, or of an agent transcript, live elsewhere: the first pass names the ids it
@@ -134,15 +117,19 @@ if [[ $output == need$'\t'* ]]; then
     case $what in
       agent) wanted+=("$id") ;;
       run)
-        path=$(cc_run_dir "$session_dir" "$id") && agents_add_run_dir "$path"
-        path=$(cc_run_record "$session_dir" "$id") && agents_add documents "$path"
+        if path=$(cc_run_dir "$session_dir" "$id"); then
+          [ -f "$path/journal.jsonl" ] && documents+=("$path/journal.jsonl")
+          for file in "$path"/agent-*.jsonl; do
+            [ -f "$file" ] && agent_files+=("$file")
+          done
+        fi
+        path=$(cc_run_record "$session_dir" "$id") && documents+=("$path")
         ;;
     esac
   done <<< "$output"
   if [ ${#wanted[@]} -gt 0 ]; then
-    while IFS= read -r path; do
-      agents_add agent_files "$path"
-    done < <(cc_agent_transcripts "$session_dir" "${wanted[@]}")
+    cc_lines "$(cc_agent_transcripts "$session_dir" "${wanted[@]}")"
+    agent_files+=(${CC_LINES[@]+"${CC_LINES[@]}"})
   fi
   output=$(agents_run true) || cc_jq_failed $? "the agents of $subject"
 fi

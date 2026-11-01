@@ -117,7 +117,8 @@ def call($w):
 # Record plumbing that tools, conversation and search share. This module is imported, so nothing in it
 # may call an s:: function that calls another one (see cc_module_program in common.sh).
 
-def src: .agent // "main";
+# A split-pane teammate's transcript is a main transcript of its own session, named by that session's id.
+def src($fi): .agent // (if $fi == 0 then "main" else .session end);
 
 # Merges per-file record arrays by time. Each record sorts by the latest timestamp its file has shown
 # so far, since timestamps can run backwards, so every file keeps its own order; the records of a file

@@ -127,6 +127,20 @@ $ diff <(cc-sessions overview a7c3e9f) <(cc-sessions overview a7c3e9f --agents |
 same
 ```
 
+A split-pane teammate runs as a session of its own and counts as one of the lead's agents, named by its session id.
+Its type and label come from its spawning call.
+
+```scrut
+$ cc-sessions overview d5e7 --agents | grep -E '^agents?\t'
+agents\t6\tagent=3\tteammate=2\tworkflow-agent=1 (escaped)
+agent\ta1e3c5a7b9d1f3e5a\tagent\tExplore\t7\t4000\t4000\t86\tCheck the audit log (escaped)
+agent\ta2b4d6f8a0c2e4a6b\tagent\tExplore\t3\t1700\t0\t28\tTrace the slow query (escaped)
+agent\ta5c7e9a1b3c5d7e9f\tagent\tExplore\t2\t1600\t0\t20\tLook up the timeout setting (escaped)
+agent\tareviewer-1a2b3c4d5e6f7a8b\tteammate\treviewer\t5\t2300\t2100\t80\tReview the audit findings (escaped)
+agent\ta6d8f0b2c4e6a8b0d\tworkflow-agent\tworkflow-subagent\t5\t2400\t0\t33\tcount (escaped)
+agent\tf3a5c7e9-1b3d-4f5a-8c7e-9a1b3c5d7e9f\tteammate\tgeneral-purpose\t4\t6400\t6100\t105\tFix the timeout (escaped)
+```
+
 A flat-layout session's agents sit beside it; the Warmup agent is internal. The flat agent's type comes from its Task call and its label from its delegation prompt.
 
 ```scrut

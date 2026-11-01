@@ -112,10 +112,10 @@ def kinds_of($spec):
       else $asked end
   end;
 
-def _src($t; $multi):
+def _src($t; $multi; $explicit):
   if $t.kind == "journal" then $t.run
   elif $t.agent then $t.agent
-  elif $multi then $t.session
+  elif $multi or ($explicit | not) then $t.session
   else "main" end;
 
 #: Per-session search: one TSV record per match, the files of $ARGS.named.opts.files ([{path, explicit}]) merged by time, then a notice on stderr when nothing matched. Input: null; reads rg lines with inputs.
@@ -126,11 +126,11 @@ def within:
   | [ $o.files[] | . as $f
       | ($grouped[$f.path] // {} | s::from_lines($f.path; null)) as $t
       | select($f.explicit or ($t | s::is_internal | not))
-      | {t: $t, hit: $f.hit} ] as $searched
-  | ($searched | map(select(.hit) | .t)) as $hit
-  | ($hit[] | s::skipped_notice),
-    ([ range(0; $hit | length) as $fi | $hit[$fi] as $t
-       | [ $t | matches($o.kinds; $o.match) | select(s::within($o.since; $o.until)) | . + {fi: $fi, src: _src($t; $multi)} ] ]
+      | {t: $t, hit: $f.hit, explicit: $f.explicit} ] as $searched
+  | ($searched | map(select(.hit))) as $hit
+  | ($hit[] | .t | s::skipped_notice),
+    ([ range(0; $hit | length) as $fi | $hit[$fi] as $h | $h.t as $t
+       | [ $t | matches($o.kinds; $o.match) | select(s::within($o.since; $o.until)) | . + {fi: $fi, src: _src($t; $multi; $h.explicit)} ] ]
      | r::by_time) as $out
   | if ($out | length) > 0 then
       $out[] | [s::handle, .src, (.ts | s::ts), .kind, (. as $r | $r.text | snippet($r.m; $o.width))] | s::tsv

@@ -715,6 +715,120 @@ $ cc-sessions jq '.rows |= map(if .l == 67 then .e.message.content |= sub("<tool
 [67,null]
 ```
 
+`s::completions` reads every completion block, the ones a session was handed (notification entries and queued
+commands) first, then those that exist only as a `queue-operation` enqueue. A 2.0.x `<agent-notification>` is keyed by
+`<agent-id>`, read as its task id; ECHO L10 holds two.
+
+```scrut
+$ cc-sessions jq 's::completions | [s::handle, .tool_use_id, .task_id, .status] | s::tsv' e2c4 a7c3e9f -- -r
+L10\t-\ta1d2e3f\tcompleted (escaped)
+L10\t-\ta4b5c6d\tcompleted (escaped)
+L8\t-\ta7e8f9a\tcompleted (escaped)
+L67\ttoolu_01FxAlpha000000000000011\ta7c3e9b2d4f6a8c01\tcompleted (escaped)
+L68\ttoolu_01FxAlpha000000000000013\tw3k9p2m7z\tcompleted (escaped)
+```
+
+A call links to the completion with its tool-use id, else to the first one after it with its agent or task id.
+
+```scrut
+$ cc-sessions jq '[s::agent_calls | .notification.l]' e2c4 -- -c
+[10,10,8,null,null,null]
+```
+
+Agent calls also carry a teammate's team and name, whether the user interrupted the call, and the output tokens that
+a finished call reports for the agent's final message.
+
+```scrut
+$ cc-sessions jq '. as $t | s::agent_calls | [$t.session[:4], s::handle, .agent_id, .team_name, .teammate_name, .interrupted, .reported_output] | s::tsv' d5e7 e2c4 -- -r
+d5e7\tL4\ta1e3c5a7b9d1f3e5a\t-\t-\tfalse\t56 (escaped)
+d5e7\tL6\treviewer@session-d5e7f9a1\tsession-d5e7f9a1\treviewer\tfalse\t- (escaped)
+d5e7\tL8\tfixer@session-d5e7f9a1\tsession-d5e7f9a1\tfixer\tfalse\t- (escaped)
+d5e7\tL10\t-\t-\t-\ttrue\t- (escaped)
+e2c4\tL2\ta1d2e3f\t-\t-\tfalse\t- (escaped)
+e2c4\tL4\ta4b5c6d\t-\t-\tfalse\t- (escaped)
+e2c4\tL6\ta7e8f9a\t-\t-\tfalse\t- (escaped)
+e2c4\tL11\ta0b1c2d\t-\t-\tfalse\t900 (escaped)
+e2c4\tL13\ta0b1c2d\t-\t-\tfalse\t650 (escaped)
+e2c4\tL15\t-\t-\t-\ttrue\t- (escaped)
+```
+
+`s::lifecycle_status($run_status; $end)` is the status of what a call started, the first that applies: the run record's
+status, the notification's, the call's own outcome (a finished call, an error, a denial, an interrupt), the
+transcript's end, else unknown.
+
+```scrut
+$ cc-sessions jq '({status: "completed"} | s::lifecycle_status(null; null)),
+>   ({status: "async_launched", notification: {status: "killed"}} | s::lifecycle_status(null; "completed")),
+>   ({status: "async_launched"} | s::lifecycle_status(null; "completed")),
+>   ({status: "error", interrupted: true} | s::lifecycle_status(null; null)),
+>   ({status: "error"} | s::lifecycle_status(null; null)),
+>   ({status: "denied"} | s::lifecycle_status(null; null)),
+>   ({status: "teammate_spawned"} | s::lifecycle_status(null; null)),
+>   ({status: "async_launched", notification: {status: "completed"}} | s::lifecycle_status("failed"; null)),
+>   (null | s::lifecycle_status(null; "failed"))' -- -n -r | paste -s -d ' ' -
+completed killed completed killed failed denied unknown failed failed
+```
+
+`s::end_status` reads a transcript's end: completed when its last message stopped, failed on an API error, else null.
+
+```scrut
+$ cc-sessions jq '[.agent, s::end_status] | s::tsv' a7c3e9b2 a2b4d6f8 a4b5c6d -- -r
+a7c3e9b2d4f6a8c01\tcompleted (escaped)
+a2b4d6f8a0c2e4a6b\t- (escaped)
+a4b5c6d\t- (escaped)
+```
+
+`s::teammate` is a teammate's team and name: from its meta, or, for a split-pane teammate's own session, from the
+`teamName` and `agentName` its entries carry. A split-pane teammate's session is of kind `teammate`.
+
+```scrut
+$ cc-sessions jq '[.agent // .session, (s::teammate | if . then "\(.name)@\(.team)" else null end), s::agent_kind] | s::tsv' areviewer f3a5 aplanner a1e3 d5e7 -- -r
+areviewer-1a2b3c4d5e6f7a8b\treviewer@session-d5e7f9a1\tteammate (escaped)
+f3a5c7e9-1b3d-4f5a-8c7e-9a1b3c5d7e9f\tfixer@session-d5e7f9a1\tteammate (escaped)
+aplanner-5e1f0a2b3c4d5e6f\tplanner@session-a7c3e9f1\tteammate (escaped)
+a1e3c5a7b9d1f3e5a\t-\tagent (escaped)
+d5e7f9a1-3b5c-4d7e-9f1a-2b4c6d8e0f13\t-\t- (escaped)
+```
+
+`s::matching_call` links a teammate to its spawning call by team and name when the call names no file. The agent the
+reviewer started has its call in the reviewer's transcript, so no call of the session links it.
+
+```scrut
+$ cc-sessions jq '(.[0] | [s::agent_calls]) as $calls | .[1:][] | [.agent // .session, (s::matching_call($calls) | if . then s::handle else "-" end)] | s::tsv' d5e7 areviewer f3a5 a5c7 -- -s -r
+areviewer-1a2b3c4d5e6f7a8b\tL6 (escaped)
+f3a5c7e9-1b3d-4f5a-8c7e-9a1b3c5d7e9f\tL8 (escaped)
+a5c7e9a1b3c5d7e9f\t- (escaped)
+```
+
+## Output tokens that are lower bounds
+
+Claude Code 2.0.50 through 2.1.56 often wrote a message's last entry before its output was counted.
+`s::partial_output_version` names those versions; `s::partial_output_versions` lists them among a transcript's
+assistant entries; `s::lower_bound_notice` is the notice for an array of them, and nothing for none.
+
+```scrut
+$ cc-sessions jq '"2.0.49", "2.0.50", "2.1.37", "2.1.56", "2.1.59", "2.1.314", "2.0.65-beta", "unknown" | [., s::partial_output_version] | s::tsv' -- -n -r
+2.0.49\tfalse (escaped)
+2.0.50\ttrue (escaped)
+2.1.37\ttrue (escaped)
+2.1.56\ttrue (escaped)
+2.1.59\tfalse (escaped)
+2.1.314\tfalse (escaped)
+2.0.65-beta\ttrue (escaped)
+unknown\tfalse (escaped)
+```
+
+```scrut
+$ cc-sessions jq '[.session[:4], (s::partial_output_versions | join(","))] | s::tsv' e2c4 c4e6 a7c3e9f b2d4 -- -r
+> cc-sessions jq '["2.1.37", "2.0.65", "2.1.37", "2.0.51"] | s::lower_bound_notice' -- -n -r; cc-sessions jq '[] | s::lower_bound_notice' -- -n -r; echo end
+e2c4\t2.0.65 (escaped)
+c4e6\t2.0.76 (escaped)
+a7c3\t- (escaped)
+b2d4\t- (escaped)
+cc-sessions: output tokens are lower bounds for messages written by Claude Code 2.0.51, 2.0.65, 2.1.37: versions 2.0.50 through 2.1.56 often did not record a message's final output count
+end
+```
+
 Forks: the parent's `launchedAgentId`, and the agent's `fork-context-ref`.
 
 ```scrut
@@ -831,6 +945,23 @@ beta/b2d4f6a8-1c3e-4a5b-8d7f-9e0a1b2c3d4e/subagents/agent-a4c6e8f0a2b4c6d8e.json
 9
 alpha/a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e/subagents/workflows/wf_5d1c9a7e-3b2/journal.jsonl
 end
+```
+
+`cc_teammate_sessions` finds the sessions of the split-pane teammates a session spawned: the main transcripts in its
+project directory whose entries carry the `teamName` and `agentName` of a spawn result's `<name>@<team>`. The in-process
+teammate's id names no session there. `cc_session_agent_files` includes them.
+
+```scrut
+$ (. "$CC_TEST_ROOT/lib/common.sh"; cc_teammate_sessions "$P/-tmp-sessions-fixture-delta/d5e7f9a1-3b5c-4d7e-9f1a-2b4c6d8e0f13.jsonl"; cc_teammate_sessions "$ALPHA.jsonl"; echo end) | cc_test_rel
+> (. "$CC_TEST_ROOT/lib/common.sh"; cc_session_agent_files "$P/-tmp-sessions-fixture-delta/d5e7f9a1-3b5c-4d7e-9f1a-2b4c6d8e0f13.jsonl") | cc_test_rel | sed 's#<root>/projects/-tmp-sessions-fixture-delta/##'
+<root>/projects/-tmp-sessions-fixture-delta/f3a5c7e9-1b3d-4f5a-8c7e-9a1b3c5d7e9f.jsonl
+end
+d5e7f9a1-3b5c-4d7e-9f1a-2b4c6d8e0f13/subagents/agent-a1e3c5a7b9d1f3e5a.jsonl
+d5e7f9a1-3b5c-4d7e-9f1a-2b4c6d8e0f13/subagents/agent-a2b4d6f8a0c2e4a6b.jsonl
+d5e7f9a1-3b5c-4d7e-9f1a-2b4c6d8e0f13/subagents/agent-a5c7e9a1b3c5d7e9f.jsonl
+d5e7f9a1-3b5c-4d7e-9f1a-2b4c6d8e0f13/subagents/agent-areviewer-1a2b3c4d5e6f7a8b.jsonl
+d5e7f9a1-3b5c-4d7e-9f1a-2b4c6d8e0f13/subagents/workflows/wf_8c2e4a6b-1d3/agent-a6d8f0b2c4e6a8b0d.jsonl
+f3a5c7e9-1b3d-4f5a-8c7e-9a1b3c5d7e9f.jsonl
 ```
 
 A project directory can hold thousands of flat agent files; reading their `sessionId`s takes one process, not one per
@@ -1045,7 +1176,7 @@ first, as `<pos>TAB<mtime>TAB<bytes>TAB<path>`.
 
 ```scrut
 $ (. "$CC_TEST_ROOT/lib/common.sh"; cc_sessions_by_mtime '' '' | awk -F '\t' '{ n = split($4, p, "/"); print $1, substr(p[n], 1, 4) }' | paste -s -d ' ' -; cc_sessions_by_mtime 1793318400 1793404799 | cut -f 1,2)
-0 b5a7 1 a7c3 2 d1f3 3 e5a7 4 f6b8 5 c7d9 6 b9e1 7 b2d4 8 c4e6
+0 b5a7 1 a7c3 2 d1f3 3 e5a7 4 f6b8 5 c7d9 6 b9e1 7 b2d4 8 c4e6 9 e2c4 10 d5e7 11 f3a5
 0\t1793361600 (escaped)
 1\t1793359800 (escaped)
 ```
@@ -1055,8 +1186,8 @@ transcript, as `<main>TAB<file>`: nested ones by their directory, flat ones by t
 
 ```scrut
 $ (. "$CC_TEST_ROOT/lib/common.sh"; cc_corpus_agent_map | wc -l | tr -d ' '; cc_corpus_agent_map --journals | wc -l | tr -d ' '; cc_corpus_agent_map | grep -- '-flat/' | sort | cc_test_rel)
-11
-12
+21
+23
 <root>/projects/-tmp-sessions-fixture-flat/c4e6a8b0-2d4f-4a6c-9e8a-0b2c4d6e8f1a.jsonl\t<root>/projects/-tmp-sessions-fixture-flat/agent-5f6a7b8c.jsonl (escaped)
 <root>/projects/-tmp-sessions-fixture-flat/c4e6a8b0-2d4f-4a6c-9e8a-0b2c4d6e8f1a.jsonl\t<root>/projects/-tmp-sessions-fixture-flat/agent-9a0b1c2d.jsonl (escaped)
 ```
@@ -1143,11 +1274,11 @@ The library answers the same under jq 1.7 (`/usr/bin/jq`) as under jq 1.8.
 
 ```scrut
 $ mkdir -p "$CC_TEST_TMP/jq17" && ln -sf /usr/bin/jq "$CC_TEST_TMP/jq17/jq"
-> f='[s::totals, s::models, [s::duplicates], [s::user_entries | del(.e)], [s::human_events], [s::outputs], [s::messages | del(.blocks)], [s::tool_calls], [s::skill_events], [s::attributions], [s::content], [s::agent_calls], [s::workflow_calls], [s::notifications], [s::fork_launches], s::fork_ref, s::delegation, s::agent_result, s::label_of, s::origin, s::is_stub, s::cwds, s::span, [s::compactions], [s::unknown_types], s::internal_reason, [s::journal]]'
-> set -- a7c3e9f b2d4 b9e1 c4e6 d1f3 e5a7 f6b8 b5a7 a7c3e9b2 aplanner adoes a3d1 acompact a0f1 a9e8 5f6a7b8c 9a0b1c2d "$WF/journal.jsonl"
+> f='[s::totals, s::models, [s::duplicates], [s::user_entries | del(.e)], [s::human_events], [s::outputs], [s::messages | del(.blocks)], [s::tool_calls], [s::skill_events], [s::attributions], [s::content], [s::agent_calls], [s::workflow_calls], [s::notifications], [s::completions], [s::fork_launches], s::fork_ref, s::delegation, s::agent_result, s::label_of, s::origin, s::is_stub, s::cwds, s::span, [s::compactions], [s::unknown_types], s::internal_reason, [s::journal], s::teammate, s::agent_kind, s::end_status, s::partial_output_versions]'
+> set -- a7c3e9f b2d4 b9e1 c4e6 d1f3 e5a7 f6b8 b5a7 a7c3e9b2 aplanner adoes a3d1 acompact a0f1 a9e8 5f6a7b8c 9a0b1c2d "$WF/journal.jsonl" d5e7 e2c4 f3a5 areviewer
 > cc-sessions jq "$f" "$@" --max-chars 0 > v18.txt 2>/dev/null && PATH="$CC_TEST_TMP/jq17:$PATH" cc-sessions jq "$f" "$@" --max-chars 0 > v17.txt 2>/dev/null
 > cmp v18.txt v17.txt && wc -l < v18.txt | tr -d ' '
-18
+22
 ```
 
 ```scrut

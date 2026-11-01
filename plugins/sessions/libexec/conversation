@@ -24,7 +24,7 @@ Options:
 
 Fields:
   handle  L<line> in the file named by src; an assistant record is at its first text line
-  src     main for the session's own transcript, else the agent id
+  src     main for the session's transcript, else the agent id; a split-pane teammate's session id
   time    the entry's timestamp, or the nearest earlier one in the file (UTC)
   role    prompt slash bash sdk queued answer denied plan interrupt output: the human, as in
           cc-sessions prompts; assistant: one API message's text; tool: one call, "<name> <input>

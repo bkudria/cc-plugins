@@ -27,6 +27,9 @@ entry of each `message.id`; context = input + cache creation + cache read.
 | `UNDER` | `projects/-tmp-sessions-fixture-under-score/f6b8d0e2-4a6c-4e8a-b0c2-d4e6f8a0b2c4` |
 | `GAMMA` | `projects/-tmp-sessions-fixture-gamma/c7d9e1f3-5a6b-4c8d-9e0f-1a2b3c4d5e6f` |
 | `WF` | `ALPHA/subagents/workflows/wf_5d1c9a7e-3b2` |
+| `DELTA` | `projects/-tmp-sessions-fixture-delta/d5e7f9a1-3b5c-4d7e-9f1a-2b4c6d8e0f13` |
+| `MATE` | `projects/-tmp-sessions-fixture-delta/f3a5c7e9-1b3d-4f5a-8c7e-9a1b3c5d7e9f` |
+| `ECHO` | `projects/-tmp-sessions-fixture-echo/e2c4a6b8-0d2f-4b4d-8e6f-1a3b5c7d9e0f` |
 
 `X.jsonl` is the main transcript; `X/` is its session directory.
 
@@ -43,9 +46,12 @@ entry of each `message.id`; context = input + cache creation + cache read.
 | RESUMED | `b9e1c3a5-7d2f-4e6a-8b0c-1d3e5f7a9b2c` | 7 | `/tmp/sessions-fixture/beta` | 2.1.206 | cli | `Find where the header should live.` (first human input L1) | yes | 2026-07-20 12:00:00 |
 | BETA | `b2d4f6a8-1c3e-4a5b-8d7f-9e0a1b2c3d4e` | 22 | `/tmp/sessions-fixture/beta` | 2.1.206 | cli | `Summarise the beta build failures.` (first human input L2) | yes | 2026-07-15 12:00:00 |
 | FLAT | `c4e6a8b0-2d4f-4a6c-9e8a-0b2c4d6e8f1a` | 8 | `/tmp/sessions-fixture/flat` | 2.0.76 | cli (no entrypoint) | `Flat era config loader search` (legacy summary L1) | yes | 2026-01-03 12:00:00 |
+| ECHO | `e2c4a6b8-0d2f-4b4d-8e6f-1a3b5c7d9e0f` | 19 | `/tmp/sessions-fixture/echo` | 2.0.65 | cli (no entrypoint) | `Explore the schema code and the state updates in the background.` (first human input L1) | yes | 2025-12-08 09:06:00 |
+| DELTA | `d5e7f9a1-3b5c-4d7e-9f1a-2b4c6d8e0f13` | 18 | `/tmp/sessions-fixture/delta` | 2.1.220 | cli | `Run the audit workflow, then check the log and bring in a reviewer.` (first human input L1) | yes | 2025-12-06 10:06:00 |
+| MATE | `f3a5c7e9-1b3d-4f5a-8c7e-9a1b3c5d7e9f` | 6 | `/tmp/sessions-fixture/delta` | 2.1.220 | cli | none (no title and no human input) | yes | 2025-12-06 10:01:02 |
 
-- Default listing (cli only), newest first: ALPHA, RELOC, UNDER, GAMMA, RESUMED, BETA, FLAT. With sdk admitted, SDK sits between
-  ALPHA and RELOC. STUB is newest of all and must never appear. `projects/-tmp-sessions-fixture-flat/agent-*.jsonl` are
+- Default listing (cli only), newest first: ALPHA, RELOC, UNDER, GAMMA, RESUMED, BETA, FLAT, ECHO, DELTA, MATE. With sdk
+  admitted, SDK sits between ALPHA and RELOC. STUB is newest of all and must never appear. `projects/-tmp-sessions-fixture-flat/agent-*.jsonl` are
   flat sub-agents, never sessions.
 - Project directory names follow Claude Code's encoding (every character outside `[A-Za-z0-9]` becomes `-`):
   `/tmp/sessions fixture/under_score` → `-tmp-sessions-fixture-under-score`.
@@ -75,6 +81,9 @@ entry of each `message.id`; context = input + cache creation + cache read.
 | `c7d9` | `GAMMA.jsonl` | GAMMA (no session directory) |
 | `wf_5d1c9a7e-3b2` | (rule 3) | ALPHA |
 | `e0a0` | nothing | exit 2 (entry uuids are not file names) |
+| `d5e7`, `e2c4`, `f3a5` | the one session with that prefix | DELTA, ECHO, MATE |
+| `areviewer`, `a1e3`, `a2b4`, `a5c7`, `a6d8` | the one agent file in `DELTA/` with that id | DELTA's agents |
+| `a1d2`, `a4b5`, `a7e8`, `a0b1`, `a3c4` | the one flat agent file beside ECHO | ECHO's agents |
 | `ALPHA/tool-results/b4k7m2q9x.txt` (as a path) | — | ALPHA |
 | `RELOC/tool-results/c8n2v5x1q.txt` (as a path) | — | RELOC |
 
@@ -529,6 +538,85 @@ duplicate uuids, no backwards timestamps. First timestamp `2026-10-26T14:00:03.9
 No `custom-title` and no `summary`; the only `ai-title` (L13) is a single token, so the label is the `agent-name`
 `gamma-indexer` (L14), not the first human input (L1).
 
+## DELTA (2.1.220: workflow resume, teammates, an interrupt)
+
+| L | Entry | Notes |
+|---|---|---|
+| 1 | user, origin human: `Run the audit workflow, then check the log and bring in a reviewer.` | H1 |
+| 2 | assistant M1: tool_use W1 Workflow `{"name":"audit","args":{"scope":"logs"}}` | before every Agent call |
+| 3 | user tool_result W1: launch; `runId` `wf_8c2e4a6b-1d3`, `taskId` `wd1x7k2p` | |
+| 4 | assistant M2: tool_use A1 Agent (Explore, `Check the audit log`) | synchronous |
+| 5 | user tool_result A1: `status` completed, `agentId` `a1e3c5a7b9d1f3e5a`, `usage.output_tokens` 56 | |
+| 6 | assistant M3: tool_use A2 Agent (`name` reviewer, `Review the audit findings`) | in-process teammate |
+| 7 | user tool_result A2: `teammate_spawned`, `agent_id` `reviewer@session-d5e7f9a1`, `team_name` `session-d5e7f9a1`, `tmux_pane_id` `in-process`, `is_splitpane` false; no `agentId` | names no file |
+| 8 | assistant M4: tool_use A3 Agent (`name` fixer, `Fix the timeout`) | split-pane teammate |
+| 9 | user tool_result A3: `teammate_spawned`, `agent_id` `fixer@session-d5e7f9a1`, `tmux_pane_id` `%12`, `is_splitpane` true | its transcript is MATE |
+| 10 | assistant M5: tool_use A4 Agent (Explore, `Trace the slow query`) | |
+| 11 | user tool_result A4 `[Request interrupted by user for tool use]`, `is_error` true; `toolUseResult` is that text with `Error: ` | interrupted |
+| 12 | user `[Request interrupted by user for tool use]` | interrupt event |
+| 13 | user `<task-notification>` for W1: `<status>killed</status>`, no `<result>` | notification |
+| 14 | user, origin human: `Resume the audit run.` | H2 |
+| 15 | assistant M6: tool_use W2 Workflow `{"scriptPath":…,"resumeFromRunId":"wf_8c2e4a6b-1d3"}` | resumes the run |
+| 16 | user tool_result W2: launch; same `runId`, `taskId` `wd2m4n6q` | |
+| 17 | user `<task-notification>` for W2: completed, `<result>{"errors":1}</result>` | notification |
+| 18 | assistant M7: text `The audit finished with one timeout, which the fixer is raising.` | |
+
+- Tool ids `toolu_01FxDelta00000000000000N` for W1, A1, A2, A3, A4, W2 (N = 1–6). Messages M1–M7
+  `msg_01FxDelta00000000000000N`, one entry each: input 9, cache creation 7200, cache read 98100, output 520; peak
+  context 16201 (M7, L18). Model claude-opus-5-5. Entry timestamps 2025-12-06T10:00:01Z to 10:05:45Z.
+- Run `wf_8c2e4a6b-1d3`: record `DELTA/workflows/wf_8c2e4a6b-1d3.json` (status completed, result `{"errors":1}`,
+  summary `Audit the logs.`, defaultModel claude-haiku-5-5); `DELTA/subagents/workflows/wf_8c2e4a6b-1d3/` holds
+  `journal.jsonl` (agent `a6d8f0b2c4e6a8b0d`, label `count`, result `One error: a timeout at 09:58.`) and that agent's
+  transcript and meta (2 lines; output 33).
+
+| Agent | File | Link | Status / result | Output |
+|---|---|---|---|---|
+| `a1e3c5a7b9d1f3e5a` | `DELTA/subagents/agent-a1e3c5a7b9d1f3e5a.jsonl` + meta (`toolUseId` A1) | A1 `agentId` | completed (sync); last text `The audit log's last error is a timeout at 09:58.` | 30 + 56 = 86; the call reports 56, as the last entry does |
+| `areviewer-1a2b3c4d5e6f7a8b` | `DELTA/subagents/agent-areviewer-1a2b3c4d5e6f7a8b.jsonl` + meta (`taskKind` in_process_teammate, `name` reviewer, `teamName` session-d5e7f9a1; no `toolUseId`) | A2 by meta name and team | ends `end_turn`; last text `Fix list: raise the audit timeout in config/audit.yml.` | 45 + 35 = 80 |
+| `a5c7e9a1b3c5d7e9f` | `DELTA/subagents/agent-a5c7e9a1b3c5d7e9f.jsonl` + meta (`parentAgentId` areviewer…, `toolUseId` = the reviewer's L2 call) | none in DELTA: its call is the reviewer's | last text `The audit timeout is set in config/audit.yml.` | 20 |
+| `a2b4d6f8a0c2e4a6b` | `DELTA/subagents/agent-a2b4d6f8a0c2e4a6b.jsonl` + meta (`toolUseId` A4) | A4 by meta | ends on a user `[Request interrupted by user]` (L4); no text | 28 |
+
+## MATE (DELTA's split-pane teammate `fixer`)
+
+L1 `agent-setting` (no teamName), L2 user `<teammate-message teammate_id="team-lead">…Raise the audit timeout and rerun the
+check.…` (a `peer` entry), L3 assistant tool_use Edit (output 80), L4 user tool_result, L5 assistant text `Raised the
+audit timeout to 30s; the check passes.` (`end_turn`, output 25), L6 `last-prompt`. Every user and assistant entry
+carries `teamName` `session-d5e7f9a1` and `agentName` `fixer`. Two messages: input 4, cache creation 6400, cache read
+6100, output 105; model claude-opus-5-5. No human input and no title: listed with label `-`.
+
+## ECHO (2.0.65, flat layout: agent notifications, a resume, an interrupt)
+
+| L | Entry | Notes |
+|---|---|---|
+| 1 | user `Explore the schema code and the state updates in the background.` (no origin key) | H1 |
+| 2, 4, 6 | assistant M1–M3: tool_use T1–T3 Task (Explore, background) | |
+| 3, 5, 7 | user tool_result: `async_launched`, `agentId` `a1d2e3f`, `a4b5c6d`, `a7e8f9a` | |
+| 8 | `queue-operation` enqueue: `<agent-notification>` for `a7e8f9a`, completed | the only record of that completion |
+| 9 | `queue-operation` remove | |
+| 10 | user (string): two `<agent-notification>` blocks, `a1d2e3f` and `a4b5c6d`, both completed; no `<tool-use-id>` or `<result>` | notification |
+| 11 | assistant M4: tool_use T4 Task (general-purpose, `Summarise the schema`) | synchronous |
+| 12 | user tool_result T4: completed, `agentId` `a0b1c2d`, `usage.output_tokens` 900 | |
+| 13 | assistant M5: tool_use T5 Task with `resume` `a0b1c2d` (`Add the sixth rule`) | resumes it |
+| 14 | user tool_result T5: completed, `agentId` `a0b1c2d`, `usage.output_tokens` 650 | |
+| 15 | assistant M6: tool_use T6 Task (Explore, `Check the fixtures`) | |
+| 16 | user tool_result T6 `[Request interrupted by user for tool use]`, `is_error` true | interrupted; names no agent |
+| 17 | user `[Request interrupted by user for tool use]` | interrupt event |
+| 18 | user `Thanks, that is enough.` | H2 |
+| 19 | assistant M7: text, `stop_reason` null, `output_tokens` 2 | |
+
+- Tool ids `toolu_01FxEcho000000000000000N` for T1–T6. Messages M1–M7: input 9, cache creation 5950, cache read 62500,
+  output 347; peak context 12003 (M1, L2). Model claude-sonnet-4-5-20250929. No `entrypoint` on any entry.
+- Flat agents in `projects/-tmp-sessions-fixture-echo/`, each `sessionId` ECHO, version 2.0.65, model
+  claude-haiku-4-5-20251001, no meta files, no `stop_reason` on any message:
+
+| Agent | Lines | Link | End | Output |
+|---|---|---|---|---|
+| `a1d2e3f` | L1 prompt, L2 tool_use Grep, L3 result, L4 text `Schema inference lives in lib/schema/infer.rb.` | T1 `agentId`; L10 block 1 | text | 30 + 2 |
+| `a4b5c6d` | L1 prompt, L2 tool_use Read | T2; L10 block 2 | a pending tool call | 2 |
+| `a7e8f9a` | L1 prompt, L2 text `Three migrations: create_schemas, add_defaults and add_nullable.` | T3; L8 enqueue | text | 1 |
+| `a0b1c2d` | L1 prompt (T4's), L2 tool_use Read, L3 result, L4 text, L5 from-parent `Add the rule for nullable fields.` (T5's), L6 text `Six rules now: the five before, and nullable fields say so.` | T4 and T5 `agentId` | text | 40 + 3 + 2 = 45 in the transcript; T5 reports 650 for the final message, so 40 + 3 + 650 = 693 |
+| `a3c4d5e` | L1 prompt (T6's), L2 tool_use Glob, L3 user `[Request interrupted by user]` | T6 by prompt text | a user entry | 1 |
+
 ## STUB
 
 One line: `{"type":"ai-title","aiTitle":"Stub session title",…}`. No user or assistant entry; skipped by listings.
@@ -595,3 +683,5 @@ ALPHA L42; `recap` ALPHA L76.
 - GAMMA's entries carry a subset of the top-level keys real 2.1.316 entries have: no `session_id`, `slug`,
   `serverClassifierRequest`, `serverClassifierContext`, `permissionDecision`, `requestRef`, `requestedModel` or
   `effort`.
+- DELTA and MATE (2.1.220) carry December 2025 timestamps and file times, months before that version; the times keep
+  them out of the windows the other tests use. Their entries, like ECHO's, carry a subset of the real top-level keys.

@@ -88,7 +88,7 @@ def _events:
 
 def _records($o; $fi):
   s::memo
-  | r::src as $src
+  | r::src($fi) as $src
   | .lines as $lines
   | (reduce s::entries[] as $r ({}; .["\($r.l)"] = $r.t)) as $time
   | [s::skill_events] as $skills

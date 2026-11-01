@@ -100,13 +100,16 @@ def _agent_set($rest; $since; $until; $with_agents):
 # Journal labels name workflow agents; agent calls give agents without a meta file a type.
 def _journal_labels($rest): [$rest[] | select(.kind == "journal") | s::journal | {key: .agent_id, value: .label}] | from_entries;
 
+# A split-pane teammate's transcript is a session of its own: its id is the session's, and its call
+# gives it a type and a label.
 def _agent_line($agent_calls; $journal; $width):
   select(.kind != "internal")
   | .kind as $kind
   | .t
-  | ["agent", .agent, $kind, (.meta.agentType? // (s::matching_call($agent_calls) | if . then .subagent_type else null end))]
+  | s::matching_call($agent_calls) as $call
+  | ["agent", (.agent // .session), $kind, (.meta.agentType? // $call.subagent_type)]
     + (s::totals | _tokens)
-    + [s::agent_label($journal[.agent]) | if . then .text | s::display($width) else null end];
+    + [s::agent_label($journal[.agent // ""]) // ($call | if . then {text: .description} else null end) | if . then .text | s::display($width) else null end];
 
 #: The overview records of the first transcript; the others are its agent transcripts and journals.
 def overview($since; $until; $width; $with_agents):

@@ -18,7 +18,8 @@ newer version writes.
 | `lib/file-separator` | The line `cc_jq_program` writes after each file when it hands jq every file as one text |
 | `tests/` | scrut tests and the synthetic fixture tree they run against |
 
-Requirements: bash 3.2 or later, jq 1.7 or later, ripgrep (for `list` and `search`), BSD `find`/`stat` (macOS).
+Requirements: bash 3.2 or later, jq 1.7 or later, ripgrep (for `list`, `search`, and finding the sessions of a session's
+split-pane teammates), BSD `find`/`stat` (macOS).
 All shell code runs under `/bin/bash` 3.2: no associative arrays, `mapfile`, `${var,,}` or `declare -n`.
 
 ## Files
@@ -72,6 +73,11 @@ Every `<session>` argument accepts, in this order:
   blocks in file order.
 - A message's usage is the usage on its **last** entry. Before 2.1.300 the earlier entries carry partial `output_tokens`;
   from 2.1.300 every entry repeats the final usage. Summing per entry overcounts; taking the first entry undercounts.
+- Claude Code 2.0.50 through 2.1.56 often wrote a message's last entry before its output was counted, so that no entry
+  holds the final `output_tokens`. Of messages of 2,000 characters or more, the last entry counts fewer than 10 output
+  tokens in none before 2.0.50, 35% from 2.0.50 to 2.1.9, 97% from 2.1.12 to 2.1.29, 43% from 2.1.30 to 2.1.56 and
+  0.1% after. Output token figures from those versions are lower bounds; `agents` says so in a stderr notice when a
+  row shown draws on them.
 - Messages whose model is `<synthetic>` are harness-generated, carry zero usage, and are left out of model lists.
 - A session's token totals cover its main transcript. Sub-agent totals are reported per agent; a roll-up skips internal
   agents and counts each `message.id` once. Context size per message is input + cache creation + cache read.
@@ -152,38 +158,60 @@ lists.
 - `<text>` is literal and matched in the decoded text, or a jq (Oniguruma) regex with `--regex`. Smart case: text with
   no uppercase letter (a regex's backslash escapes do not count) matches any case.
 - Within sessions: one record per hit. With several sessions `src` names each session's own transcript by its id;
-  `--agents` adds each session's agents and run journals.
+  `--agents` adds each session's agents and run journals (a split-pane teammate's session named by its id).
 - Across sessions: one record per session. Hits in its agents and run journals count toward it (`agent` ends the kinds
   list); internal agents are left out. `hits` ends in `+`, a lower bound, when a file had more matching lines than
   were read from it (100 after the noise filter, 300 before).
 
 ## Sub-agents and workflows
 
-- A session's agents are its nested and flat-layout agent transcripts plus those its Agent and Workflow calls name
-  elsewhere under the root (a resumed copy's agents stay in the original's directory). Every command that reads a
-  session's agents uses this set.
+- A session's agents are its nested and flat-layout agent transcripts, those its Agent and Workflow calls name
+  elsewhere under the root (a resumed copy's agents stay in the original's directory), and the sessions of the
+  split-pane teammates it spawned. Every command that reads a session's agents uses this set.
 - Agent call → transcript: `toolUseResult.agentId` (or `agent_id` for teammates) names `subagents/agent-<id>.jsonl` in the
   session directory; if absent there, any `agent-<id>.jsonl` under the root (resumed sessions keep the original's directory).
   The sub-agent's `.meta.json` `toolUseId`, when present, confirms the link.
+- A teammate whose spawn result (`teammate_spawned`) names it only `agent_id` `<name>@<team>` names no file. In process,
+  its transcript is the `subagents/` file whose meta `name` and `teamName` are the result's `name` and `team_name`. In a
+  split pane (`is_splitpane`), it runs as a session of its own: the main transcript in the lead's project directory
+  whose user and assistant entries carry `teamName` and `agentName` equal to them. Such a session is still listed and
+  searched across sessions as itself; read as the lead's agent, its records name it by its session id.
+- An agent whose meta names `parentAgentId` was started by another agent, whose transcript holds its call. Calls are
+  read only from the session's own transcript, so it is listed without a call.
 - Workflow call → run: `toolUseResult.runId` and `transcriptDir` name `subagents/workflows/<run-id>/`; if absent there, any
   directory of that name under the root. The run record is `workflows/<run-id>.json`; each agent's label, phase and result
   come from `journal.jsonl`.
 - Flat-layout sub-agents link to their parent by `sessionId`, and to the Task call by `agentId` or by prompt text.
 - Fork agents link through the parent's `system` entry carrying `launchedAgentId` and their own `fork-context-ref` line.
 - A background completion arrives as a `notification` user entry or, from 2.1.31x, as a `queued_command` attachment
-  with `commandMode` `task-notification`; either links to its call by `<tool-use-id>`, else `<task-id>`.
+  with `commandMode` `task-notification`; some exist only as a `queue-operation` enqueue. One text can hold several
+  `<task-notification>` or `<agent-notification>` blocks, each a completion of its own; 2.0.x names the agent of an
+  `<agent-notification>` by `<agent-id>` alone. A completion links to its call by `<tool-use-id>`, else by `<task-id>`
+  or `<agent-id>` to the call's task or agent id, taking the first one after the call, as calls that resume an agent
+  share its id. A delivered completion is preferred over an enqueue.
   `/private/tmp/.../tasks/<id>.output` paths are ephemeral and never followed.
 - Internal agents are left out of corpus search, listings and roll-ups: `agent-acompact-*`, `agent-aprompt_suggestion-*`,
   agents whose first prompt is `Warmup`, and forks of the `sessions:transcripts` skill (their first prompt contains
   `[cc-sessions:transcripts-fork]`). They stay reachable through an explicit `<session>` argument.
-- An agent's kind is the first that applies: `internal`; `teammate` (meta `taskKind` names a teammate, or its call's
-  result is `teammate_spawned`); `fork` (meta `isFork`, or a `fork-context-ref` line); `flat`; `workflow-agent`; `agent`.
-- An agent's result is, in order of preference: its notification's `<result>`, its journal result, its last
+- An agent's kind is the first that applies: `internal`; `teammate` (meta `taskKind` names a teammate, its call's
+  result is `teammate_spawned`, or it is a split-pane teammate's session); `fork` (meta `isFork`, or a
+  `fork-context-ref` line); `flat`; `workflow-agent`; `agent`.
+- `agents` lists one row per agent or run, at the first call that names it; a call that resumes it (`resume`,
+  `resumeFromRunId`) adds no row, and the row's status and result come from the last call. Rows follow their call's
+  line, each run's agents right after it; agents and runs that no call links come last.
+- An agent's result is, in order of preference: its last call's notification `<result>`, its journal result, its last
   `structured_output`, its last assistant text. Teammates get no notification.
-- An agent's status, in order of preference: its journal (a result means `completed`), its run record, its notification,
-  its call's own result (a finished synchronous call), else the transcript's end: `completed` when the last user or
-  assistant entry is an assistant message that stopped (`end_turn`, `stop_sequence`, or, before 2.1.300, no
-  `stop_reason` and no tool call), `failed` on an API error message, otherwise `unknown`.
+- An agent's or run's status is one of `completed`, `failed`, `killed`, `running`, `denied` and `unknown`, in order of
+  preference: its journal (a result means `completed`), its run record, its last call's notification, that call's own
+  outcome, else the transcript's end. A call's outcome is `killed` when the user interrupted it (the result starts
+  `[Request interrupted by user`), otherwise its result's status: `completed` for a finished synchronous call, `failed`
+  for an error, `denied` for a rejection; a launch or spawn gives none. The transcript's end is `completed` when the
+  last user or assistant entry is an assistant message that stopped (`end_turn`, `stop_sequence`, or, before 2.1.300,
+  no `stop_reason` and no tool call), `failed` on an API error message, otherwise `unknown`. `s::lifecycle_status`
+  holds this order for a call.
+- An agent's output tokens are its transcript's, except that a finished call reports the usage of the agent's final
+  message: when that call is the last and reports more for that message than its last entry holds, the reported count
+  replaces the transcript's.
 
 ## Tool calls and persisted outputs
 

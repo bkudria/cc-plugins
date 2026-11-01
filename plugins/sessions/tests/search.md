@@ -64,7 +64,7 @@ Text that appears only in harness copies (skill listing, instructions, request b
 ```scrut
 $ out=$(cc-sessions search NOISE_ONLY_TERM 2> err.txt); echo "exit $? stdout ${#out}"; cc_test_rel < err.txt
 exit 0 stdout 0
-cc-sessions: no session has "NOISE_ONLY_TERM" in the default kinds with --origin cli; 9 sessions searched in <root>/projects
+cc-sessions: no session has "NOISE_ONLY_TERM" in the default kinds with --origin cli; 12 sessions searched in <root>/projects
 ```
 
 A file the user edited is content of kind `file`.
@@ -100,6 +100,9 @@ c7d9e1f3-5a6b-4c8d-9e0f-1a2b3c4d5e6f\t2026-10-26T15:00:00Z\t/tmp/sessions-fixtur
 b9e1c3a5-7d2f-4e6a-8b0c-1d3e5f7a9b2c\t2026-07-20T12:00:00Z\t/tmp/sessions-fixture/beta\tFind where the header should live. (escaped)
 b2d4f6a8-1c3e-4a5b-8d7f-9e0a1b2c3d4e\t2026-07-15T12:00:00Z\t/tmp/sessions-fixture/beta\tSummarise the beta build failures. (escaped)
 c4e6a8b0-2d4f-4a6c-9e8a-0b2c4d6e8f1a\t2026-01-03T12:00:00Z\t/tmp/sessions-fixture/flat\tFlat era config loader search (escaped)
+e2c4a6b8-0d2f-4b4d-8e6f-1a3b5c7d9e0f\t2025-12-08T09:06:00Z\t/tmp/sessions-fixture/echo\tExplore the schema code and the state updates in the background. (escaped)
+d5e7f9a1-3b5c-4d7e-9f1a-2b4c6d8e0f13\t2025-12-06T10:06:00Z\t/tmp/sessions-fixture/delta\tRun the audit workflow, then check the log and bring in a reviewer. (escaped)
+f3a5c7e9-1b3d-4f5a-8c7e-9a1b3c5d7e9f\t2025-12-06T10:01:02Z\t/tmp/sessions-fixture/delta\t- (escaped)
 ```
 
 The current session is searched and marked.
@@ -113,8 +116,8 @@ Internal agents are left out of corpus search: the transcripts fork and the prom
 
 ```scrut
 $ cc-sessions search '[cc-sessions:transcripts-fork]' 2>&1 | cc_test_rel; cc-sessions search 'SUGGESTION MODE' 2>&1 | cc_test_rel
-cc-sessions: no session has "[cc-sessions:transcripts-fork]" in the default kinds with --origin cli; 9 sessions searched in <root>/projects
-cc-sessions: no session has "SUGGESTION MODE" in the default kinds with --origin cli; 9 sessions searched in <root>/projects
+cc-sessions: no session has "[cc-sessions:transcripts-fork]" in the default kinds with --origin cli; 12 sessions searched in <root>/projects
+cc-sessions: no session has "SUGGESTION MODE" in the default kinds with --origin cli; 12 sessions searched in <root>/projects
 ```
 
 A flat-layout sub-agent's hits count toward its session; the copies in `progress` entries do not.
@@ -260,6 +263,14 @@ L5\twf_5d1c9a7e-3b2\tagent-result (escaped)
 $ cc-sessions search CONTENT_TERM_ALPHA a7c3e9f --agents --kind all | wc -l | tr -d ' '; cc-sessions search 'One session loaded' a7c3e9f --agents 2>&1 | cc_test_rel
 10
 cc-sessions: no hits for "One session loaded" in the default kinds of 7 transcripts (session a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e)
+```
+
+A split-pane teammate's transcript is a session of its own; with `--agents` its hits join under that session's id.
+
+```scrut
+$ cc-sessions search 'timeout to 30s' d5e7 --agents | hits; cc-sessions search 'timeout to 30s' d5e7 2>&1 | cc_test_rel
+L5\tf3a5c7e9-1b3d-4f5a-8c7e-9a1b3c5d7e9f\tassistant (escaped)
+cc-sessions: no hits for "timeout to 30s" in the default kinds of 1 transcript (session d5e7f9a1-3b5c-4d7e-9f1a-2b4c6d8e0f13)
 ```
 
 The notice names the bounds that left nothing.
@@ -499,13 +510,16 @@ f6b8d0e2-4a6c-4e8a-b0c2-d4e6f8a0b2c4
 b9e1c3a5-7d2f-4e6a-8b0c-1d3e5f7a9b2c
 b2d4f6a8-1c3e-4a5b-8d7f-9e0a1b2c3d4e
 c4e6a8b0-2d4f-4a6c-9e8a-0b2c4d6e8f1a
+e2c4a6b8-0d2f-4b4d-8e6f-1a3b5c7d9e0f
+d5e7f9a1-3b5c-4d7e-9f1a-2b4c6d8e0f13
+f3a5c7e9-1b3d-4f5a-8c7e-9a1b3c5d7e9f
 ```
 
 An age counts back from now, for sessions and for records.
 
 ```scrut
 $ cc-sessions search the --since 100000d | wc -l | tr -d ' '; cc-sessions search symbol b2d4 --until 100000d 2>/dev/null | wc -l | tr -d ' '
-7
+10
 0
 ```
 

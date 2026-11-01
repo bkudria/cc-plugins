@@ -421,17 +421,56 @@ cc_agent_transcripts() {
   find -H "$root" -type f \( "${names[@]}" \) 2> /dev/null < /dev/null | LC_ALL=C sort | awk -F / '!seen[$NF]++'
 }
 
-# cc_session_agent_files <main-transcript> [--journals]: cc_agent_files, then the agent transcripts that
-# the session's Agent and Workflow calls name but that sit elsewhere under the data root, as a resumed
-# session's agents stay with the original session. --journals adds each workflow run's journal.jsonl.
+# cc_teammate_sessions <main-transcript>: the sessions of the split-pane teammates that the session
+# spawned, sorted: the other main transcripts in its project directory whose entries carry the teamName
+# and agentName of a spawn result's agent_id <name>@<team>. An in-process teammate's file is a sub-agent
+# transcript, never one of these. rg reads the transcript, as grep is slow on its long lines; without
+# rg nothing is found.
+cc_teammate_sessions() {
+  local main=$1 project=${1%/*} ids id path teams=() candidates=()
+  ids=$(cc_rg -o -N --no-filename -e '"agent_id":"[^"@\\ ]+@[^"\\ ]+"' -- "$main" |
+    sed -E 's/^"agent_id":"//; s/"$//' | LC_ALL=C sort -u)
+  [ -n "$ids" ] || return 0
+  cc_lines "$ids"
+  for id in "${CC_LINES[@]}"; do
+    teams+=(-e "\"teamName\":\"${id#*@}\"")
+  done
+  cc_lines "$(find "$project" -mindepth 1 -maxdepth 1 -type f -name '*.jsonl' ! -name 'agent-*' 2> /dev/null < /dev/null)"
+  cc_lines "$(cc_rg -l -F "${teams[@]}" -- ${CC_LINES[@]+"${CC_LINES[@]}"} | LC_ALL=C sort)"
+  for path in ${CC_LINES[@]+"${CC_LINES[@]}"}; do
+    [ "$path" = "$main" ] || candidates+=("$path")
+  done
+  [ ${#candidates[@]} -gt 0 ] || return 0
+  awk -v ids="$(printf '%s' "$ids" | tr '\n' ' ')" '
+    BEGIN { n = split(ids, list, " "); for (i = 1; i <= n; i++) wanted[list[i]] = 1 }
+    /"teamName":"/ && /"agentName":"/ && /"type":"(user|assistant)"/ {
+      team = $0; sub(/.*"teamName":"/, "", team); sub(/".*/, "", team)
+      name = $0; sub(/.*"agentName":"/, "", name); sub(/".*/, "", name)
+      if ((name "@" team) in wanted) print FILENAME
+      nextfile
+    }' "${candidates[@]}" 2> /dev/null < /dev/null
+}
+
+# cc_session_agent_files <main-transcript> [--journals]: a session's agents as every command reads them:
+# cc_agent_files, cc_session_elsewhere_files, then cc_teammate_sessions. --journals adds each workflow
+# run's journal.jsonl.
 cc_session_agent_files() {
-  local main=$1 journals=${2-} dir=${1%.jsonl} key id path found missing=() confirmed='' names=()
+  local main=$1 journals=${2-} dir=${1%.jsonl}
   {
     cc_agent_files "$main"
     if [ "$journals" = --journals ] && [ -d "$dir/subagents/workflows" ]; then
       find "$dir/subagents/workflows" -mindepth 2 -maxdepth 2 -type f -name journal.jsonl 2> /dev/null < /dev/null
     fi
   } | LC_ALL=C sort
+  cc_session_elsewhere_files "$main" "$journals"
+  cc_teammate_sessions "$main"
+}
+
+# cc_session_elsewhere_files <main-transcript> [--journals]: the agent transcripts that the session's Agent
+# and Workflow calls name but that sit elsewhere under the data root, as a resumed session's agents stay
+# with the original session; --journals adds those runs' journal.jsonl.
+cc_session_elsewhere_files() {
+  local main=$1 journals=${2-} dir=${1%.jsonl} key id path found missing=() confirmed='' names=()
   while IFS=: read -r key id; do
     found=0
     if [ "$key" = run ]; then

@@ -33,8 +33,8 @@ time, or shows them all when they alone fill the page; a notice says to continue
 With <session>s: one record per hit, in time order, each file in its own order (a run journal,
 which has no times, last); no default limit.
   Fields: handle  src  time  kind  snippet
-  src       main, or the session id when several sessions are named; an agent id; a workflow
-            run id for its journal
+  src       main, or the session id when several sessions are named or for a split-pane
+            teammate; an agent id; a workflow run id for its journal
   time      the entry's timestamp, or the nearest earlier one in the file (UTC)
   --agents  also search each session's non-internal agents and run journals
   --since T, --until T  records from/to T: a handle (L120), a timestamp or an age

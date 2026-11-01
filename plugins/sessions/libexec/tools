@@ -23,7 +23,7 @@ Options:
 
 Fields:
   handle  L<line> of the tool_use entry, in the file named by src
-  src     main for the session's own transcript, else the agent id
+  src     main for the session's transcript, else the agent id; a split-pane teammate's session id
   time    the entry's timestamp, or the nearest earlier one in the file (UTC)
   name    the tool; MCP tools in full (mcp__<server>__<tool>)
   status  ok, error, denied (the user rejected it), none (no result recorded), persisted (an ok

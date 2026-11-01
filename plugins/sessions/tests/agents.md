@@ -186,6 +186,79 @@ $ Q=$CC_TEST_TMP/queued && mkdir -p "$Q/projects" && cp -R "$P/-tmp-sessions-fix
 completed\tNotified result. (escaped)
 ```
 
+## Call order, resumed runs and teammates
+
+DELTA (2.1.220): rows run in call order, the workflow run of L2 with its agent right after it, before the agent called at
+L4. The run's second call (L15) resumes it and adds no row; the run's result is that call's notification. The
+in-process teammate (L6), whose spawn result names it only `reviewer@session-d5e7f9a1`, is its `subagents/` file with
+that meta `name` and `teamName`. The split-pane teammate (L8) is the session in the same project directory whose
+entries carry its `teamName` and `agentName`; its id is that session's id. The interrupted call (L10) is `killed`.
+The reviewer's own agent, whose call is in the reviewer's transcript, is listed without a call.
+
+```scrut
+$ cc-sessions agents d5e7 | cc_test_rel
+dir\t<root>/projects/-tmp-sessions-fixture-delta/d5e7f9a1-3b5c-4d7e-9f1a-2b4c6d8e0f13 (escaped)
+L2\tworkflow\twf_8c2e4a6b-1d3\taudit\tcompleted\tclaude-haiku-5-5\t33\tAudit the logs.\tsubagents/workflows/wf_8c2e4a6b-1d3\t{"errors":1} (escaped)
+L2\tworkflow-agent\ta6d8f0b2c4e6a8b0d\tworkflow-subagent\tcompleted\tclaude-haiku-5-5\t33\tcount\tsubagents/workflows/wf_8c2e4a6b-1d3/agent-a6d8f0b2c4e6a8b0d.jsonl\tOne error: a timeout at 09:58. (escaped)
+L4\tagent\ta1e3c5a7b9d1f3e5a\tExplore\tcompleted\tclaude-haiku-5-5\t86\tCheck the audit log\tsubagents/agent-a1e3c5a7b9d1f3e5a.jsonl\tThe audit log's last error is a timeout at 09:58. (escaped)
+L6\tteammate\tareviewer-1a2b3c4d5e6f7a8b\treviewer\tcompleted\tclaude-haiku-5-5\t80\tReview the audit findings\tsubagents/agent-areviewer-1a2b3c4d5e6f7a8b.jsonl\tFix list: raise the audit timeout in config/audit.yml. (escaped)
+L8\tteammate\tf3a5c7e9-1b3d-4f5a-8c7e-9a1b3c5d7e9f\tgeneral-purpose\tcompleted\tclaude-opus-5-5\t105\tFix the timeout\t<root>/projects/-tmp-sessions-fixture-delta/f3a5c7e9-1b3d-4f5a-8c7e-9a1b3c5d7e9f.jsonl\tRaised the audit timeout to 30s; the check passes. (escaped)
+L10\tagent\ta2b4d6f8a0c2e4a6b\tExplore\tkilled\tclaude-haiku-5-5\t28\tTrace the slow query\tsubagents/agent-a2b4d6f8a0c2e4a6b.jsonl\t- (escaped)
+-\tagent\ta5c7e9a1b3c5d7e9f\tExplore\tcompleted\tclaude-haiku-5-5\t20\tLook up the timeout setting\tsubagents/agent-a5c7e9a1b3c5d7e9f.jsonl\tThe audit timeout is set in config/audit.yml. (escaped)
+```
+
+Because rows follow their handles, the `--since` that a cut names shows every row left out.
+
+```scrut {output_stream: combined}
+$ cc-sessions agents d5e7 --limit 4 2>&1 | cut -f 1-3 | cc_test_rel
+dir\t<root>/projects/-tmp-sessions-fixture-delta/d5e7f9a1-3b5c-4d7e-9f1a-2b4c6d8e0f13 (escaped)
+L2\tworkflow\twf_8c2e4a6b-1d3 (escaped)
+L2\tworkflow-agent\ta6d8f0b2c4e6a8b0d (escaped)
+L4\tagent\ta1e3c5a7b9d1f3e5a (escaped)
+cc-sessions: output stopped at --limit 4 after 4 records; 4 more left out; continue with --since L6
+```
+
+```scrut
+$ cc-sessions agents d5e7 | sort -u > all.txt; for n in 2 3 4 5 6; do
+>   next=$(cc-sessions agents d5e7 --limit "$n" 2>&1 > page1.txt | grep -o -e '--since L[0-9]*$' | cut -d ' ' -f 2)
+>   cc-sessions agents d5e7 --since "$next" > page2.txt; sort -u page1.txt page2.txt | cmp -s - all.txt || echo "lost rows after a cut at $n"
+> done; echo checked
+checked
+```
+
+## Older completions, resumed agents and interrupts
+
+ECHO (2.0.65, flat layout): one user entry (L10) holds two `<agent-notification>` blocks, each keyed by `<agent-id>`; the
+completion of L6 exists only as a `queue-operation` enqueue (L8). The agent of L11 is resumed at L13: one row, at its
+first call, with the result of the last. That call reports 650 output tokens for the agent's final message, whose last
+entry recorded 2, so the output is 40 + 3 + 650. The interrupted call (L15) is `killed`.
+
+```scrut
+$ cc-sessions agents e2c4 2>/dev/null | cc_test_rel
+dir\t<root>/projects/-tmp-sessions-fixture-echo/e2c4a6b8-0d2f-4b4d-8e6f-1a3b5c7d9e0f (escaped)
+L2\tflat\ta1d2e3f\tExplore\tcompleted\tclaude-haiku-4-5-20251001\t32\tExplore the schema inference code.\t<root>/projects/-tmp-sessions-fixture-echo/agent-a1d2e3f.jsonl\tSchema inference lives in lib/schema/infer.rb. (escaped)
+L4\tflat\ta4b5c6d\tExplore\tcompleted\tclaude-haiku-4-5-20251001\t2\tExplore how state updates are written.\t<root>/projects/-tmp-sessions-fixture-echo/agent-a4b5c6d.jsonl\t- (escaped)
+L6\tflat\ta7e8f9a\tExplore\tcompleted\tclaude-haiku-4-5-20251001\t1\tList the schema migrations.\t<root>/projects/-tmp-sessions-fixture-echo/agent-a7e8f9a.jsonl\tThree migrations: create_schemas, add_defaults and add_nullable. (escaped)
+L11\tflat\ta0b1c2d\tgeneral-purpose\tcompleted\tclaude-haiku-4-5-20251001\t693\tSummarise the schema rules in five bullets.\t<root>/projects/-tmp-sessions-fixture-echo/agent-a0b1c2d.jsonl\tSix rules now: the five before, and nullable fields say so. (escaped)
+L15\tflat\ta3c4d5e\tExplore\tkilled\tclaude-haiku-4-5-20251001\t1\tCheck that the fixtures match the schema.\t<root>/projects/-tmp-sessions-fixture-echo/agent-a3c4d5e.jsonl\t- (escaped)
+```
+
+## Output tokens that are lower bounds
+
+Claude Code 2.0.50 through 2.1.56 often wrote a message's last entry before its output was counted. When a row shown
+draws on messages from those versions, a notice says that their output tokens are lower bounds.
+
+```scrut
+$ cc-sessions agents e2c4 2>&1 >/dev/null; cc-sessions agents c4e6 2>&1 >/dev/null
+cc-sessions: output tokens are lower bounds for messages written by Claude Code 2.0.65: versions 2.0.50 through 2.1.56 often did not record a message's final output count
+cc-sessions: output tokens are lower bounds for messages written by Claude Code 2.0.76: versions 2.0.50 through 2.1.56 often did not record a message's final output count
+```
+
+```scrut
+$ for s in a7c3e9f b2d4 d5e7; do cc-sessions agents "$s" 2>&1 >/dev/null | grep -c 'lower bounds'; done | paste -s -d ' ' -
+0 0 0
+```
+
 ## Widths and --full
 
 The result is cut to 150 characters and the label to 80; `--full` keeps both whole.
@@ -321,7 +394,9 @@ exit 2
 
 ```scrut
 $ mkdir -p "$CC_TEST_TMP/jq17" && ln -sf /usr/bin/jq "$CC_TEST_TMP/jq17/jq"
-> for s in a7c3e9f b9e1 c4e6; do cc-sessions agents "$s" > now.txt && PATH="$CC_TEST_TMP/jq17:$PATH" cc-sessions agents "$s" | cmp - now.txt && echo same; done
+> for s in a7c3e9f b9e1 c4e6 d5e7 e2c4; do cc-sessions agents "$s" > now.txt 2>&1 && PATH="$CC_TEST_TMP/jq17:$PATH" cc-sessions agents "$s" 2>&1 | cmp - now.txt && echo same; done
+same
+same
 same
 same
 same

@@ -296,6 +296,19 @@ $ cc-sessions tools c4e6 | cut -f1,4,7,8
 L4\tTask\tExplore "Locate config loader"\t5f6a7b8c completed (escaped)
 ```
 
+In 2.0.x a background agent's completion is an `<agent-notification>` block keyed by `<agent-id>`; one entry can hold
+several (ECHO L10), and some exist only as a `queue-operation` enqueue (L8).
+
+```scrut
+$ cc-sessions tools e2c4 --name '^Task$' | cut -f1,8
+L2\ta1d2e3f completed (escaped)
+L4\ta4b5c6d completed (escaped)
+L6\ta7e8f9a completed (escaped)
+L11\ta0b1c2d completed (escaped)
+L13\ta0b1c2d completed (escaped)
+L15\t[Request interrupted by user for tool use] (escaped)
+```
+
 An agent transcript given as the operand has its id as src.
 
 ```scrut
@@ -409,6 +422,16 @@ A resumed session's agent that stayed with the original session is found through
 $ cc-sessions tools b9e1 --agents | cut -f1-4
 L3\tmain\t2026-07-15T09:01:07Z\tAgent (escaped)
 L3\ta4c6e8f0a2b4c6d8e\t2026-07-15T09:01:17Z\tGlob (escaped)
+```
+
+A split-pane teammate's transcript is a session of its own; its src is that session's id.
+
+```scrut
+$ cc-sessions tools d5e7 --agents | cut -f1-4 | awk -F '\t' '$2 != "main"'
+L2\ta1e3c5a7b9d1f3e5a\t2025-12-06T10:00:11Z\tRead (escaped)
+L2\tareviewer-1a2b3c4d5e6f7a8b\t2025-12-06T10:00:31Z\tAgent (escaped)
+L3\tf3a5c7e9-1b3d-4f5a-8c7e-9a1b3c5d7e9f\t2025-12-06T10:00:38Z\tEdit (escaped)
+L2\ta2b4d6f8a0c2e4a6b\t2025-12-06T10:00:39Z\tGrep (escaped)
 ```
 
 ## Empty answers

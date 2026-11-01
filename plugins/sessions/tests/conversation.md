@@ -461,6 +461,16 @@ L2\t5f6a7b8c\tassistant\tThe loader is config/load.rb. (escaped)
 L8\tmain\tassistant\tThe config loader is config/load.rb. (escaped)
 ```
 
+A split-pane teammate runs as a session of its own; its records join under that session's id. The lead's messages to
+it are `peer` records there.
+
+```scrut
+$ cc-sessions conversation d5e7 --agents | awk -F '\t' '$2 ~ /^f3a5/' | cut -f1,2,4
+L2\tf3a5c7e9-1b3d-4f5a-8c7e-9a1b3c5d7e9f\tpeer (escaped)
+L3\tf3a5c7e9-1b3d-4f5a-8c7e-9a1b3c5d7e9f\ttool (escaped)
+L5\tf3a5c7e9-1b3d-4f5a-8c7e-9a1b3c5d7e9f\tassistant (escaped)
+```
+
 ## Widths
 
 `wide.jsonl` holds a 500-character prompt, a 1000-character answer and a Bash call with a 300-character command.

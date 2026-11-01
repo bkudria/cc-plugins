@@ -1,0 +1,1 @@
+{"agentType":"reviewer","isBuiltIn":false,"description":"Review the audit findings","name":"reviewer","spawnDepth":0,"model":"haiku","taskKind":"in_process_teammate","teamName":"session-d5e7f9a1","color":"green","planModeRequired":false,"spawnedAgentType":"general-purpose","permissionMode":"default"}

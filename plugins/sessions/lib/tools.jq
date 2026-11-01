@@ -21,7 +21,7 @@ def _matches($o):
   and (($o.errors | not) or .status == "error");
 
 def _records($o; $fi):
-  s::memo | r::src as $src
+  s::memo | r::src($fi) as $src
   | [_calls | select(s::within($o.since; $o.until) and _matches($o)) | . + {src: $src, fi: $fi}];
 
 def main($o):

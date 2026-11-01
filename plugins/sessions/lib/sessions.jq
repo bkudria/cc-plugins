@@ -301,6 +301,22 @@ def totals:
 #: The models of the transcript's messages in first-use order, without <synthetic>.
 def models: [messages | select(.synthetic | not) | .model | select(. != null)] | _uniq;
 
+def _version_key: [scan("[0-9]+")][:3] | map(tonumber);
+
+#: True for a Claude Code version from 2.0.50 through 2.1.56: these often wrote a message's last entry before its output was counted, so that its output_tokens are a lower bound. Input: a version string.
+def partial_output_version:
+  type == "string" and (_version_key as $v | ($v | length) == 3 and $v >= [2, 0, 50] and $v <= [2, 1, 56]);
+
+#: The versions among the transcript's assistant entries that s::partial_output_version names, in first-use order.
+def partial_output_versions: [entries[] | select(.e.type == "assistant") | .e.version | select(partial_output_version)] | _uniq;
+
+#: The notice, without a newline, that output tokens are lower bounds for messages written by the versions in the input array (each once, in version order); nothing for an empty array.
+def lower_bound_notice:
+  map(strings) | unique_by(_version_key)
+  | if length == 0 then empty
+    else "cc-sessions: output tokens are lower bounds for messages written by Claude Code \(join(", ")): versions 2.0.50 through 2.1.56 often did not record a message's final output count"
+    end;
+
 #: True for an internal agent id (acompact-…, aprompt_suggestion-…). Input: an agent id string.
 def internal_agent_id: type == "string" and (startswith("acompact-") or startswith("aprompt_suggestion-"));
 
@@ -682,11 +698,6 @@ def _tag($name): [capture("<\($name)>(?<v>[\\s\\S]*?)</\($name)>")][0].v // null
 
 def _object: if type == "object" then . else {} end;
 
-def _notification_for($notes; $call_id; $task_id):
-  first($notes[] | select(.tool_use_id == $call_id))
-  // (if $task_id then first($notes[] | select(.tool_use_id == null and .task_id == $task_id)) else null end)
-  // null;
-
 def _queued_notification: .e.type == "attachment" and .e.attachment.type == "queued_command" and .e.attachment.commandMode == "task-notification";
 
 #: Background completions (<task-notification> user entries, or queued_command attachments of commandMode task-notification): {l, tool_use_id, task_id, status, summary, result, output_file, ts, text}; output_file paths are ephemeral and never followed.
@@ -698,22 +709,51 @@ def notifications:
   | {l, tool_use_id: ($x | _tag("tool-use-id")), task_id: ($x | _tag("task-id")), status: ($x | _tag("status")),
      summary: ($x | _tag("summary")), result: ($x | _tag("result")), output_file: ($x | _tag("output-file")), ts: .t, text: $x};
 
-#: Agent and Task calls: {l, id, tool, description, subagent_type, name, prompt, background, agent_id, status, result_l, ts, notification}; agent_id comes from toolUseResult.agentId or agent_id, else the result text; notification is the s::notifications record linked by tool-use id, else by task id.
+def _completion_blocks:
+  [scan("<(?:task|agent)-notification>[\\s\\S]*?</(?:task|agent)-notification>")] as $blocks
+  | if ($blocks | length) > 0 then $blocks[] else . end;
+
+def _notification_enqueue:
+  .e.type == "queue-operation" and .e.operation == "enqueue" and (.e.content | type) == "string"
+  and (.e.content | test("^\\s*<(?:task|agent)-notification>"));
+
+#: Background completions, one per <task-notification> or <agent-notification> block (2.0.x names the agent of the latter by <agent-id>, read as task_id): those of notification user entries and queued_command attachments in file order, then those that exist only as a queue-operation enqueue: {l, tool_use_id, task_id, status, summary, result, ts}.
+def completions:
+  _memo_users
+  | ([ (user_entries | select(.class == "notification") | {l, t, text}),
+       (entries[] | select(_queued_notification) | {l, t, text: (.e.attachment.prompt | _text)}) ] | sort_by(.l)) as $handed
+  | ($handed | map(.text)) as $handed_texts
+  | $handed + [entries[] | select(_notification_enqueue and (.e.content as $c | $handed_texts | index([$c]) | not)) | {l, t, text: .e.content}]
+  | .[] | . as $r | .text | _completion_blocks
+  | {l: $r.l, tool_use_id: _tag("tool-use-id"), task_id: (_tag("task-id") // _tag("agent-id")), status: _tag("status"),
+     summary: _tag("summary"), result: _tag("result"), ts: $r.t};
+
+# A completion without a tool-use id names its task or agent, which a resumed agent shares with every
+# call that resumes it: only a completion after the call can be its own.
+def _completion_for($notes; $call; $key):
+  first($notes[] | select(.tool_use_id == $call.id))
+  // (if $key then first($notes[] | select(.tool_use_id == null and .task_id == $key and .l > $call.l)) else null end)
+  // null;
+
+#: Agent and Task calls: {l, id, tool, description, subagent_type, name, prompt, background, agent_id, team_name, teammate_name, status, interrupted, reported_output, result_l, ts, notification}; agent_id comes from toolUseResult.agentId or agent_id, else the result text; team_name and teammate_name are a spawned teammate's; interrupted is true when the user interrupted the call; reported_output is the output_tokens that a finished call's result reports, which are those of the agent's final message; notification is the s::completions record with the call's tool-use id, else the first after the call with its agent id.
 def agent_calls:
   _memo_users
-  | [notifications] as $notes
-  | tool_calls | select(.name == "Agent" or .name == "Task")
+  | [completions] as $notes
+  | tool_calls | select(.name == "Agent" or .name == "Task") | . as $call
   | (.result | _object) as $r
   | ($r.agentId // $r.agent_id // ([(.text // "") | capture("agent_?[iI]d: (?<id>[A-Za-z0-9_-]+)")][0].id) // null) as $agent
   | {l, id, tool: .name, description: .input.description, subagent_type: .input.subagent_type, name: .input.name,
      prompt: .input.prompt, background: (.input.run_in_background == true), agent_id: $agent,
-     status: ($r.status // .status), result_l, ts, notification: _notification_for($notes; .id; $agent)};
+     team_name: ($r.team_name // null), teammate_name: (if $r.team_name then $r.name // .input.name else null end),
+     status: ($r.status // .status), interrupted: ((.text // "") | startswith("[Request interrupted by user")),
+     reported_output: (if $r.status == "completed" then $r.usage.output_tokens? // null else null end),
+     result_l, ts, notification: _completion_for($notes; $call; $agent)};
 
-#: Workflow calls: {l, id, name, run_id, task_id, transcript_dir, script_path, status, result_l, ts, notification}; stored paths are hints (find the run with cc_run_dir).
+#: Workflow calls: {l, id, name, run_id, task_id, transcript_dir, script_path, status, result_l, ts, notification}; stored paths are hints (find the run with cc_run_dir); notification is the s::completions record with the call's tool-use id, else the first after the call with its task id.
 def workflow_calls:
   _memo_users
-  | [notifications] as $notes
-  | tool_calls | select(.name == "Workflow")
+  | [completions] as $notes
+  | tool_calls | select(.name == "Workflow") | . as $call
   | (.result | _object) as $r
   | (.text // "") as $text
   | ($r.runId // ([$text | capture("Run ID: (?<v>wf_[A-Za-z0-9_-]+)")][0].v) // null) as $run
@@ -721,7 +761,34 @@ def workflow_calls:
   | {l, id, name: ($r.workflowName // .input.name // null), run_id: $run, task_id: $task,
      transcript_dir: ($r.transcriptDir // ([$text | capture("Transcript dir: (?<v>[^\n]+)")][0].v) // null),
      script_path: ($r.scriptPath // ([$text | capture("Script file: (?<v>[^\n]+)")][0].v) // null),
-     status: ($r.status // .status), result_l, ts, notification: _notification_for($notes; .id; $task)};
+     status: ($r.status // .status), result_l, ts, notification: _completion_for($notes; $call; $task)};
+
+#: A status word as completed, failed, killed, running or denied: completed and success; failed and error; killed, cancelled, canceled and stopped; running; denied; null for anything else.
+def lifecycle_word:
+  if type != "string" then null
+  else ascii_downcase
+    | if . == "completed" or . == "success" then "completed"
+      elif . == "failed" or . == "error" then "failed"
+      elif . == "killed" or . == "cancelled" or . == "canceled" or . == "stopped" then "killed"
+      elif . == "running" or . == "denied" then .
+      else null end
+  end;
+
+#: The status of the agent or workflow run that a call started, the first that applies: $run_status (its run record's status), the call's notification, the call's own outcome (killed when the user interrupted it, else its result's status: completed for a finished call, failed for an error, denied for a rejection), $end (s::end_status of the agent's transcript), else unknown. Input: a record of s::agent_calls or s::workflow_calls, or null when no call started it.
+def lifecycle_status($run_status; $end):
+  [($run_status | lifecycle_word), (.notification.status? | lifecycle_word),
+   (if . == null then null elif .interrupted == true then "killed" else .status | lifecycle_word end), ($end | lifecycle_word)]
+  | map(select(. != null)) | first // "unknown";
+
+#: How a transcript ended: completed when its last user or assistant entry is an assistant message that stopped (end_turn or stop_sequence; before 2.1.300, when stop_reason is often null on every entry, also no stop_reason and no tool call), failed on an API error message, else null.
+def end_status:
+  ([entries[] | select(.e.type == "user" or .e.type == "assistant")] | last) as $last
+  | ($last.e.message.stop_reason? // null) as $stop
+  | if $last == null or $last.e.type != "assistant" then null
+    elif $last.e.isApiErrorMessage == true then "failed"
+    elif $stop == "end_turn" or $stop == "stop_sequence" then "completed"
+    elif $stop == null and ([$last.e.message.content | arrays | .[] | select(.type == "tool_use")] | length) == 0 then "completed"
+    else null end;
 
 #: Fork agents launched from this transcript (system entries with launchedAgentId): {l, agent_id, ts}.
 def fork_launches: entries[] | select(.e.type == "system" and (.e.launchedAgentId | type) == "string") | {l, agent_id: .e.launchedAgentId, ts: .t};
@@ -739,9 +806,18 @@ def journal:
   | {agent_id: $agent, key: ($s.e.key // $r.e.key // null), label: ($s.e.label // null), phase: ($s.e.phase // null),
      started_l: ($s.l // null), result_l: ($r.l // null), result: ($r.e.result // null)};
 
-#: An agent transcript's kind, the first that applies: internal, teammate (meta taskKind names a teammate), fork (meta isFork or a fork-context-ref), flat, workflow-agent, agent; null for other transcripts.
+#: A teammate's team and name, {team, name}: its meta's teamName and name, else the teamName and agentName that its user and assistant entries carry (a split-pane teammate's own session); null otherwise.
+def teammate:
+  if (.meta.teamName? | type) == "string" and (.meta.name? | type) == "string" then {team: .meta.teamName, name: .meta.name}
+  else
+    first(entries[] | .e | select((.type == "user" or .type == "assistant") and (.teamName | type) == "string" and (.agentName | type) == "string")
+      | {team: .teamName, name: .agentName}) // null
+  end;
+
+#: An agent transcript's kind, the first that applies: internal, teammate (meta taskKind names a teammate, or a split-pane teammate's own session), fork (meta isFork or a fork-context-ref), flat, workflow-agent, agent; null for other transcripts.
 def agent_kind:
-  if (.kind | IN("subagent", "workflow-agent", "flat")) | not then null
+  if .kind == "main" then (if teammate != null then "teammate" else null end)
+  elif (.kind | IN("subagent", "workflow-agent", "flat")) | not then null
   elif is_internal then "internal"
   elif (.meta.taskKind? // "") | tostring | test("teammate") then "teammate"
   elif .meta.isFork? == true or fork_ref != null then "fork"
@@ -760,13 +836,15 @@ def agent_result:
           | select(.type == "text" and ((.text // "") | length) > 0) | {l: $r.l, text, data: null, ts: $r.t}] | last
     end;
 
-#: The record in $calls (from s::agent_calls) that started this agent transcript: by agent id, by the meta's toolUseId, else by delegation prompt text; null if none.
+#: The record in $calls (from s::agent_calls) that started this agent transcript: by agent id, by the meta's toolUseId, by a teammate's team and name (s::teammate), else by delegation prompt text; null if none.
 def matching_call($calls):
   . as $t
   | (delegation.text // null) as $prompt
+  | (if any($calls[]; .team_name != null) then teammate else null end) as $teammate
   | first(
       ($calls[] | select($t.agent != null and .agent_id == $t.agent)),
       ($calls[] | select(($t.meta.toolUseId? // null) != null and .id == $t.meta.toolUseId)),
+      ($calls[] | select($teammate != null and .team_name == $teammate.team and .teammate_name == $teammate.name)),
       ($calls[] | select($prompt != null and .prompt == $prompt))
     ) // null;
 
