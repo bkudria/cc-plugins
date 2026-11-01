@@ -356,14 +356,15 @@ cc-sessions: --until takes a handle (L120), a timestamp (2026-10-30T10:00:04Z, 2
 
 ## Limit and continuation
 
-`--limit` stops after that many sessions; the notice counts the older sessions not listed and says how to continue.
+`--limit` stops after that many sessions; the notice says that older sessions were not all examined and how to
+continue: `--until` the modified time of the next session, which the page never shares.
 
 ```scrut
 $ cc-sessions list --limit 3 2> notice.txt | ids; cat notice.txt
 a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e\talpha fixture session (escaped)
 e5a7c9b1-3d5f-4b7d-8f9a-0c1e2a3b4c5d\tShow the release notes (escaped)
 f6b8d0e2-4a6c-4e8a-b0c2-d4e6f8a0b2c4\tList the files with spaces in their names. (escaped)
-cc-sessions: output stopped at --limit 3 after 3 sessions; 4 older sessions left out; continue with --until 2026-10-27T12:00:00Z
+cc-sessions: output stopped at --limit 3 after 3 sessions; older sessions were not all examined; continue with --until 2026-10-26T15:00:00Z
 ```
 
 No notice when exactly the limit qualifies; `--limit 0` lists everything.
@@ -380,7 +381,7 @@ $ cc-sessions list --limit 7 2>&1 | wc -l | tr -d ' '; cc-sessions list --limit 
 $ cc-sessions list --max-chars 300 2> notice.txt | cut -f 1; cat notice.txt
 a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e
 e5a7c9b1-3d5f-4b7d-8f9a-0c1e2a3b4c5d
-cc-sessions: output stopped at --max-chars 300 after 2 sessions; 5 older sessions left out; continue with --until 2026-10-28T12:00:00Z
+cc-sessions: output stopped at --max-chars 300 after 2 sessions; older sessions were not all examined; continue with --until 2026-10-27T12:00:00Z
 ```
 
 A first row longer than the budget is not printed; the notice gives the size that fits it.
@@ -407,7 +408,56 @@ The default limit is 50 sessions.
 ```scrut
 $ CLAUDE_CONFIG_DIR=$GEN cc-sessions list 2> notice.txt | wc -l | tr -d ' '; cat notice.txt
 50
-cc-sessions: output stopped at --limit 50 after 50 sessions; 2 older sessions left out; continue with --until 2026-09-01T12:02:00Z
+cc-sessions: output stopped at --limit 50 after 50 sessions; older sessions were not all examined; continue with --until 2026-09-01T12:01:00Z
+```
+
+`TIE` holds six sessions: `0000aa01` and `0000aa02` modified at 12:05, `0000bb01` to `0000bb03` at 12:04, and
+`0000cc01` at 12:03.
+
+```scrut
+$ TIE=$CC_TEST_TMP/tie && mkdir -p "$TIE/projects/-tmp-tie"
+> for s in aa01:05 aa02:05 bb01:04 bb02:04 bb03:04 cc01:03; do id=0000${s%:*}-0000-4000-8000-000000000000
+>   printf '{"type":"user","message":{"role":"user","content":"tied session %s"},"uuid":"%s","timestamp":"2026-09-05T12:00:00.000Z","sessionId":"%s","cwd":"/tmp/tie"}\n' "${s%:*}" "$id" "$id" > "$TIE/projects/-tmp-tie/$id.jsonl"
+>   touch -t "2026090512${s#*:}.00" "$TIE/projects/-tmp-tie/$id.jsonl"; done
+```
+
+A page never splits the sessions that share one modified second: it ends before them, and the notice continues at
+their time.
+
+```scrut
+$ CLAUDE_CONFIG_DIR=$TIE cc-sessions list --limit 3 2> notice.txt | cut -f 1,2; cat notice.txt
+> CLAUDE_CONFIG_DIR=$TIE cc-sessions list --until 2026-09-05T12:04:00Z --limit 3 2> notice.txt | cut -f 1; cat notice.txt
+0000aa01-0000-4000-8000-000000000000\t2026-09-05T12:05:00Z (escaped)
+0000aa02-0000-4000-8000-000000000000\t2026-09-05T12:05:00Z (escaped)
+cc-sessions: output stopped at --limit 3 after 2 sessions; older sessions were not all examined; continue with --until 2026-09-05T12:04:00Z
+0000bb01-0000-4000-8000-000000000000
+0000bb02-0000-4000-8000-000000000000
+0000bb03-0000-4000-8000-000000000000
+cc-sessions: output stopped at --limit 3 after 3 sessions; older sessions were not all examined; continue with --until 2026-09-05T12:03:00Z
+```
+
+When those sessions alone fill the page, the page holds them all, past the limit.
+
+```scrut
+$ CLAUDE_CONFIG_DIR=$TIE cc-sessions list --until 2026-09-05T12:04:00Z --limit 2 2> notice.txt | cut -f 1; cat notice.txt
+> CLAUDE_CONFIG_DIR=$TIE cc-sessions list --since 2026-09-05T12:04:00Z --until 2026-09-05T12:04:00Z --limit 2 2>&1 | wc -l | tr -d ' '
+0000bb01-0000-4000-8000-000000000000
+0000bb02-0000-4000-8000-000000000000
+0000bb03-0000-4000-8000-000000000000
+cc-sessions: output stopped at --limit 2 after 3 sessions, which share one modified time; older sessions were not all examined; continue with --until 2026-09-05T12:03:00Z
+3
+```
+
+`--max-chars` counts characters, whatever the locale: a row whose label holds 80 two-byte characters fits a budget
+of its length in characters.
+
+```scrut
+$ U=$CC_TEST_TMP/utf && mkdir -p "$U/projects/-tmp-utf" && id=0000ee01-0000-4000-8000-000000000000
+> printf '{"type":"user","message":{"role":"user","content":"%s"},"uuid":"%s","timestamp":"2026-09-06T10:00:00.000Z","sessionId":"%s","cwd":"/tmp/utf"}\n' "$(printf 'é%.0s' $(seq 1 80))" "$id" "$id" > "$U/projects/-tmp-utf/$id.jsonl"
+> n=$(CLAUDE_CONFIG_DIR=$U cc-sessions list --max-chars 0 | LC_ALL=en_US.UTF-8 wc -m | tr -d ' ')
+> CLAUDE_CONFIG_DIR=$U cc-sessions list --max-chars "$n" 2>/dev/null | wc -l | tr -d ' '; CLAUDE_CONFIG_DIR=$U cc-sessions list --max-chars "$((n - 1))" 2>&1 | cut -d ';' -f 1
+1
+cc-sessions: output stopped at --max-chars * after 0 sessions (glob)
 ```
 
 Labels are cut to 100 characters, with whitespace runs shown as one space.

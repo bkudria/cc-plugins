@@ -413,6 +413,32 @@ $ (unset CLAUDE_CONFIG_DIR; cc-sessions jq '.file' a9e8 -- -r) | cc_test_rel
 <root>/projects/-tmp-sessions-fixture-alpha/a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e/subagents/workflows/wf_5d1c9a7e-3b2/agent-a9e8d7c6b5a4f3e21.jsonl
 ```
 
+A `projects/` directory that is a symbolic link is followed, by every lookup.
+
+```scrut
+$ SYM=$CC_TEST_TMP/symcfg && mkdir -p "$SYM" && ln -s "$P" "$SYM/projects"
+> CLAUDE_CONFIG_DIR=$SYM cc-sessions jq '.file' a7c3e9f -- -r | cc_test_rel "$SYM"
+> CLAUDE_CONFIG_DIR=$SYM cc-sessions list --origin all | wc -l | tr -d ' '
+> CLAUDE_CONFIG_DIR=$SYM cc-sessions list --skill alpha-helper | cut -f 1
+> CLAUDE_CONFIG_DIR=$SYM cc-sessions search CONTENT_TERM_ALPHA | cut -f 1
+> CLAUDE_CONFIG_DIR=$SYM cc-sessions schema --since 100000d 2>/dev/null | grep -c '^files'
+<root>/projects/-tmp-sessions-fixture-alpha/a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e.jsonl
+8
+a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e
+a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e
+9
+```
+
+A relative `CLAUDE_CONFIG_DIR` is made absolute, even one whose name starts with `-`.
+
+```scrut
+$ mkdir -p "$CC_TEST_TMP/-cfg" && cp -Rp "$CLAUDE_CONFIG_DIR/." "$CC_TEST_TMP/-cfg/"
+> (cd "$HOME" && CLAUDE_CONFIG_DIR=.claude cc-sessions list no-session-has-this 2>&1) | cc_test_rel "$HOME"
+> (cd "$CC_TEST_TMP" && CLAUDE_CONFIG_DIR=-cfg cc-sessions list --origin all) | wc -l | tr -d ' '
+cc-sessions: no sessions match "no-session-has-this" with --origin cli; 9 sessions checked in <root>/.claude/projects
+8
+```
+
 A missing data root means the command could not answer: exit 1.
 
 ```scrut {output_stream: stderr}
@@ -504,6 +530,37 @@ exit 5
 exit 3
 false
 exit 1
+```
+
+A filter may end in a comment, in every input mode.
+
+```scrut
+$ cc-sessions jq '1 # one' -- -n && cc-sessions jq '.kind # the kind' b2d4 && cc-sessions jq 'length # how many' b2d4 a0f1 -- -s
+1
+"main"
+2
+```
+
+Thousands of operands go to one jq run: the argument list does not grow with them, and the time grows in proportion.
+`OPS` holds 4000 one-line files.
+
+```scrut
+$ OPS=$CC_TEST_TMP/ops/projects/-tmp-ops && mkdir -p "$OPS"
+> for i in $(seq 1 4000); do printf '{"type":"user","uuid":"u%s"}\n' "$i" > "$OPS/$(printf '%08x' "$i")-0000-4000-8000-000000000000.jsonl"; done
+```
+
+```scrut {timeout: 40s}
+$ cc-sessions jq '[.kind, (.rows | length)]' "$OPS"/*.jsonl --max-chars 0 | sort | uniq -c | sed 's/^ *//'
+> cc-sessions jq 'map(.file) | unique | length' "$OPS"/*.jsonl "$OPS"/000001*.jsonl -- -s
+4000 ["main",1]
+4000
+```
+
+`schema` reads the same operands in the same way.
+
+```scrut {timeout: 40s}
+$ cc-sessions schema "$OPS"/*.jsonl | grep '^type'
+type\tuser\t4000\t* (escaped) (glob)
 ```
 
 No operand is a usage error unless `-n` is passed to jq.
@@ -644,6 +701,68 @@ L2\tb (escaped)
 cc-sessions: output stopped at --limit 2 after 2 records; 1 more left out; continue with a larger --limit (0 removes the limit)
 ```
 
+So do handles that run forward in what was shown but not in what was left out.
+
+```scrut {output_stream: combined}
+$ cc-sessions jq '"L1\ta", "L5\tb", "L3\tc"' --limit 1 -- -n -r 2>&1
+L1\ta (escaped)
+cc-sessions: output stopped at --limit 1 after 1 record; 2 more left out; continue with a larger --limit (0 removes the limit)
+```
+
+Records whose first fields are a handle, a `src` and a time can come from several files, where a handle bound applies
+to each file's own lines. When the records shown and left out come from more than one file, the notice continues
+with the next record's time instead. `--since` is inclusive, so the notice says how many records already shown carry
+that second and will repeat.
+
+```scrut {output_stream: combined}
+$ cc-sessions jq '"L1\tmain\t2026-10-30T10:00:01Z\ta", "L1\tagent\t2026-10-30T10:00:02Z\tb", "L2\tmain\t2026-10-30T10:00:02Z\tc", "L2\tagent\t2026-10-30T10:00:03Z\td"' --limit 2 -- -n -r 2>&1
+L1\tmain\t2026-10-30T10:00:01Z\ta (escaped)
+L1\tagent\t2026-10-30T10:00:02Z\tb (escaped)
+cc-sessions: output stopped at --limit 2 after 2 records; 2 more left out; continue with --since 2026-10-30T10:00:02Z, which repeats the 1 record already shown at that second
+```
+
+```scrut {output_stream: combined}
+$ cc-sessions jq '"L1\tmain\t2026-10-30T10:00:01Z\ta", "L1\tagent\t2026-10-30T10:00:02Z\tb", "L2\tmain\t2026-10-30T10:00:03Z\tc"' --limit 1 -- -n -r 2>&1
+L1\tmain\t2026-10-30T10:00:01Z\ta (escaped)
+cc-sessions: output stopped at --limit 1 after 1 record; 2 more left out; continue with --since 2026-10-30T10:00:02Z
+```
+
+A record left out with an earlier time, or with none, would be lost by a time bound: the notice asks for a larger
+budget instead.
+
+```scrut {output_stream: combined}
+$ cc-sessions jq '"L1\tmain\t2026-10-30T10:00:01Z\ta", "L1\tagent\t2026-10-30T10:00:05Z\tb", "L2\tmain\t2026-10-30T10:00:03Z\tc"' --limit 1 -- -n -r 2>&1
+> cc-sessions jq '"L1\tmain\t2026-10-30T10:00:01Z\ta", "L1\tagent\t2026-10-30T10:00:05Z\tb", "L5\trun\t-\tc"' --limit 1 -- -n -r 2>&1 >/dev/null
+L1\tmain\t2026-10-30T10:00:01Z\ta (escaped)
+cc-sessions: output stopped at --limit 1 after 1 record; 2 more left out; continue with a larger --limit (0 removes the limit)
+cc-sessions: output stopped at --limit 1 after 1 record; 2 more left out; continue with a larger --limit (0 removes the limit)
+```
+
+Records of that shape that all come from one file continue with `--since L<next>`.
+
+```scrut {output_stream: combined}
+$ cc-sessions jq '"L1\tmain\t2026-10-30T10:00:01Z\ta", "L2\tmain\t2026-10-30T10:00:01Z\tb"' --limit 1 -- -n -r 2>&1
+L1\tmain\t2026-10-30T10:00:01Z\ta (escaped)
+cc-sessions: output stopped at --limit 1 after 1 record; 1 more left out; continue with --since L2
+```
+
+A first record over the budget gives the size that fits it and, with several files, its time.
+
+```scrut {output_stream: combined}
+$ cc-sessions jq '"L7\tmain\t2026-10-30T10:00:01Z\t" + ("x" * 100), "L1\tagent\t2026-10-30T10:00:02Z\tsmall"' --max-chars 50 -- -n -r 2>&1
+cc-sessions: output stopped at --max-chars 50 after 0 records; 2 more left out; the next record is 130 characters; continue with --max-chars 130 --since 2026-10-30T10:00:01Z
+```
+
+`--max-chars` counts characters, not bytes, whatever the locale (this suite runs under `LC_ALL=C`): a record of 100
+two-byte characters takes 101 characters with its newline.
+
+```scrut
+$ for n in 101 100; do cc-sessions jq '"é" * 100' --max-chars $n -- -n -r 2> notice.txt | wc -c | tr -d ' '; cut -d ";" -f 1 notice.txt; done
+201
+0
+cc-sessions: output stopped at --max-chars 100 after 0 records
+```
+
 Global options are accepted before the command too, and their values are checked.
 
 ```scrut {output_stream: combined}
@@ -699,6 +818,39 @@ When the reader of stdout goes away early, output ends quietly: no notice and no
 $ (cc-sessions jq 'range(100000)' -- -n | head -n 1) 2>&1; (trap '' PIPE; cc-sessions jq 'range(100000)' -- -n | head -n 1) 2>&1
 0
 0
+```
+
+`PIPES` holds sessions whose answers are far larger than a pipe holds: `0000beef` has 1000 prompts, each with a Bash
+call, and one assistant text of 200000 characters at L3001; `0000bee2` has 3000 entry types `schema` does not know;
+the sixty `0000c0de` sessions each start with a 2000-character prompt and load the skill `pipe-skill`.
+
+```scrut
+$ PIPES=$CC_TEST_TMP/pipes && D=$PIPES/projects/-tmp-pipes && mkdir -p "$D" && pad=$(printf 'p%.0s' $(seq 1 120))
+> for i in $(seq 1 1000); do t=$(printf '2026-09-03T%02d:%02d:%02d' $((10 + i * 3 / 3600)) $((i * 3 / 60 % 60)) $((i * 3 % 60)))
+>   printf '{"type":"user","message":{"role":"user","content":"pipe prompt %s %s"},"uuid":"0000beef-0000-4000-8000-%012d","timestamp":"%s.000Z","sessionId":"0000beef-0000-4000-8000-000000000000","cwd":"/tmp/pipes"}\n' "$i" "$pad" "$i" "$t"
+>   printf '{"type":"assistant","message":{"id":"msg_%s","model":"claude-opus-5-5","role":"assistant","content":[{"type":"tool_use","id":"toolu_%s","name":"Bash","input":{"command":"echo pipe %s %s"}}],"usage":{"input_tokens":1,"output_tokens":1}},"uuid":"0000beef-0000-4000-8001-%012d","timestamp":"%s.100Z"}\n' "$i" "$i" "$i" "$pad" "$i" "$t"
+>   printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_%s","content":"pipe %s %s"}]},"uuid":"0000beef-0000-4000-8002-%012d","timestamp":"%s.200Z"}\n' "$i" "$i" "$pad" "$i" "$t"
+> done > "$D/0000beef-0000-4000-8000-000000000000.jsonl"
+> printf '{"type":"assistant","message":{"id":"msg_big","model":"claude-opus-5-5","role":"assistant","content":[{"type":"text","text":"%s"}]},"uuid":"0000beef-0000-4000-8003-000000000001","timestamp":"2026-09-03T11:00:00.000Z"}\n' "$(printf 'x%.0s' $(seq 1 200000))" >> "$D/0000beef-0000-4000-8000-000000000000.jsonl"
+> for i in $(seq 1 3000); do printf '{"type":"zz-unknown-%s","uuid":"0000bee2-0000-4000-8000-%012d"}\n' "$i" "$i"; done > "$D/0000bee2-0000-4000-8000-000000000000.jsonl"
+> long=$(printf 'w%.0s' $(seq 1 2000))
+> for i in $(seq 10 69); do id=0000c0de-0000-4000-8000-0000000000$i; {
+>   printf '{"type":"user","message":{"role":"user","content":"pipeword %s"},"uuid":"%s","timestamp":"2026-09-04T10:00:00.000Z","sessionId":"%s","cwd":"/tmp/pipes"}\n' "$long" "$id" "$id"
+>   printf '{"type":"assistant","message":{"id":"msg_s%s","model":"claude-opus-5-5","role":"assistant","content":[{"type":"tool_use","id":"toolu_s%s","name":"Skill","input":{"skill":"pipe-skill"}}]},"uuid":"0000c0de-0000-4000-8001-0000000000%s","timestamp":"2026-09-04T10:00:01.000Z"}\n' "$i" "$i" "$i"
+>   printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_s%s","content":"Launching skill: pipe-skill"}]},"uuid":"0000c0de-0000-4000-8002-0000000000%s","timestamp":"2026-09-04T10:00:02.000Z"}\n' "$i" "$i"
+> } > "$D/$id.jsonl"; done
+```
+
+Every command, read by a reader that stops after 100 bytes, ends without a word on stderr and exits 0: through
+the budget, without it, and with SIGPIPE ignored.
+
+```scrut {timeout: 180s}
+$ for ignore in no yes; do for c in 'tools 0000beef' 'conversation 0000beef' 'prompts 0000beef' 'entry 0000beef L3001 --full' \
+>   'search pipe 0000beef' 'search pipeword --full --limit 0' 'list --skill pipe-skill --full --limit 0' 'schema 0000bee2' 'jq .rows[] 0000beef'; do
+>   for budget in '--max-chars 1000000' '--max-chars 0'; do set -f; set -- $c $budget; set +f
+>     ( [ $ignore = yes ] && trap '' PIPE; CLAUDE_CONFIG_DIR=$PIPES cc-sessions "$@" 2> err.txt | head -c 100 > /dev/null; echo "${PIPESTATUS[0]} $(wc -c < err.txt | tr -d ' ')" )
+>   done; done; done | sort | uniq -c | sed 's/^ *//'
+36 0 0
 ```
 
 Help is never cut.

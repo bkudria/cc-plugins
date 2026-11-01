@@ -92,12 +92,13 @@ Output: one record per line, fields separated by TAB; TAB, newline and backslash
 written \t, \n and \\; an empty field is "-"; no header (each command's --help names its fields).
 Per-session records start with a handle L<line> into the transcript, or into the file named by
 the record's src field. Timestamps are UTC, YYYY-MM-DDTHH:MM:SSZ; a printed one passed to --since
-or --until selects the same record. When output stops early, a notice on stderr says how many
-records were left out and how to continue. Notices and errors go to stderr, prefixed "cc-sessions:".
+or --until selects the same record. When output stops early, a notice on stderr says what was
+left out and how to continue. Notices and errors go to stderr, prefixed "cc-sessions:".
 
-Exit status: 0 answered, also when empty (a notice says what was searched); 1 could not answer
-(unreadable file, missing dependency); 2 usage error (unknown command or option, bad value,
-unknown or ambiguous <session>). cc-sessions jq exits with jq's status.
+Exit status: 0 answered, also when empty (a notice says what was searched) or when the reader
+closed stdout early; 1 could not answer (unreadable file, missing dependency); 2 usage error
+(unknown command or option, bad value, unknown or ambiguous <session>). cc-sessions jq exits
+with jq's status.
 
 Environment: CLAUDE_CONFIG_DIR (transcripts are in $CLAUDE_CONFIG_DIR/projects; default ~/.claude),
 CLAUDE_CODE_SESSION_ID (the session called current).
@@ -155,26 +156,41 @@ cc_need_budget_value() {
 }
 
 # Copies stdin to stdout up to the budget, then counts what is left and says on stderr how to continue.
-# Handle-first records (L<line>TAB...) continue with --since only while their handles run forward.
-# When stdout goes away, the rest is drained unread so the command never meets a broken pipe.
+# Handle-first records (L<line>TAB...) continue with --since L<next> while every handle, shown or left
+# out, runs forward. Records whose first fields are a handle, a src and a time (tools, conversation and
+# search name their file in src) can come from several files, where a handle bound applies to each
+# file's own lines: when more than one src appears they continue with --since <the next record's
+# time> instead, which is inclusive, unless a record left out has an earlier time or none.
+# When stdout goes away, SIGPIPE ends this filter and then the command, quietly. Where SIGPIPE is
+# ignored the rest is drained unread instead, so the command never meets a broken pipe.
 cc_budget() {
-  local limit=$1 max=$2 line size handle used=0 shown=0 last=-1 forward=1 reason='' next_size=0 next_handle=-1 left
-  local notice since handle_pattern=$'^L([0-9]+)\t'
+  local limit=$1 max=$2 line size used=0 shown=0 last=-1 forward=1 reason='' handle src time
+  local next_size=0 next_handle=-1 next_src='' next_time='' first_src='' sources=1 times=() rest left
+  local other earlier back since repeats=0 notice
+  local handle_re=$'^L([0-9]+)\t' record_re=$'^L[0-9]+\t([^\t]+)\t([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z|-)(\t|$)'
+  cc_find_utf8_locale
+  [ -z "$CC_UTF8_LOCALE" ] || local LC_ALL=$CC_UTF8_LOCALE
   while IFS= read -r line || [ -n "$line" ]; do
     size=$((${#line} + 1))
-    handle=-1
-    [[ $line =~ $handle_pattern ]] && handle=$((10#${BASH_REMATCH[1]}))
+    handle=-1 src='' time=''
+    [[ $line =~ $handle_re ]] && handle=$((10#${BASH_REMATCH[1]}))
+    [[ $line =~ $record_re ]] && src=${BASH_REMATCH[1]} time=${BASH_REMATCH[2]}
     if [ "$limit" -gt 0 ] && [ "$shown" -ge "$limit" ]; then
       reason="--limit $limit"
     elif [ "$max" -gt 0 ] && [ $((used + size)) -gt "$max" ]; then
       reason="--max-chars $max"
     fi
     if [ -n "$reason" ]; then
-      next_size=$size next_handle=$handle
+      next_size=$size next_handle=$handle next_src=$src next_time=$time
       break
     fi
     [ "$handle" -lt "$last" ] && forward=0
     last=$handle
+    if [ -n "$src" ]; then
+      [ -n "$first_src" ] || first_src=$src
+      [ "$src" = "$first_src" ] || sources=2
+      times+=("$time")
+    fi
     if ! printf '%s\n' "$line" 2> /dev/null; then
       cat > /dev/null
       return 0
@@ -182,20 +198,53 @@ cc_budget() {
     used=$((used + size)) shown=$((shown + 1))
   done
   [ -n "$reason" ] || return 0
-  left=$(($(wc -l | tr -d ' ') + 1))
+  [ -n "$first_src" ] || first_src=$next_src
+  [ -z "$next_src" ] || [ "$next_src" = "$first_src" ] || sources=2
+  rest=$(LC_ALL=C awk -F '\t' -v src="$first_src" -v t="$next_time" -v h="$next_handle" '
+    { n++ }
+    $1 !~ /^L[0-9]+$/ { next }
+    h >= 0 && substr($1, 2) + 0 < h + 0 { back = 1 }
+    NF >= 3 && ($3 == "-" || $3 ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$/) {
+      if (src == "") src = $2
+      if ($2 != src) other = 1
+      if ($3 == "-" || $3 < t) earlier = 1
+    }
+    END { print n + 0, other + 0, earlier + 0, back + 0 }')
+  read -r left other earlier back <<< "$rest"
+  left=$((left + 1))
+  [ "$other" -eq 0 ] || sources=2
+  since=''
+  if [ $sources -gt 1 ]; then
+    if [ -n "$next_time" ] && [ "$next_time" != - ] && [ "$earlier" -eq 0 ]; then
+      since="--since $next_time"
+      [ ${#times[@]} -eq 0 ] ||
+        repeats=$(printf '%s\n' "${times[@]}" | LC_ALL=C awk -v t="$next_time" '$0 != "-" && $0 >= t { n++ } END { print n + 0 }')
+    fi
+  elif [ $forward -eq 1 ] && [ "$next_handle" -ge 0 ] && [ "$next_handle" -ge "$last" ] && [ "$back" -eq 0 ]; then
+    since="--since L$next_handle"
+  fi
   notice="output stopped at $reason after $shown record"
   [ "$shown" -eq 1 ] || notice+=s
   notice+="; $left more left out"
-  since=''
-  [ $forward -eq 1 ] && [ "$next_handle" -ge 0 ] && [ "$next_handle" -ge "$last" ] && since="--since L$next_handle"
   if [ "$shown" -eq 0 ] && [ "${reason%% *}" = --max-chars ]; then
     notice+="; the next record is $next_size characters; continue with --max-chars $next_size${since:+ $since}"
   elif [ -n "$since" ]; then
     notice+="; continue with $since"
+    if [ "$repeats" -eq 1 ]; then
+      notice+=", which repeats the 1 record already shown at that second"
+    elif [ "$repeats" -gt 1 ]; then
+      notice+=", which repeats the $repeats records already shown at that second"
+    fi
   else
     notice+="; continue with a larger ${reason%% *} (0 removes the limit)"
   fi
   cc_notice "$notice"
+}
+
+# Output without a budget passes through cat, so that a closed stdout ends it the same way: SIGPIPE
+# ends cat and then the command, or, where SIGPIPE is ignored, cat fails and the rest is drained.
+cc_copy() {
+  cat 2> /dev/null || [ $? -eq 141 ] || cat > /dev/null
 }
 
 while [ $# -gt 0 ]; do
@@ -267,8 +316,16 @@ done
 export CC_SESSIONS_LIMIT=$limit CC_SESSIONS_MAX_CHARS=$max_chars
 cc_need jq
 
-if [ "${limit:-0}" -eq 0 ] && [ "$max_chars" -eq 0 ]; then
-  exec "$command_path" ${command_args[@]+"${command_args[@]}"}
-fi
-"$command_path" ${command_args[@]+"${command_args[@]}"} | cc_budget "${limit:-0}" "$max_chars"
-exit "${PIPESTATUS[0]}"
+# fd 3 is this program's own stdout, past the filter, for a command that applies the budget itself:
+# such a page can hold more rows than --limit.
+{
+  if [ "${limit:-0}" -eq 0 ] && [ "$max_chars" -eq 0 ]; then
+    "$command_path" ${command_args[@]+"${command_args[@]}"} 3>&4 | cc_copy
+  else
+    "$command_path" ${command_args[@]+"${command_args[@]}"} 3>&4 | cc_budget "${limit:-0}" "$max_chars"
+  fi
+} 4>&1
+status=${PIPESTATUS[0]}
+# 141 is the command ended by SIGPIPE: the reader of stdout went away, which is not a failure.
+[ "$status" -ne 141 ] || status=0
+exit "$status"

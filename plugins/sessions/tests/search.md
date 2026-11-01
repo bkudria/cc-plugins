@@ -241,6 +241,8 @@ L14\tmain\t2026-10-30T10:00:18Z\tassistant\tCONTENT_TERM_ALPHA is defined in src
 ```
 
 `--agents` adds the session's sub-agents, workflow agents and run journal, each named in `src`; internal agents stay out.
+The records of several files are merged by time, each file keeping its own order; a run journal has no timestamps, so
+its records come last.
 
 ```scrut
 $ cc-sessions search CONTENT_TERM_ALPHA a7c3e9f --agents | hits
@@ -310,8 +312,8 @@ A flat-layout session's agents are its flat sub-agents; the Warmup agent is inte
 $ cc-sessions search 'config loader' c4e6 --agents | hits
 L2\tmain\tprompt (escaped)
 L4\tmain\ttool-input (escaped)
-L8\tmain\tassistant (escaped)
 L1\t5f6a7b8c\tfrom-parent (escaped)
+L8\tmain\tassistant (escaped)
 ```
 
 The resumed copy is its own session: it holds a copy of BETA's Agent call, but BETA's sub-agent counts only for BETA.
@@ -328,21 +330,36 @@ under BETA.
 
 ```scrut
 $ cc-sessions search 'include/beta.h' b9e1 --agents | hits
+L4\ta4c6e8f0a2b4c6d8e\ttool-result (escaped)
+L5\ta4c6e8f0a2b4c6d8e\tassistant (escaped)
 L4\tmain\ttool-result (escaped)
 L5\tmain\tassistant (escaped)
 L7\tmain\tassistant (escaped)
-L4\ta4c6e8f0a2b4c6d8e\ttool-result (escaped)
-L5\ta4c6e8f0a2b4c6d8e\tassistant (escaped)
 ```
 
-With several sessions, `src` names each session's own transcript by its id.
+With several sessions, `src` names each session's own transcript by its id, and their records are merged by time.
+RESUMED's L1 and L3 copy BETA's L9 and L11, timestamps included.
 
 ```scrut
 $ cc-sessions search 'header should live' b2d4 b9e1 | hits
 L9\tb2d4f6a8-1c3e-4a5b-8d7f-9e0a1b2c3d4e\tprompt (escaped)
-L11\tb2d4f6a8-1c3e-4a5b-8d7f-9e0a1b2c3d4e\ttool-input (escaped)
 L1\tb9e1c3a5-7d2f-4e6a-8b0c-1d3e5f7a9b2c\tprompt (escaped)
+L11\tb2d4f6a8-1c3e-4a5b-8d7f-9e0a1b2c3d4e\ttool-input (escaped)
 L3\tb9e1c3a5-7d2f-4e6a-8b0c-1d3e5f7a9b2c\ttool-input (escaped)
+```
+
+When the hits shown and left out come from several files, the notice continues with the next hit's time, so
+following it loses nothing.
+
+```scrut
+$ cc-sessions search lexer a7c3e9f --agents --limit 2 2> notice.txt | hits; cat notice.txt
+> cc-sessions search lexer a7c3e9f --agents --since 2026-10-30T10:25:12Z | hits
+L3\ta0f1e2d3c4b5a6978\ttool-result (escaped)
+L69\tmain\tprompt (escaped)
+cc-sessions: output stopped at --limit 2 after 2 records; 3 more left out; continue with --since 2026-10-30T10:25:12Z
+L70\tmain\tassistant (escaped)
+L71\tmain\tprompt (escaped)
+L2\tadoes-the-lexer-0a1b2c3d4e5f6a7b\tfrom-parent (escaped)
 ```
 
 An unknown session is a usage error.
@@ -390,12 +407,13 @@ Generated prompt 61, the long one: line two word word word word word word word w
 
 ## Limit and continuation
 
-The default limit is 20 sessions; the notice says how many older sessions were not reported and how to continue.
+The default limit is 20 sessions; the notice says that older sessions were not all examined and how to continue:
+`--until` the modified time of the next session, which the page never shares.
 
 ```scrut
 $ CLAUDE_CONFIG_DIR=$GEN cc-sessions search generated 2> notice.txt | wc -l | tr -d ' '; cat notice.txt
 20
-cc-sessions: output stopped at --limit 20 after 20 sessions; 32 older sessions left out; continue with --until 2026-09-01T12:32:00Z
+cc-sessions: output stopped at --limit 20 after 20 sessions; older sessions were not all examined; continue with --until 2026-09-01T12:31:00Z
 ```
 
 Past the newest sessions, a rare text is found through one pass that lists the files holding it, and a common one by reading on.
@@ -404,7 +422,7 @@ Past the newest sessions, a rare text is found through one pass that lists the f
 $ CLAUDE_CONFIG_DIR=$GEN cc-sessions search 'prompt 10' | cut -f 1,3; CLAUDE_CONFIG_DIR=$GEN cc-sessions search generated --limit 30 2> notice.txt | wc -l | tr -d ' '; cat notice.txt
 00000000-0000-4000-8000-000000000010\t1 (escaped)
 30
-cc-sessions: output stopped at --limit 30 after 30 sessions; 22 older sessions left out; continue with --until 2026-09-01T12:22:00Z
+cc-sessions: output stopped at --limit 30 after 30 sessions; older sessions were not all examined; continue with --until 2026-09-01T12:21:00Z
 ```
 
 Only the first 100 matching lines of a file are read in corpus search, and `hits` then ends with `+`; within a session every hit counts.
@@ -417,15 +435,15 @@ $ MANY=$CC_TEST_TMP/many && mkdir -p "$MANY/projects/-tmp-many"
 150
 ```
 
-`--limit` sets it; the printed `modified` passed to `--until` continues from that session.
+`--limit` sets it; following the notice continues with the next session.
 
 ```scrut
-$ cc-sessions search the --limit 2 2> notice.txt | cut -f 1; cat notice.txt; cc-sessions search the --until 2026-10-28T12:00:00Z --limit 2 | cut -f 1
+$ cc-sessions search the --limit 2 2> notice.txt | cut -f 1; cat notice.txt; cc-sessions search the --until 2026-10-27T12:00:00Z --limit 2 2>/dev/null | cut -f 1
 a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e
 e5a7c9b1-3d5f-4b7d-8f9a-0c1e2a3b4c5d
-cc-sessions: output stopped at --limit 2 after 2 sessions; 5 older sessions left out; continue with --until 2026-10-28T12:00:00Z
-e5a7c9b1-3d5f-4b7d-8f9a-0c1e2a3b4c5d
+cc-sessions: output stopped at --limit 2 after 2 sessions; older sessions were not all examined; continue with --until 2026-10-27T12:00:00Z
 f6b8d0e2-4a6c-4e8a-b0c2-d4e6f8a0b2c4
+c7d9e1f3-5a6b-4c8d-9e0f-1a2b3c4d5e6f
 ```
 
 `--max-chars` stops at the last whole row too.
@@ -434,7 +452,39 @@ f6b8d0e2-4a6c-4e8a-b0c2-d4e6f8a0b2c4
 $ cc-sessions search the --max-chars 430 2> notice.txt | cut -f 1; cat notice.txt
 a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e
 e5a7c9b1-3d5f-4b7d-8f9a-0c1e2a3b4c5d
-cc-sessions: output stopped at --max-chars 430 after 2 sessions; 5 older sessions left out; continue with --until 2026-10-28T12:00:00Z
+cc-sessions: output stopped at --max-chars 430 after 2 sessions; older sessions were not all examined; continue with --until 2026-10-27T12:00:00Z
+```
+
+`TIE` holds six sessions: `0000aa01` and `0000aa02` modified at 12:05, `0000bb01` to `0000bb03` at 12:04, and
+`0000cc01` at 12:03. A page never splits the sessions that share one modified second, and holds them all when they
+alone fill it.
+
+```scrut
+$ TIE=$CC_TEST_TMP/tie && mkdir -p "$TIE/projects/-tmp-tie"
+> for s in aa01:05 aa02:05 bb01:04 bb02:04 bb03:04 cc01:03; do id=0000${s%:*}-0000-4000-8000-000000000000
+>   printf '{"type":"user","message":{"role":"user","content":"tied session %s"},"uuid":"%s","timestamp":"2026-09-05T12:00:00.000Z","sessionId":"%s","cwd":"/tmp/tie"}\n' "${s%:*}" "$id" "$id" > "$TIE/projects/-tmp-tie/$id.jsonl"
+>   touch -t "2026090512${s#*:}.00" "$TIE/projects/-tmp-tie/$id.jsonl"; done
+> CLAUDE_CONFIG_DIR=$TIE cc-sessions search tied --limit 3 2> notice.txt | cut -f 1; cat notice.txt
+> CLAUDE_CONFIG_DIR=$TIE cc-sessions search tied --until 2026-09-05T12:04:00Z --limit 2 2> notice.txt | cut -f 1; cat notice.txt
+0000aa01-0000-4000-8000-000000000000
+0000aa02-0000-4000-8000-000000000000
+cc-sessions: output stopped at --limit 3 after 2 sessions; older sessions were not all examined; continue with --until 2026-09-05T12:04:00Z
+0000bb01-0000-4000-8000-000000000000
+0000bb02-0000-4000-8000-000000000000
+0000bb03-0000-4000-8000-000000000000
+cc-sessions: output stopped at --limit 2 after 3 sessions, which share one modified time; older sessions were not all examined; continue with --until 2026-09-05T12:03:00Z
+```
+
+`--max-chars` counts characters, whatever the locale: a row of 80 two-byte characters fits a budget of its length in
+characters.
+
+```scrut
+$ U=$CC_TEST_TMP/utf && mkdir -p "$U/projects/-tmp-utf" && id=0000ee01-0000-4000-8000-000000000000
+> printf '{"type":"user","message":{"role":"user","content":"%s"},"uuid":"%s","timestamp":"2026-09-06T10:00:00.000Z","sessionId":"%s","cwd":"/tmp/utf"}\n' "$(printf 'é%.0s' $(seq 1 80))" "$id" "$id" > "$U/projects/-tmp-utf/$id.jsonl"
+> n=$(CLAUDE_CONFIG_DIR=$U cc-sessions search éé --max-chars 0 | LC_ALL=en_US.UTF-8 wc -m | tr -d ' ')
+> CLAUDE_CONFIG_DIR=$U cc-sessions search éé --max-chars "$n" 2>/dev/null | wc -l | tr -d ' '; CLAUDE_CONFIG_DIR=$U cc-sessions search éé --max-chars "$((n - 1))" 2>&1 | cut -d ';' -f 1
+1
+cc-sessions: output stopped at --max-chars * after 0 sessions (glob)
 ```
 
 ## Corpus filters

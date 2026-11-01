@@ -8,10 +8,18 @@ def _sizes:
   | map(select(length > 0) | split("\t") | {key: (.[1:] | join("\t")), value: (.[0] | tonumber)})
   | from_entries;
 
-def _raw_lines($var):
-  if $var == "-" then [inputs]
-  else ($ARGS.named[$var] // "") | split("\n") | if length > 0 and .[-1] == "" then .[:-1] else . end
-  end;
+def _stats:
+  ($ARGS.named.__stats // "") | split("\n")
+  | map(select(length > 0) | split("\t") | {key: (.[2:] | join("\t")), value: {bytes: (.[0] | tonumber), mtime: (.[1] | tonumber)}})
+  | from_entries;
+
+# cc_jq_program sends every file as one text, each file followed by a newline and the line of
+# lib/file-separator: the pieces are each file's lines, the files first, then the meta files.
+def _pieces:
+  ($ARGS.named.__bundle // "") | split("\n") as $lines
+  | [foreach ($lines | indices("\u001ecc-sessions next file\u001e"))[] as $end ({start: 0};
+      {start: ($end + 1), piece: $lines[.start:$end]}; .piece)]
+  | map(if length > 0 and .[-1] == "" then .[:-1] else . end);
 
 def _handles_text:
   (.[:5] | map("L\(.)") | join(", ")) + (if length > 5 then " and \(length - 5) more" else "" end);
@@ -26,8 +34,15 @@ def skipped_notice:
 #: One transcript object per operand, in operand order: {file, kind, session, agent, run, session_dir, project_dir, meta, bytes, mtime, lines, rows: [{l, e}], skipped: [line...], sizes}.
 def transcripts:
   _sizes as $sizes
-  | _context_lines[] as $c
-  | _raw_lines($c[0]) as $lines
+  | _stats as $stats
+  | _pieces as $pieces
+  | _context_lines as $context
+  | ($context | map(select(.[0] != "-")) | length) as $files
+  | if ($pieces | length) != $files + ($context | map(select((.[8] // "-") != "-")) | length) then
+      error("a file changed or vanished while it was read")
+    else . end
+  | $context[] as $c
+  | (if $c[0] == "-" then [inputs] else $pieces[$c[0] | tonumber] end) as $lines
   | (reduce range(0; $lines | length) as $i ({rows: [], skipped: []};
       (try ($lines[$i] | fromjson) catch null) as $e
       | if ($e | type) == "object" then .rows += [{l: ($i + 1), e: $e}]
@@ -41,9 +56,9 @@ def transcripts:
       run: ($c[5] // "-" | _dash),
       session_dir: ($c[6] // "-" | _dash),
       project_dir: ($c[7] // "-" | _dash),
-      bytes: ($c[8] // "-" | _dash | if . then tonumber else null end),
-      mtime: ($c[9] // "-" | _dash | if . then tonumber else null end),
-      meta: ($c[10] // "-" | _dash | if . then (. as $m | try ($ARGS.named[$m] | fromjson) catch null) else null end),
+      bytes: ($stats[$c[1]].bytes // null),
+      mtime: ($stats[$c[1]].mtime // null),
+      meta: ($c[8] // "-" | _dash | if . then (try ($pieces[$files + (.[1:] | tonumber)] | join("\n") | fromjson) catch null) else null end),
       lines: ($lines | length),
       rows: $parsed.rows,
       skipped: $parsed.skipped,
@@ -222,13 +237,16 @@ def bound($spec; $now):
     (($spec[:-1] | tonumber) * ({s: 1, m: 60, h: 3600, d: 86400, w: 604800}[$spec[-1:]])) as $age
     | ($now - $age | floor) as $at | {from: $at, to: $at}
   else
+    # fromdateiso8601 rolls an impossible date or time over (2026-02-30 is 2 March), so the time is
+    # printed back and must be the one written.
     (try (
-      if $spec | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$") then ($spec + "T00:00:00Z" | fromdateiso8601) as $f | {from: $f, to: ($f + 86399)}
-      elif $spec | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}Z$") then ($spec[:16] + ":00Z" | fromdateiso8601) as $f | {from: $f, to: ($f + 59)}
-      elif $spec | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$") then ($spec | _epoch | floor) as $f | {from: $f, to: $f}
+      if $spec | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$") then {from: ($spec + "T00:00:00Z" | fromdateiso8601), digits: 10, span: 86399}
+      elif $spec | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}Z$") then {from: ($spec[:16] + ":00Z" | fromdateiso8601), digits: 16, span: 59}
+      elif $spec | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$") then {from: ($spec | _epoch | floor), digits: 19, span: 0}
       else null end
     ) catch null) as $b
-    | if $b then $b else _bound_error($spec) end
+    | if $b and ($b.from | todate)[:$b.digits] == $spec[:$b.digits] then {from: $b.from, to: ($b.from + $b.span)}
+      else _bound_error($spec) end
   end;
 
 #: s::bound($spec; now).

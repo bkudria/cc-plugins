@@ -26,10 +26,12 @@ so --agents changes nothing; internal agents are left out; the current session i
   --since T, --until T  sessions modified from/to T: a timestamp or an age (30m, 2h, 7d)
   --cwd PATH    sessions with any cwd equal to PATH or under it
   --origin O    cli (default), sdk, all, or another entrypoint name
-When --limit or --max-chars stops the search, a notice says how many older sessions were left
-out and to continue with --until <modified of the last row>.
+When --limit or --max-chars stops the search, it stops before sessions that share one modified
+time, or shows them all when they alone fill the page; a notice says to continue with --until
+<modified of the next session>.
 
-With <session>s: one record per hit, in file order; no default limit.
+With <session>s: one record per hit, in time order, each file in its own order (a run journal,
+which has no times, last); no default limit.
   Fields: handle  src  time  kind  snippet
   src       main, or the session id when several sessions are named; an agent id; a workflow
             run id for its journal
@@ -290,62 +292,40 @@ cc_search_batch() {
     ) < /dev/null
 }
 
-# Reads the rows of one batch, printing them within the limit and the budget.
-cc_search_take() {
-  local pos row
-  while IFS=$'\t' read -r pos row; do
-    [ -n "$pos" ] || continue
-    if [ "$limit" -gt 0 ] && [ $shown -ge "$limit" ]; then
-      stop="--limit $limit"
-      return 0
-    fi
-    next_size=$((${#row} + 1))
-    if [ "$max_chars" -gt 0 ] && [ $((used + next_size)) -gt "$max_chars" ]; then
-      stop="--max-chars $max_chars"
-      return 0
-    fi
-    printf '%s\n' "$row"
-    shown=$((shown + 1)) used=$((used + next_size)) last_pos=$pos
-    last_modified=${row#*$'\t'}
-    last_modified=${last_modified%%$'\t'*}
-  done
-}
-
 # The newest sessions are searched whole, in growing batches, so that a common text answers
 # quickly. When they show the text to be rare (under one session in eight), one rg pass over the
 # remaining transcripts lists the files that can hold a match, and only those are searched.
 read_cap=300 line_cap=100
 : > "$work/capped.txt"
 : > "$work/capped-read.txt"
-shown=0 used=0 stop='' next_size=0 last_pos=-1 last_modified=''
+cc_page_start "$limit" "$max_chars"
 first=0 size=8
-while [ $first -lt "$total" ] && [ -z "$stop" ]; do
-  if [ $first -ge 24 ] && { [ "$limit" -eq 0 ] || [ $((shown * 8)) -lt $first ]; }; then
+while [ $first -lt "$total" ] && [ -z "$CC_PAGE_STOP" ]; do
+  if [ $first -ge 24 ] && { [ "$limit" -eq 0 ] || [ $(((CC_PAGE_SHOWN + ${#CC_PAGE_HELD[@]}) * 8)) -lt $first ]; }; then
     break
   fi
   awk -F '\t' -v a=$first -v b=$((first + size)) '$1 >= a && $1 < b' "$work/files.tsv" > "$work/listing.tsv"
-  cc_search_take <<< "$(cc_search_batch "$work/listing.tsv")"
+  cc_page_take <<< "$(cc_search_batch "$work/listing.tsv")"
   first=$((first + size))
   [ $size -lt 1024 ] && size=$((size * 2))
 done
-if [ -z "$stop" ] && [ $first -lt "$total" ]; then
+if [ -z "$CC_PAGE_STOP" ] && [ $first -lt "$total" ]; then
   awk -F '\t' 'FILENAME == ARGV[1] { want[$0] = 1; next } $2 in want' \
     <(cc_rg -l --no-ignore --hidden --glob '*.jsonl' "$rg_case" "${match_res[@]}" -- "$root") <(awk -F '\t' -v a=$first '$1 >= a' "$work/files.tsv") > "$work/rest.tsv"
   cut -f 1 "$work/rest.tsv" | uniq > "$work/rest-pos.txt"
   count=$(($(wc -l < "$work/rest-pos.txt")))
   at=0 size=64
-  while [ $at -lt "$count" ] && [ -z "$stop" ]; do
+  while [ $at -lt "$count" ] && [ -z "$CC_PAGE_STOP" ]; do
     sed -n "$((at + 1)),$((at + size))p" "$work/rest-pos.txt" > "$work/batch-pos.txt"
     awk -F '\t' 'FILENAME == ARGV[1] { want[$0] = 1; next } $1 in want' "$work/batch-pos.txt" "$work/rest.tsv" > "$work/listing.tsv"
-    cc_search_take <<< "$(cc_search_batch "$work/listing.tsv")"
+    cc_page_take <<< "$(cc_search_batch "$work/listing.tsv")"
     at=$((at + size))
     [ $size -lt 1024 ] && size=$((size * 2))
   done
 fi
 
-if [ -n "$stop" ]; then
-  cc_sessions_stopped "$stop" "$shown" $((total - last_pos - 1)) "$next_size" "$last_modified"
-elif [ $shown -eq 0 ]; then
+cc_page_end
+if [ -z "$CC_PAGE_STOP" ] && [ "$CC_PAGE_SHOWN" -eq 0 ]; then
   filters=${cwd:+ --cwd $cwd}${since_text:+ --since $since_text}${until_text:+ --until $until_text}
   cc_notice "no session has $("$jq_bin" -n --arg t "$text" '$t') in $kinds_text with$filters --origin $origin; $total sessions searched in $root"
 fi

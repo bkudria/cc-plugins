@@ -14,7 +14,8 @@ newer version writes.
 | `lib/common.sh` | Shared shell code: session resolution, a session's agent files, argument helpers, error messages, the jq wrapper |
 | `lib/sessions.jq` | Shared jq module (`s::`) holding every rule in this file |
 | `lib/<command>.jq` | A command's jq program, when it has one. Its text runs as the main program (`cc_module_program`) and is never imported: jq 1.8.2 aborts when an imported module calls an `s::` function that calls another |
-| `lib/render.jq` | The one-line renderings of a tool call that `tools` and `conversation` share; imported, so it calls only `s::` functions that call no other |
+| `lib/render.jq` | The one-line renderings of a tool call that `tools` and `conversation` share, and the merge by time that they and `search` share; imported, so it calls only `s::` functions that call no other |
+| `lib/file-separator` | The line `cc_jq_program` writes after each file when it hands jq every file as one text |
 | `tests/` | scrut tests and the synthetic fixture tree they run against |
 
 Requirements: bash 3.2 or later, jq 1.7 or later, ripgrep (for `list` and `search`), BSD `find`/`stat` (macOS).
@@ -22,7 +23,8 @@ All shell code runs under `/bin/bash` 3.2: no associative arrays, `mapfile`, `${
 
 ## Files
 
-The data root is `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects`. Under it, each `<project>` directory holds:
+The data root is `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects`, made absolute; when it is a symbolic link, it is
+followed. Under it, each `<project>` directory holds:
 
 | Path | What it is |
 |---|---|
@@ -59,7 +61,8 @@ Every `<session>` argument accepts, in this order:
 
 - Lines are parsed tolerantly (`jq -R 'fromjson?'`). Unparseable lines are skipped and counted in a stderr notice per
   file. `list` and `search` across sessions report sessions, not lines, and print none; `schema` sums them in one notice.
-- jq and rg always get absolute paths and never read stdin (project directory names start with `-`).
+- jq and rg always get absolute paths and never read stdin (project directory names start with `-`). Files reach jq
+  as one text through a pipe, never as arguments, so any number of them fits.
 - Entries are de-duplicated by `uuid`, keeping the first occurrence: some files re-append an earlier block of history.
 - File order is authoritative. Timestamps can run backwards in file order, and several entry types carry none.
 
@@ -209,7 +212,8 @@ marker states. Text that quotes the marker mid-result is not a persisted output.
 - Origin: `sdk` when `entrypoint` starts with `sdk` or a prompt's `promptSource` is `sdk`; otherwise the `entrypoint`
   value, or `cli` when there is none. Listings show `cli` sessions unless asked for others.
 - Stub sessions (no user or assistant entry) are left out of listings.
-- The current session is every file under `CLAUDE_CODE_SESSION_ID`'s session directory, plus its main transcript.
+- The current session is the one whose id is `CLAUDE_CODE_SESSION_ID`: `current` names its main transcript, and
+  `list` and `search` mark its row.
 
 ## Output
 
@@ -218,7 +222,8 @@ marker states. Text that quotes the marker mid-result is not a persisted output.
 - Per-session records start with a handle: `L<line>` within the transcript, or within the file named by the record's
   `src` field. `entry` accepts
   a handle, a `uuid`, a `toolu_…` id or a `msg_…` id. `--since`/`--until` accept a handle, a timestamp, or a relative
-  age (`30m`, `2h`, `7d`). With several files, a handle bound applies to each file's own lines. A time bound compares each
+  age (`30m`, `2h`, `7d`); a timestamp that names no real date or time (`2026-02-30`) is a usage error. With several
+  files, a handle bound applies to each file's own lines. A time bound compares each
   record's timestamp, or the nearest earlier one in file order; records before a file's first timestamp match only handle
   bounds.
 - Timestamps print as `YYYY-MM-DDTHH:MM:SSZ` (UTC, milliseconds dropped), so a printed timestamp passed back to `--since`
@@ -226,20 +231,28 @@ marker states. Text that quotes the marker mid-result is not a persisted output.
 - Every per-session command takes `--since` and `--until`, and every command that cuts text takes `--full`; long text
   fields are cut to a per-command width, ending in `…`, unless `--full` is given. Across sessions (`list`, and `search`
   and `schema` without `<session>`), `--since` and `--until` compare modified times, and a handle is a usage error.
-- With `--agents`, `tools` and `conversation` merge the records of several files by time, each file keeping its own
-  order; `search` reports hits file by file.
-- Output budget: stdout stops at a record boundary after `--max-chars` characters (default 20000; 0 removes the limit) or
-  `--limit` records (no default unless the command's help names one). A one-line stderr notice then states how many
-  records were left out and how to continue (`--since L<next>` for per-session output). A cross-session command with a
-  default limit applies `--limit` and `--max-chars` itself, stops reading at the last whole row and says how to continue
-  in the same words (`--until <modified of the last row>`; `--until` is inclusive, so that row repeats and no session
-  that shares its time is lost).
+- When records come from several files (`--agents`, or several sessions in `search`), `tools`, `conversation` and
+  `search` merge them by time, each file keeping its own order; the records of a file with no timestamps (a run
+  journal) come last. Such records start with handle, `src` and time.
+- Output budget: stdout stops at a record boundary after `--max-chars` characters (default 20000; 0 removes the limit;
+  characters, not bytes, whatever the locale; a record counts its newline) or `--limit` records (no default unless the
+  command's help names one). A one-line stderr notice then states how many records were left out and how to continue:
+  - records from one file whose handles, shown and left out, run forward: `--since L<next>`;
+  - records shown and left out from several files: `--since <time of the next record>`, unless a record left out has
+    an earlier time or none; `--since` is inclusive, so the notice says how many records already shown carry that
+    second and will repeat;
+  - otherwise a larger `--limit` or `--max-chars`.
+- A cross-session command with a default limit applies `--limit` and `--max-chars` itself, stops reading at a row
+  boundary and writes past the dispatcher's filter. A page never ends inside the sessions that share one modified
+  second: it ends before them, or holds them all when they alone fill it. The notice says that older sessions were not
+  all examined and to continue with `--until <modified of the next row>`, a time no row shown has.
 - Notices and errors go to stderr, prefixed `cc-sessions:`. An error states the problem, the fix, and
   `cc-sessions <command> --help`.
 - An empty answer's notice reads `no <things> in <what was read>`, then `with` and the options that narrowed it.
 - Exit codes: 0 when the command answered, including an empty answer (with a stderr notice saying what was searched);
   1 when it could not (unreadable file, missing dependency); 2 for a usage error (unknown command or flag, bad value,
-  unresolvable or ambiguous `<session>`). `cc-sessions jq` returns jq's exit code.
+  unresolvable or ambiguous `<session>`). `cc-sessions jq` returns jq's exit code. When the reader closes stdout
+  early, output ends quietly, with nothing on stderr, and the exit code is 0.
 - `--` ends options for every command. `cc-sessions`, `-h` and `--help` print the index; `<command> -h|--help` prints that
   command's help. Help never reads transcripts and always exits 0; the index ends with the status of each dependency.
 

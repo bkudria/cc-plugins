@@ -136,16 +136,20 @@ for operand in ${operands[@]+"${operands[@]}"}; do
     cc_resolve "$operand"
     file=$CC_FILE
   fi
-  for seen in ${files[@]+"${files[@]}"}; do [ "$seen" = "$file" ] && continue 2; done
   files+=("$file")
 done
+if [ ${#files[@]} -gt 1 ]; then
+  cc_lines "$(printf '%s\n' "${files[@]}" | awk '!seen[$0]++')"
+  files=("${CC_LINES[@]}")
+fi
 
+# The filter's closing parenthesis goes on a line of its own, after any comment the filter ends with.
 if [ $null_input -eq 1 ]; then
-  program="import \"sessions\" as s; ($filter)"
+  program="import \"sessions\" as s; ($filter"$'\n'")"
 elif [ $slurp -eq 1 ]; then
-  program="import \"sessions\" as s; [s::transcripts] | ($filter)"
+  program="import \"sessions\" as s; [s::transcripts] | ($filter"$'\n'")"
 else
-  program="import \"sessions\" as s; s::transcripts | ($filter)"
+  program="import \"sessions\" as s; s::transcripts | ($filter"$'\n'")"
 fi
 
 cc_jq_program "$program" ${passed[@]+"${passed[@]}"} -- ${files[@]+"${files[@]}"}

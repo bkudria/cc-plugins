@@ -154,8 +154,11 @@ cc_unknown_option() {
     "valid options: ${valid%, }; to pass text that starts with -, put it after --"
 }
 
+# The data root, absolute: jq and rg get absolute paths, and find would read a relative root that
+# starts with - as an option. Every find over it takes -H, so that a projects/ that is a symbolic link
+# is followed.
 cc_data_root() {
-  printf '%s/projects\n' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+  cc_abs_path "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects"
 }
 
 cc_require_data_root() {
@@ -259,7 +262,7 @@ cc_resolve_id() {
   local ref=$1 root
   [[ $ref =~ ^[A-Za-z0-9_-]{4,}$ ]] || cc_reference_error "$ref"
   root=$(cc_require_data_root) || exit
-  cc_find_lines < <(find "$root" -type f \( -name "$ref*.jsonl" -o -name "agent-$ref*.jsonl" -o -name "agent-a$ref*.jsonl" \) \
+  cc_find_lines < <(find -H "$root" -type f \( -name "$ref*.jsonl" -o -name "agent-$ref*.jsonl" -o -name "agent-a$ref*.jsonl" \) \
     ! -name journal.jsonl ! -path '*/memory/*' ! -path '*/tool-results/*' 2> /dev/null < /dev/null | LC_ALL=C sort)
   cc_pick "$ref" ${CC_FOUND[@]+"${CC_FOUND[@]}"}
 }
@@ -273,7 +276,7 @@ cc_resolve_session_dir() {
     return 0
   fi
   root=$(cc_require_data_root) || exit
-  cc_find_lines < <(find "$root" -mindepth 2 -maxdepth 2 -type f -name "${dir##*/}.jsonl" 2> /dev/null < /dev/null | LC_ALL=C sort)
+  cc_find_lines < <(find -H "$root" -mindepth 2 -maxdepth 2 -type f -name "${dir##*/}.jsonl" 2> /dev/null < /dev/null | LC_ALL=C sort)
   cc_pick "${dir##*/}" ${CC_FOUND[@]+"${CC_FOUND[@]}"}
 }
 
@@ -288,7 +291,7 @@ cc_resolve_run() {
     esac
     for seen in ${dirs[@]+"${dirs[@]}"}; do [ "$seen" = "$dir" ] && continue 2; done
     dirs+=("$dir")
-  done < <(find "$root" \( -type d -path '*/subagents/workflows/*' -name "$ref*" \) -o \
+  done < <(find -H "$root" \( -type d -path '*/subagents/workflows/*' -name "$ref*" \) -o \
     \( -type f -path '*/workflows/*' -name "$ref*.json" \) 2> /dev/null < /dev/null | LC_ALL=C sort)
   if [ ${#dirs[@]} -ne 1 ]; then
     cc_pick "$ref" ${dirs[@]+"${dirs[@]/%/.jsonl}"}
@@ -340,7 +343,7 @@ cc_resolve() {
       [ -n "${CLAUDE_CODE_SESSION_ID-}" ] ||
         cc_usage_error "\"current\" needs CLAUDE_CODE_SESSION_ID, which is not set" "pass a session id or a path instead"
       root=$(cc_require_data_root) || exit
-      cc_find_lines < <(find "$root" -mindepth 2 -maxdepth 2 -type f -name "$CLAUDE_CODE_SESSION_ID.jsonl" 2> /dev/null < /dev/null)
+      cc_find_lines < <(find -H "$root" -mindepth 2 -maxdepth 2 -type f -name "$CLAUDE_CODE_SESSION_ID.jsonl" 2> /dev/null < /dev/null)
       cc_pick "$CLAUDE_CODE_SESSION_ID" ${CC_FOUND[@]+"${CC_FOUND[@]}"}
       ;;
     */* | *.jsonl) cc_resolve_path "$ref" ;;
@@ -349,27 +352,15 @@ cc_resolve() {
   esac
 }
 
-# cc_agent_transcript <session-dir> <agent-id>: the agent's transcript in that session's directory,
-# else anywhere under the data root; returns 1 when there is none.
-cc_agent_transcript() {
-  local dir=$1 id=$2 path root
-  for path in "$dir/subagents/agent-$id.jsonl" "$dir"/subagents/workflows/*/"agent-$id.jsonl"; do
-    [ -f "$path" ] && printf '%s\n' "$path" && return 0
-  done
-  root=$(cc_data_root)
-  [ -d "$root" ] || return 1
-  path=$(find "$root" -type f -name "agent-$id.jsonl" 2> /dev/null < /dev/null | LC_ALL=C sort | head -n 1)
-  [ -n "$path" ] && printf '%s\n' "$path" && return 0
-  return 1
-}
-
-# cc_run_dir <session-dir> <run-id>: the workflow run's directory, found like cc_agent_transcript.
+# cc_run_dir <session-dir> <run-id>: the workflow run's directory: in that session's directory, else
+# anywhere under the data root (a resumed session keeps using the original's directory); returns 1 when
+# there is none.
 cc_run_dir() {
   local dir=$1 run=$2 path root
   [ -d "$dir/subagents/workflows/$run" ] && printf '%s\n' "$dir/subagents/workflows/$run" && return 0
   root=$(cc_data_root)
   [ -d "$root" ] || return 1
-  path=$(find "$root" -type d -name "$run" -path '*/subagents/workflows/*' 2> /dev/null < /dev/null | LC_ALL=C sort | head -n 1)
+  path=$(find -H "$root" -type d -name "$run" -path '*/subagents/workflows/*' 2> /dev/null < /dev/null | LC_ALL=C sort | head -n 1)
   [ -n "$path" ] && printf '%s\n' "$path" && return 0
   return 1
 }
@@ -380,7 +371,7 @@ cc_run_record() {
   [ -f "$dir/workflows/$run.json" ] && printf '%s\n' "$dir/workflows/$run.json" && return 0
   root=$(cc_data_root)
   [ -d "$root" ] || return 1
-  path=$(find "$root" -type f -name "$run.json" -path '*/workflows/*' 2> /dev/null < /dev/null | LC_ALL=C sort | head -n 1)
+  path=$(find -H "$root" -type f -name "$run.json" -path '*/workflows/*' 2> /dev/null < /dev/null | LC_ALL=C sort | head -n 1)
   [ -n "$path" ] && printf '%s\n' "$path" && return 0
   return 1
 }
@@ -410,8 +401,8 @@ cc_agent_files() {
   } | LC_ALL=C sort
 }
 
-# cc_agent_transcripts <session-dir> <agent-id>...: cc_agent_transcript for several ids, with one find
-# over the data root for those not in the session directory; ids found nowhere print nothing.
+# cc_agent_transcripts <session-dir> <agent-id>...: each agent's transcript, found like cc_run_dir, with
+# one find over the data root for those not in the session directory; ids found nowhere print nothing.
 cc_agent_transcripts() {
   local dir=$1 id path root missing=() names=()
   shift
@@ -427,7 +418,7 @@ cc_agent_transcripts() {
     [ ${#names[@]} -gt 0 ] && names+=(-o)
     names+=(-name "agent-$id.jsonl")
   done
-  find "$root" -type f \( "${names[@]}" \) 2> /dev/null < /dev/null | LC_ALL=C sort | awk -F / '!seen[$NF]++'
+  find -H "$root" -type f \( "${names[@]}" \) 2> /dev/null < /dev/null | LC_ALL=C sort | awk -F / '!seen[$NF]++'
 }
 
 # cc_session_agent_files <main-transcript> [--journals]: cc_agent_files, then the agent transcripts that
@@ -469,7 +460,7 @@ cc_session_agent_files() {
     fi
   done
   [ ${#names[@]} -gt 0 ] || return 0
-  find "$(cc_data_root)" \( -false "${names[@]}" \) -print 2> /dev/null < /dev/null | LC_ALL=C sort |
+  find -H "$(cc_data_root)" \( -false "${names[@]}" \) -print 2> /dev/null < /dev/null | LC_ALL=C sort |
     while IFS= read -r path; do
       if [ -d "$path" ]; then
         for found in "$path"/agent-*.jsonl; do [ -f "$found" ] && printf '%s\n' "$found"; done
@@ -480,29 +471,21 @@ cc_session_agent_files() {
     done | awk -F/ '!seen[$NF]++ || $NF == "journal.jsonl"'
 }
 
-# cc_current_files: the current session (CLAUDE_CODE_SESSION_ID): its main transcript, then every
-# transcript under its session directories; nothing when the variable is empty.
-cc_current_files() {
-  local id=${CLAUDE_CODE_SESSION_ID-} root dir
-  [ -n "$id" ] || return 0
-  root=$(cc_data_root)
-  [ -d "$root" ] || return 0
-  find "$root" -mindepth 2 -maxdepth 2 -type f -name "$id.jsonl" 2> /dev/null < /dev/null | LC_ALL=C sort | head -n 1
-  for dir in "$root"/*/"$id"; do
-    [ -d "$dir" ] && find "$dir" -type f -name '*.jsonl' ! -name journal.jsonl ! -path '*/tool-results/*' 2> /dev/null < /dev/null
-  done | LC_ALL=C sort
-}
-
 # cc_resolve_all <session-reference>...: resolves each one (exiting like cc_resolve) into the array
-# CC_FILES, in order, each file once.
+# CC_FILES, in order, each file once. The references move to an array first: bash copies the caller's
+# arguments at every function call, which over thousands of them would take time growing with their
+# square.
 cc_resolve_all() {
-  local ref seen
+  local ref refs=("$@")
+  set --
   CC_FILES=()
-  for ref in "$@"; do
+  for ref in "${refs[@]}"; do
     cc_resolve "$ref"
-    for seen in ${CC_FILES[@]+"${CC_FILES[@]}"}; do [ "$seen" = "$CC_FILE" ] && continue 2; done
     CC_FILES+=("$CC_FILE")
   done
+  [ ${#CC_FILES[@]} -gt 1 ] || return 0
+  cc_lines "$(printf '%s\n' "${CC_FILES[@]}" | awk '!seen[$0]++')"
+  CC_FILES=("${CC_LINES[@]}")
 }
 
 cc_jq_binary() {
@@ -535,22 +518,115 @@ cc_mtime_bound() {
   printf '%s %s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
 }
 
-# cc_sessions_stopped <reason> <shown> <left> <next-size> <last-modified>: the notice of a cross-session
-# command that applied the output budget itself and stopped reading, in the dispatcher's words.
-cc_sessions_stopped() {
-  local s=s
-  [ "$2" -eq 1 ] && s=''
-  if [ "$2" -eq 0 ]; then
-    cc_notice "output stopped at $1 after 0 sessions; the next record is $4 characters; continue with --max-chars $4"
-  else
-    cc_notice "output stopped at $1 after $2 session$s; $3 older sessions left out; continue with --until $5"
+# cc_find_utf8_locale: sets CC_UTF8_LOCALE to a UTF-8 locale this system has, so that ${#text} under it
+# counts characters whatever the caller's locale; empty when there is none.
+cc_find_utf8_locale() {
+  local LC_ALL candidate text=$'\303\251'
+  CC_UTF8_LOCALE=''
+  for candidate in C.UTF-8 en_US.UTF-8 UTF-8; do
+    { LC_ALL=$candidate; } 2> /dev/null
+    if [ ${#text} -eq 1 ]; then
+      CC_UTF8_LOCALE=$candidate
+      return 0
+    fi
+  done
+}
+
+# cc_print_line <text>: prints one line of output. When the reader has closed stdout, the command ends
+# at once with SIGPIPE's status, quietly: bash reports the failed write when a trap is set, and any
+# later output of its own would carry the unwritten bytes.
+cc_print_line() {
+  printf '%s\n' "$1" 2> /dev/null || exit 141
+}
+
+# Paging for the cross-session commands, which apply the budget themselves so that reading stops with
+# it. cc_page_start <limit> <max-chars> resets the state; cc_page_take reads "<pos>TAB<row>" lines, newest
+# first, whose row has its modified time in field 2, prints the rows that fit and sets CC_PAGE_STOP when
+# the budget is reached; cc_page_end prints the rows still held and the notice. A page never ends inside
+# the rows that share one modified second, since --until <that second> would then repeat some of them
+# and could never reach those past the limit: it ends before them, or holds them all when they are the
+# whole page. The page continues with --until <modified of the next row>, which no row shown shares.
+# Rows go to fd 3, which the dispatcher opens on its own stdout past its budget filter, as such a page
+# can hold more rows than --limit.
+cc_page_start() {
+  CC_PAGE_LIMIT=$1 CC_PAGE_MAX=$2 CC_PAGE_SHOWN=0 CC_PAGE_USED=0 CC_PAGE_STOP='' CC_PAGE_NEXT='' CC_PAGE_NEXT_SIZE=0
+  CC_PAGE_HELD=() CC_PAGE_HELD_SIZE=0 CC_PAGE_GROUP='' CC_PAGE_WHOLE=''
+  { true >&3; } 2> /dev/null || exec 3>&1
+  cc_find_utf8_locale
+}
+
+# cc_page_over <size>: true, naming the budget in CC_PAGE_OVER, when one more row of that size does not fit.
+cc_page_over() {
+  local count=$((CC_PAGE_SHOWN + ${#CC_PAGE_HELD[@]} + 1))
+  CC_PAGE_OVER=''
+  if [ "$CC_PAGE_LIMIT" -gt 0 ] && [ $count -gt "$CC_PAGE_LIMIT" ]; then
+    CC_PAGE_OVER="--limit $CC_PAGE_LIMIT"
+  elif [ "$CC_PAGE_MAX" -gt 0 ] && [ $((CC_PAGE_USED + CC_PAGE_HELD_SIZE + $1)) -gt "$CC_PAGE_MAX" ]; then
+    CC_PAGE_OVER="--max-chars $CC_PAGE_MAX"
   fi
+  [ -n "$CC_PAGE_OVER" ]
+}
+
+cc_page_flush() {
+  local row
+  for row in ${CC_PAGE_HELD[@]+"${CC_PAGE_HELD[@]}"}; do
+    cc_print_line "$row" >&3
+  done
+  CC_PAGE_SHOWN=$((CC_PAGE_SHOWN + ${#CC_PAGE_HELD[@]})) CC_PAGE_USED=$((CC_PAGE_USED + CC_PAGE_HELD_SIZE))
+  CC_PAGE_HELD=() CC_PAGE_HELD_SIZE=0
+}
+
+cc_page_take() {
+  local pos row modified size
+  [ -z "$CC_UTF8_LOCALE" ] || local LC_ALL=$CC_UTF8_LOCALE
+  while IFS=$'\t' read -r pos row; do
+    [ -n "$pos" ] && [ -z "$CC_PAGE_STOP" ] || continue
+    modified=${row#*$'\t'}
+    modified=${modified%%$'\t'*}
+    size=$((${#row} + 1))
+    if [ ${#CC_PAGE_HELD[@]} -gt 0 ] && [ "$modified" = "$CC_PAGE_GROUP" ]; then
+      if [ -z "$CC_PAGE_WHOLE" ] && cc_page_over "$size"; then
+        if [ "$CC_PAGE_SHOWN" -gt 0 ]; then
+          CC_PAGE_STOP=$CC_PAGE_OVER CC_PAGE_NEXT=$modified CC_PAGE_HELD=() CC_PAGE_HELD_SIZE=0
+          continue
+        fi
+        CC_PAGE_WHOLE=$CC_PAGE_OVER
+      fi
+    else
+      if [ -n "$CC_PAGE_WHOLE" ]; then
+        cc_page_flush
+        CC_PAGE_STOP=$CC_PAGE_WHOLE CC_PAGE_NEXT=$modified
+        continue
+      fi
+      cc_page_flush
+      if cc_page_over "$size"; then
+        CC_PAGE_STOP=$CC_PAGE_OVER CC_PAGE_NEXT=$modified CC_PAGE_NEXT_SIZE=$size
+        continue
+      fi
+      CC_PAGE_GROUP=$modified
+    fi
+    CC_PAGE_HELD+=("$row")
+    CC_PAGE_HELD_SIZE=$((CC_PAGE_HELD_SIZE + size))
+  done
+}
+
+cc_page_end() {
+  local s=s shared=''
+  [ -n "$CC_PAGE_STOP" ] || cc_page_flush
+  [ -n "$CC_PAGE_STOP" ] || return 0
+  if [ "$CC_PAGE_SHOWN" -eq 0 ]; then
+    cc_notice "output stopped at $CC_PAGE_STOP after 0 sessions; the next record is $CC_PAGE_NEXT_SIZE characters; continue with --max-chars $CC_PAGE_NEXT_SIZE"
+    return 0
+  fi
+  [ "$CC_PAGE_SHOWN" -eq 1 ] && s=''
+  [ -n "$CC_PAGE_WHOLE" ] && shared=', which share one modified time'
+  cc_notice "output stopped at $CC_PAGE_STOP after $CC_PAGE_SHOWN session$s$shared; older sessions were not all examined; continue with --until $CC_PAGE_NEXT"
 }
 
 # cc_sessions_by_mtime <from> <to>: the main transcripts under the data root modified inside the bounds
 # (epoch seconds; empty for none), newest first, as "<pos>TAB<mtime>TAB<bytes>TAB<path>" lines.
 cc_sessions_by_mtime() {
-  find "$(cc_data_root)" -mindepth 2 -maxdepth 2 -type f -name '*.jsonl' ! -name 'agent-*' \
+  find -H "$(cc_data_root)" -mindepth 2 -maxdepth 2 -type f -name '*.jsonl' ! -name 'agent-*' \
     -exec stat -f '%m%t%z%t%N' {} + 2> /dev/null < /dev/null |
     LC_ALL=C sort -t $'\t' -k1,1nr -k3,3 |
     awk -F '\t' -v lo="${1:-x}" -v hi="${2:-x}" '(lo == "x" || $1 >= lo + 0) && (hi == "x" || $1 <= hi + 0) { print n++ "\t" $0 }'
@@ -563,9 +639,9 @@ cc_corpus_agent_map() {
   local root names=(-name 'agent-*.jsonl')
   root=$(cc_data_root)
   [ "${1-}" = --journals ] && names=(\( -name 'agent-*.jsonl' -o -name journal.jsonl \))
-  find "$root" -mindepth 3 -path '*/subagents/*' -type f "${names[@]}" 2> /dev/null < /dev/null |
+  find -H "$root" -mindepth 3 -path '*/subagents/*' -type f "${names[@]}" 2> /dev/null < /dev/null |
     awk '{ main = $0; sub(/\/subagents\/.*$/, ".jsonl", main); print main "\t" $0 }'
-  cc_lines "$(find "$root" -mindepth 2 -maxdepth 2 -type f -name 'agent-*.jsonl' 2> /dev/null < /dev/null)"
+  cc_lines "$(find -H "$root" -mindepth 2 -maxdepth 2 -type f -name 'agent-*.jsonl' 2> /dev/null < /dev/null)"
   cc_rg -m 1 -o --no-heading --with-filename --field-match-separator=$'\t' -e '"sessionId":"[^"]*"' -- ${CC_LINES[@]+"${CC_LINES[@]}"} |
     awk -F '\t' '{ id = $2; gsub(/"sessionId":"|"/, "", id); dir = $1; sub(/\/[^\/]*$/, "", dir); print dir "/" id ".jsonl\t" $1 }'
 }
@@ -578,90 +654,77 @@ cc_readable() {
   done
 }
 
-# cc_jq_failed <status> <what>: after a failed cc_jq_program in a command substitution. Status 1 and 2
-# were reported already (an unreadable file, a usage error found by the program); any other status is
-# jq failing on the input, said in a sentence instead of jq's own words.
+# cc_jq_failed <status> <what>: after a failed cc_jq_program. Status 1 and 2 were reported already (an
+# unreadable file, a usage error found by the program); 141 is jq ended by SIGPIPE, as the reader of
+# stdout went away, which ends the command quietly; any other status is jq failing on the input, said
+# in a sentence instead of jq's own words.
 cc_jq_failed() {
-  case $1 in 1 | 2) exit "$1" ;; esac
+  case $1 in 1 | 2 | 141) exit "$1" ;; esac
   cc_fail "could not read $2" "check that it is a Claude Code transcript"
 }
 
 # cc_jq_program <program> [<jq-option>...] -- <file|->...
 # Runs jq with lib/ on the library path. Each file reaches the program through s::transcripts as one
-# transcript object; files and agent meta files are passed with --rawfile, so stdin stays closed unless
-# "-" is a file. One stat call covers every file, however many there are.
+# transcript object. What jq reads (the files and their agents' meta files, joined by the line in
+# lib/file-separator; each file's facts; stat results; the sizes of saved outputs) comes through
+# --rawfile of process substitutions rather than the argument list, so any number of files fits and
+# no step runs once per file. stdin stays closed unless "-" is a file.
 cc_jq_program() {
-  local program=$1 file ctx='' sizes stated dir index=0 stdin=0 line stat_line meta
-  local options=() raw=() files=() session_dirs=() entries=() stats=()
+  local program=$1 file entry meta stdin=0 last_dir='' input=/dev/null
+  local options=() operands=() files=() metas=() entries=() dirs=()
   shift
   while [ $# -gt 0 ] && [ "$1" != -- ]; do
     options+=("$1")
     shift
   done
   [ $# -gt 0 ] && shift
-  for file in "$@"; do
+  # As in cc_resolve_all, the operands leave the argument list before any function is called.
+  operands=("$@")
+  set --
+  for file in ${operands[@]+"${operands[@]}"}; do
     if [ "$file" = - ]; then
       stdin=1
-      entries+=("$(printf '%s\t%s\t%s' - - file)")
+      entries+=($'-\t-\tfile')
       continue
     fi
     case $file in /*) ;; *) file=$PWD/$file ;; esac
     cc_readable "$file"
     cc_path_info "$file"
-    files+=("$file")
-    raw+=(--rawfile "__f$index" "$file")
     meta=-
     if [ -n "$CC_META_FILE" ] && [ -r "$CC_META_FILE" ]; then
-      meta=__m$index
-      raw+=(--rawfile "$meta" "$CC_META_FILE")
+      meta=m${#metas[@]}
+      metas+=("$CC_META_FILE")
     fi
-    entries+=("$(printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t@STAT@\t%s' "__f$index" "$file" "$CC_KIND" "${CC_SESSION_ID:--}" \
-      "${CC_AGENT_ID:--}" "${CC_RUN_ID:--}" "${CC_SESSION_DIR:--}" "${CC_PROJECT_DIR:--}" "$meta")")
-    index=$((index + 1))
-    if [ -n "$CC_SESSION_DIR" ] && [ -d "$CC_SESSION_DIR/tool-results" ]; then
-      for dir in ${session_dirs[@]+"${session_dirs[@]}"}; do [ "$dir" = "$CC_SESSION_DIR" ] && continue 2; done
-      session_dirs+=("$CC_SESSION_DIR")
+    printf -v entry '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' "${#files[@]}" "$file" "$CC_KIND" "${CC_SESSION_ID:--}" \
+      "${CC_AGENT_ID:--}" "${CC_RUN_ID:--}" "${CC_SESSION_DIR:--}" "${CC_PROJECT_DIR:--}" "$meta"
+    files+=("$file")
+    entries+=("$entry")
+    if [ -n "$CC_SESSION_DIR" ] && [ "$CC_SESSION_DIR" != "$last_dir" ] && [ -d "$CC_SESSION_DIR/tool-results" ]; then
+      dirs+=("$CC_SESSION_DIR/tool-results")
     fi
+    last_dir=$CC_SESSION_DIR
   done
-  # stat skips a file that vanished, so each line is matched to its file by name.
-  if [ $index -gt 0 ]; then
-    cc_lines "$(stat -f '%z%t%m%t%N' -- "${files[@]}" 2> /dev/null < /dev/null)"
-    stats=(${CC_LINES[@]+"${CC_LINES[@]}"})
-  fi
-  index=0
-  for line in ${entries[@]+"${entries[@]}"}; do
-    case $line in
-      *@STAT@*)
-        stat_line=$'-\t-'
-        if [ ${#stats[@]} -gt 0 ] && [ "${stats[0]#*$'\t'*$'\t'}" = "${files[index]}" ]; then
-          stat_line=${stats[0]%$'\t'*}
-          stats=(${stats[@]+"${stats[@]:1}"})
-        fi
-        line=${line/@STAT@/$stat_line}
-        index=$((index + 1))
-        ;;
-    esac
-    ctx+=$line$'\n'
-  done
-  sizes=$(
-    for dir in ${session_dirs[@]+"${session_dirs[@]}"}; do
-      find "$dir/tool-results" -type f -exec stat -f '%z%t%N' {} + 2> /dev/null < /dev/null
-    done
-    if [ ${#files[@]} -gt 0 ]; then
-      grep -h -o -e 'Full output saved to: [^"\\]*' -- "${files[@]}" 2> /dev/null < /dev/null | sort -u |
-        while IFS= read -r stated; do
-          stated=${stated#Full output saved to: }
-          [ -f "$stated" ] && stat -f '%z%t%N' "$stated" 2> /dev/null < /dev/null
-        done
-    fi
-  )
-  if [ $stdin -eq 1 ]; then
-    "$(cc_jq_binary)" -n -R -c -L "$CC_SESSIONS_LIB" --arg __ctx "$ctx" --arg __sizes "$sizes" \
-      ${raw[@]+"${raw[@]}"} ${options[@]+"${options[@]}"} -- "$program"
-  else
-    "$(cc_jq_binary)" -n -R -c -L "$CC_SESSIONS_LIB" --arg __ctx "$ctx" --arg __sizes "$sizes" \
-      ${raw[@]+"${raw[@]}"} ${options[@]+"${options[@]}"} -- "$program" < /dev/null
-  fi
+  [ $stdin -eq 1 ] && input=/dev/stdin
+  "$(cc_jq_binary)" -n -R -c -L "$CC_SESSIONS_LIB" \
+    --rawfile __ctx <(printf '%s\n' ${entries[@]+"${entries[@]}"}) \
+    --rawfile __stats <(
+      [ ${#files[@]} -eq 0 ] || printf '%s\0' "${files[@]}" | xargs -0 stat -f '%z%t%m%t%N' -- 2> /dev/null
+    ) \
+    --rawfile __sizes <(
+      [ ${#dirs[@]} -eq 0 ] || printf '%s\n' "${dirs[@]}" | LC_ALL=C sort -u | tr '\n' '\0' |
+        xargs -0 sh -c 'find "$@" -type f -exec stat -f "%z%t%N" {} +' sh 2> /dev/null
+      [ ${#files[@]} -eq 0 ] || printf '%s\0' "${files[@]}" | xargs -0 grep -h -o -e 'Full output saved to: [^"\\]*' -- 2> /dev/null |
+        LC_ALL=C sort -u | while IFS= read -r file; do
+          file=${file#Full output saved to: }
+          [ -f "$file" ] && printf '%s\0' "$file"
+        done | xargs -0 stat -f '%z%t%N' -- 2> /dev/null
+    ) \
+    --rawfile __bundle <(
+      for file in ${files[@]+"${files[@]}"} ${metas[@]+"${metas[@]}"}; do
+        printf '%s\0%s\0' "$file" "$CC_SESSIONS_LIB/file-separator"
+      done | xargs -0 cat -- 2> /dev/null
+    ) \
+    ${options[@]+"${options[@]}"} -- "$program" < "$input"
 }
 
 # cc_module_program <name> <call>: the text of lib/<name>.jq followed by the call, run as the main
@@ -669,11 +732,4 @@ cc_jq_program() {
 # function that calls another one, so a command module is never imported.
 cc_module_program() {
   printf '%s\n%s\n' "$(< "$CC_SESSIONS_LIB/$1.jq")" "$2"
-}
-
-# cc_jq <filter> [<jq-option>...] -- <file|->... : the filter runs once per transcript object.
-cc_jq() {
-  local filter=$1
-  shift
-  cc_jq_program "import \"sessions\" as s; s::transcripts | ($filter)" "$@"
 }

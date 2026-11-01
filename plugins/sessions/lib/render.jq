@@ -114,17 +114,18 @@ def call($w):
   | "\(.name) " as $head
   | $head + input(if $w > 0 then [$w - ($head | length) - ($tail | length), 20] | max else 0 end) + $tail;
 
-# Record plumbing that tools and conversation share. This module is imported, so nothing in it may
-# call an s:: function that calls another one (see cc_module_program in common.sh).
+# Record plumbing that tools, conversation and search share. This module is imported, so nothing in it
+# may call an s:: function that calls another one (see cc_module_program in common.sh).
 
 def src: .agent // "main";
 
 # Merges per-file record arrays by time. Each record sorts by the latest timestamp its file has shown
-# so far, since timestamps can run backwards, so every file keeps its own order.
+# so far, since timestamps can run backwards, so every file keeps its own order; the records of a file
+# with no timestamp at all (a run journal) come last.
 def by_time:
   if length == 1 then .[0]
   else
-    [ .[] | (first(.[] | .ts | strings) // "") as $start
+    [ .[] | (first(.[] | .ts | strings) // null) as $start
       | foreach .[] as $r ($start; if ($r.ts | type) == "string" and $r.ts > . then $r.ts else . end; $r + {_key: .}) ]
-    | sort_by([._key, .fi]) | map(del(._key))
+    | sort_by([._key == null, ._key, .fi]) | map(del(._key))
   end;

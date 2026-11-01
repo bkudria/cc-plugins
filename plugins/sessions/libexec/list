@@ -36,8 +36,9 @@ Fields, one session per record:
   skill     with --skill: <exact name> <how>[,<how>...] [+<n> agents], how being tool, skill,
             bundled or orphan; +<n> agents counts the agents that loaded it
 
-When --limit or --max-chars stops the listing, a notice says how many older sessions were left
-out and to continue with --until <modified of the last row>.
+When --limit or --max-chars stops the listing, it stops before sessions that share one modified
+time, or shows them all when they alone fill the page; a notice says to continue with --until
+<modified of the next session>.
 Empty answer: nothing on stdout; a notice names the pattern, the options and how many sessions
 were checked.
 Exit status: 0 answered, also when empty; 1 no transcripts directory, or rg missing; 2 usage
@@ -241,35 +242,19 @@ cc_list_batch() {
 
 # The budget is applied here rather than left to the dispatcher, so that reading stops with it and the
 # notice can say where to continue.
-max_chars=${CC_SESSIONS_MAX_CHARS:-20000}
-start=0 size=$((limit + 1)) shown=0 used=0 stop='' next_size=0 last_pos=-1 last_modified=''
+cc_page_start "$limit" "${CC_SESSIONS_MAX_CHARS:-20000}"
+start=0 size=$((limit + 1))
 [ "$size" -lt 64 ] && size=64
-while [ $start -lt "$rows" ] && [ -z "$stop" ]; do
+while [ $start -lt "$rows" ] && [ -z "$CC_PAGE_STOP" ]; do
   end=$((start + size))
   [ $end -gt "$rows" ] && end=$rows
-  while IFS=$'\t' read -r pos row; do
-    [ -n "$pos" ] || continue
-    if [ "$limit" -gt 0 ] && [ $shown -ge "$limit" ]; then
-      stop="--limit $limit"
-      break
-    fi
-    next_size=$((${#row} + 1))
-    if [ "$max_chars" -gt 0 ] && [ $((used + next_size)) -gt "$max_chars" ]; then
-      stop="--max-chars $max_chars"
-      break
-    fi
-    printf '%s\n' "$row"
-    shown=$((shown + 1)) used=$((used + next_size)) last_pos=$pos
-    last_modified=${row#*$'\t'}
-    last_modified=${last_modified%%$'\t'*}
-  done <<< "$(cc_list_batch "$start" "$end")"
+  cc_page_take <<< "$(cc_list_batch "$start" "$end")"
   start=$end
   [ $size -lt 8192 ] && size=$((size * 2))
 done
+cc_page_end
 
-if [ -n "$stop" ]; then
-  cc_sessions_stopped "$stop" "$shown" $((total - last_pos - 1)) "$next_size" "$last_modified"
-elif [ $shown -eq 0 ]; then
+if [ -z "$CC_PAGE_STOP" ] && [ "$CC_PAGE_SHOWN" -eq 0 ]; then
   cc_notice "no sessions${pattern:+ match \"$pattern\"} with$filters --origin $origin; $total sessions checked in $root"
 fi
 exit 0

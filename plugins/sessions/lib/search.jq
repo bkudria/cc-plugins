@@ -1,4 +1,5 @@
 import "sessions" as s;
+import "render" as r;
 
 # Text found by rg is confirmed here on decoded content: rg reads JSON lines, where quotes, backslashes
 # and control characters are escaped, so its patterns are only a permissive first pass.
@@ -117,7 +118,7 @@ def _src($t; $multi):
   elif $multi then $t.session
   else "main" end;
 
-#: Per-session search: one TSV record per match in the order of $ARGS.named.opts.files ([{path, explicit}]), then a notice on stderr when nothing matched. Input: null; reads rg lines with inputs.
+#: Per-session search: one TSV record per match, the files of $ARGS.named.opts.files ([{path, explicit}]) merged by time, then a notice on stderr when nothing matched. Input: null; reads rg lines with inputs.
 def within:
   $ARGS.named.opts as $o
   | s::group_lines(inputs) as $grouped
@@ -126,11 +127,13 @@ def within:
       | ($grouped[$f.path] // {} | s::from_lines($f.path; null)) as $t
       | select($f.explicit or ($t | s::is_internal | not))
       | {t: $t, hit: $f.hit} ] as $searched
-  | [ $searched[] | select(.hit) | .t as $t
-      | ($t | s::skipped_notice),
-        ($t | matches($o.kinds; $o.match) | select(s::within($o.since; $o.until))
-          | [s::handle, _src($t; $multi), (.ts | s::ts), .kind, (. as $r | $r.text | snippet($r.m; $o.width))] | s::tsv) ] as $out
-  | if ($out | length) > 0 then $out[]
+  | ($searched | map(select(.hit) | .t)) as $hit
+  | ($hit[] | s::skipped_notice),
+    ([ range(0; $hit | length) as $fi | $hit[$fi] as $t
+       | [ $t | matches($o.kinds; $o.match) | select(s::within($o.since; $o.until)) | . + {fi: $fi, src: _src($t; $multi)} ] ]
+     | r::by_time) as $out
+  | if ($out | length) > 0 then
+      $out[] | [s::handle, .src, (.ts | s::ts), .kind, (. as $r | $r.text | snippet($r.m; $o.width))] | s::tsv
     else
       ("cc-sessions: no hits for \($o.text | tojson) in \($o.kinds_text) of \($searched | length) transcript\(if ($searched | length) == 1 then "" else "s" end)"
        + " (session\(if $multi then "s" else "" end) \($o.sessions_text))\(if $o.bounds != "" then " with\($o.bounds)" else "" end)\n") | stderr | empty

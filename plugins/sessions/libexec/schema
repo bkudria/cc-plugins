@@ -79,9 +79,7 @@ corpus=false
 extra='{"t":{},"k":{},"r":{},"f":{},"s":{"lines":0,"files":0}}'
 if [ ${#operands[@]} -gt 0 ]; then
   cc_resolve_all "${operands[@]}"
-  for file in "${CC_FILES[@]}"; do
-    printf '%s\t%s\n' "$(stat -f %z "$file" 2> /dev/null < /dev/null)" "$file"
-  done > "$tmp/list"
+  printf '%s\0' "${CC_FILES[@]}" | xargs -0 stat -f '%z%t%N' -- > "$tmp/list" 2> /dev/null
   scope="${operands[*]}"
 else
   corpus=true
@@ -97,7 +95,7 @@ else
     to=${to##* }
   fi
   # Transcripts and journals go to the list to be read; every other file is only counted by kind.
-  extra=$(find "$root" -type f -exec stat -f '%m%t%z%t%N' {} + 2> /dev/null < /dev/null |
+  extra=$(find -H "$root" -type f -exec stat -f '%m%t%z%t%N' {} + 2> /dev/null < /dev/null |
     awk -F '\t' -v from="$from" -v to="$to" -v list="$tmp/list" '
       BEGIN { printf "" > list }
       {
@@ -184,4 +182,4 @@ if [ -z "$out" ]; then
   fi
   exit 0
 fi
-printf '%s\n' "$out"
+cc_print_line "$out"

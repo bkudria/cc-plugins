@@ -543,6 +543,20 @@ L12
 cc-sessions: output stopped at --limit 3 after 3 records; 47 more left out; continue with --since L14
 ```
 
+With `--agents` the records come from several files, so the notice continues by time: record 47 and the
+next one are both at 10:20:10, so following the notice repeats one record and loses none.
+
+```scrut
+$ cc-sessions conversation a7c3e9f --agents --events --limit 47 2> notice.txt | tail -n 1 | cut -f1-4; cat notice.txt
+> cc-sessions conversation a7c3e9f --agents --events --since 2026-10-30T10:20:10Z > rest.txt; wc -l < rest.txt | tr -d ' '; head -n 1 rest.txt | cut -f1-4
+> cc-sessions conversation a7c3e9f --agents --events --max-chars 0 | tail -n 29 | cmp - rest.txt && echo same
+L2\ta7c3e9b2d4f6a8c01\t2026-10-30T10:20:10Z\tevent (escaped)
+cc-sessions: output stopped at --limit 47 after 47 records; 28 more left out; continue with --since 2026-10-30T10:20:10Z, which repeats the 1 record already shown at that second
+29
+L2\ta7c3e9b2d4f6a8c01\t2026-10-30T10:20:10Z\tevent (escaped)
+same
+```
+
 With jq 1.7 first on PATH the records are the same.
 
 ```scrut

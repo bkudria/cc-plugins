@@ -78,8 +78,9 @@ entry of each `message.id`; context = input + cache creation + cache read.
 | `ALPHA/tool-results/b4k7m2q9x.txt` (as a path) | — | ALPHA |
 | `RELOC/tool-results/c8n2v5x1q.txt` (as a path) | — | RELOC |
 
-With `CLAUDE_CODE_SESSION_ID=a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e`, the current session is `ALPHA.jsonl` plus the eight
-`.jsonl` transcripts under `ALPHA/` (six in `subagents/`, two in `WF/`; `WF/journal.jsonl` is not a transcript).
+With `CLAUDE_CODE_SESSION_ID=a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e`, the current session is ALPHA: `current` resolves
+to `ALPHA.jsonl`, and `list` and `search` mark its row. `ALPHA/` holds eight `.jsonl` transcripts (six in
+`subagents/`, two in `WF/`; `WF/journal.jsonl` is not a transcript).
 
 ## ALPHA (current era, 2.1.314)
 

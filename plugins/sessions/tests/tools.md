@@ -489,6 +489,18 @@ L15
 cc-sessions: output stopped at --limit 2 after 2 records; 11 more left out; continue with --since L17
 ```
 
+With `--agents` the calls come from several files, so the notice continues with the next call's time.
+
+```scrut
+$ cc-sessions tools a7c3e9f --agents --limit 13 2> notice.txt | tail -n 1 | cut -f1-4; cat notice.txt
+> cc-sessions tools a7c3e9f --agents --since 2026-10-30T10:20:10Z | cut -f1,2
+L64\tmain\t2026-10-30T10:20:02Z\tWorkflow (escaped)
+cc-sessions: output stopped at --limit 13 after 13 records; 3 more left out; continue with --since 2026-10-30T10:20:10Z
+L2\ta7c3e9b2d4f6a8c01 (escaped)
+L2\ta0f1e2d3c4b5a6978 (escaped)
+L3\ta9e8d7c6b5a4f3e21 (escaped)
+```
+
 With jq 1.7 first on PATH the records are the same.
 
 ```scrut

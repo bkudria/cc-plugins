@@ -171,6 +171,28 @@ jq: error (at <unknown>): --since/--until takes a handle (L120), a timestamp (20
 [5]
 ```
 
+So is a timestamp that names no real date or time: 2026 has no 29 February, April has no 31st, and no minute has a
+60th second.
+
+```scrut
+$ for v in 2026-02-30 2026-02-29 2026-02-29T10:00Z 2026-04-31T10:00:00Z 2026-10-30T10:00:60Z 2026-10-30T24:00:00Z 2028-02-29 2026-12-31T23:59:59.999Z; do
+>   cc-sessions jq '"\($v) \(try (s::bound($v) | .from | todate) catch "refused")"' -- -n -r --arg v "$v"; done
+2026-02-30 refused
+2026-02-29 refused
+2026-02-29T10:00Z refused
+2026-04-31T10:00:00Z refused
+2026-10-30T10:00:60Z refused
+2026-10-30T24:00:00Z refused
+2028-02-29 2028-02-29T00:00:00Z
+2026-12-31T23:59:59.999Z 2026-12-31T23:59:59Z
+```
+
+```scrut {output_stream: stderr}
+$ cc-sessions list --since 2026-02-30
+cc-sessions: --since takes a handle (L120), a timestamp (2026-10-30T10:00:04Z, 2026-10-30T10:00Z, 2026-10-30) or an age (90s, 30m, 2h, 7d, 1w), got "2026-02-30"; pass one of those forms; see cc-sessions list --help
+[2]
+```
+
 `s::within(since; until)` keeps rows or records inside both bounds (null for none), inclusive; time is compared to the second, and rows with no timestamp at or before them never match a time bound.
 
 ```scrut
@@ -762,17 +784,8 @@ L60
 
 ## Finding related files
 
-`cc_agent_transcript` finds an agent's transcript in the session directory, else anywhere under the data root (a resumed session keeps using the original's directory).
-
-```scrut
-$ (. "$CC_TEST_ROOT/lib/common.sh"; cc_agent_transcript "$ALPHA" a7c3e9b2d4f6a8c01; cc_agent_transcript "$RESUMED" a4c6e8f0a2b4c6d8e; cc_agent_transcript "$ALPHA" a0f1e2d3c4b5a6978; cc_agent_transcript "$ALPHA" nosuchagent || echo "not found $?") | cc_test_rel
-<root>/projects/-tmp-sessions-fixture-alpha/a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e/subagents/agent-a7c3e9b2d4f6a8c01.jsonl
-<root>/projects/-tmp-sessions-fixture-beta/b2d4f6a8-1c3e-4a5b-8d7f-9e0a1b2c3d4e/subagents/agent-a4c6e8f0a2b4c6d8e.jsonl
-<root>/projects/-tmp-sessions-fixture-alpha/a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e/subagents/workflows/wf_5d1c9a7e-3b2/agent-a0f1e2d3c4b5a6978.jsonl
-not found 1
-```
-
-`cc_run_dir` finds a workflow run's directory the same way.
+`cc_run_dir` finds a workflow run's directory in the session directory, else anywhere under the data root (a resumed
+session keeps using the original's directory).
 
 ```scrut
 $ (. "$CC_TEST_ROOT/lib/common.sh"; cc_run_dir "$ALPHA" wf_5d1c9a7e-3b2; cc_run_dir "$BETA" wf_5d1c9a7e-3b2; cc_run_dir "$BETA" wf_nothing || echo "not found $?") | cc_test_rel
@@ -832,15 +845,6 @@ $ M=$CC_TEST_TMP/many/projects/-tmp-many && mkdir -p "$M" && printf '{"type":"us
 ```scrut {timeout: 4s}
 $ (. "$CC_TEST_ROOT/lib/common.sh"; cc_agent_files "$M/s1.jsonl") | cc_test_rel "$M"
 <root>/agent-a1b2c3d4.jsonl
-```
-
-`cc_current_files` is the current session: its main transcript and every transcript under its directory.
-
-```scrut
-$ (. "$CC_TEST_ROOT/lib/common.sh"; CLAUDE_CODE_SESSION_ID=a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e; cc_current_files | wc -l | tr -d ' '; cc_current_files | head -n 1 | cc_test_rel; CLAUDE_CODE_SESSION_ID=; cc_current_files | wc -l | tr -d ' ')
-9
-<root>/projects/-tmp-sessions-fixture-alpha/a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e.jsonl
-0
 ```
 
 ## Labels and origin
@@ -1077,14 +1081,6 @@ $ (. "$CC_TEST_ROOT/lib/common.sh"; cd /tmp && cc_abs_path ./x/y//; cc_abs_path 
 /
 ```
 
-`cc_jq <filter> [<jq-option>...] -- <file>...` runs a filter once per transcript object, as a command does.
-
-```scrut
-$ (. "$CC_TEST_ROOT/lib/common.sh"; cc_jq '[.kind, (s::totals.output)] | s::tsv' -r -- "$ALPHA.jsonl" "$ALPHA/subagents/agent-aplanner-5e1f0a2b3c4d5e6f.jsonl")
-main\t1487 (escaped)
-subagent\t40 (escaped)
-```
-
 `cc_module_program <name> <call>` is the program a command runs: the text of `lib/<name>.jq`, then the call. A command
 module is never imported, because jq 1.8.2 aborts when an imported module calls an `s::` function that calls another.
 
@@ -1096,16 +1092,17 @@ $ L=$CC_TEST_TMP/modlib && mkdir -p "$L" "$CC_TEST_TMP/jq17" && cp "$CC_TEST_ROO
 15
 ```
 
-The wrapper's own cost does not grow by a process per file: 400 agent transcripts with their meta files read quickly.
+The wrapper's own cost grows in proportion to the files, with no process per file: 3000 agent transcripts with their
+meta files read in a few seconds, where work that grew with the square of their number would take minutes.
 
 ```scrut
 $ A=$CC_TEST_TMP/metas/projects/-tmp-m/s1/subagents && mkdir -p "$A"
-> for i in $(seq 1 400); do id=$(printf 'a%016x' "$i"); printf '{"type":"user","sessionId":"s1","message":{"content":"x"}}\n' > "$A/agent-$id.jsonl"; printf '{"agentType":"Explore","description":"d\\t%s"}\n' "$i" > "$A/agent-$id.meta.json"; done
+> for i in $(seq 1 3000); do printf -v id 'a%016x' "$i"; printf '{"type":"user","sessionId":"s1","message":{"content":"x"}}\n' > "$A/agent-$id.jsonl"; printf '{"agentType":"Explore","description":"d\\t%s"}\n' "$i" > "$A/agent-$id.meta.json"; done
 ```
 
-```scrut {timeout: 2s}
+```scrut {timeout: 30s}
 $ (. "$CC_TEST_ROOT/lib/common.sh"; cc_jq_program 'import "sessions" as s; [s::transcripts | .meta.description, .bytes] | [length, .[-2:]]' -c -- "$A"/*.jsonl)
-[800,["d\t400",59]]
+[6000,["d\t3000",59]]
 ```
 
 `cc_one_session <count>` is the usage error of a command that reads one `<session>` and got none or several.
@@ -1195,7 +1192,7 @@ L83\t0.4321\tclaude-haiku-5-5,claude-opus-5-5\t21\t245300\t230 (escaped)
 The jq wrapper always hands jq absolute paths.
 
 ```scrut
-$ (. "$CC_TEST_ROOT/lib/common.sh"; cd "$P/-tmp-sessions-fixture-beta" && cc_jq '.file' -r -- b9e1c3a5-7d2f-4e6a-8b0c-1d3e5f7a9b2c.jsonl) | cc_test_rel
+$ (. "$CC_TEST_ROOT/lib/common.sh"; cd "$P/-tmp-sessions-fixture-beta" && cc_jq_program 'import "sessions" as s; s::transcripts | .file' -r -- b9e1c3a5-7d2f-4e6a-8b0c-1d3e5f7a9b2c.jsonl) | cc_test_rel
 <root>/projects/-tmp-sessions-fixture-beta/b9e1c3a5-7d2f-4e6a-8b0c-1d3e5f7a9b2c.jsonl
 ```
 
