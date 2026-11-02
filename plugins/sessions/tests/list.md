@@ -123,7 +123,7 @@ Another origin name selects sessions with that entrypoint; here there are none.
 
 ```scrut
 $ cc-sessions list --origin claude-vscode 2>&1 | cc_test_rel
-cc-sessions: no sessions with --origin claude-vscode; 13 sessions checked in <root>/projects
+cc-sessions: no sessions with --origin claude-vscode; 12 sessions checked in <root>/projects
 ```
 
 A malformed origin is a usage error.
@@ -165,8 +165,8 @@ A later human input does not match, and neither does an assistant reply.
 
 ```scrut
 $ cc-sessions list 'wrap up' 2>&1 | cc_test_rel; cc-sessions list 'forty fixes' 2>&1 | cc_test_rel
-cc-sessions: no sessions match "wrap up" with --origin cli; 13 sessions checked in <root>/projects
-cc-sessions: no sessions match "forty fixes" with --origin cli; 13 sessions checked in <root>/projects
+cc-sessions: no sessions match "wrap up" with --origin cli; 12 sessions checked in <root>/projects
+cc-sessions: no sessions match "forty fixes" with --origin cli; 12 sessions checked in <root>/projects
 ```
 
 It matches the session id.
@@ -190,14 +190,14 @@ The pattern is literal: `.` is not a wildcard.
 
 ```scrut
 $ cc-sessions list 'alpha.fixture' 2>&1 | cc_test_rel
-cc-sessions: no sessions match "alpha.fixture" with --origin cli; 13 sessions checked in <root>/projects
+cc-sessions: no sessions match "alpha.fixture" with --origin cli; 12 sessions checked in <root>/projects
 ```
 
 A stub's title never makes it a row.
 
 ```scrut
 $ cc-sessions list 'Stub session title' --origin all 2>&1 | cc_test_rel
-cc-sessions: no sessions match "Stub session title" with --origin all; 13 sessions checked in <root>/projects
+cc-sessions: no sessions match "Stub session title" with --origin all; 12 sessions checked in <root>/projects
 ```
 
 A pattern that starts with `-` goes after `--`.
@@ -243,9 +243,9 @@ A failed Skill call, a skill that is only listed, and a slash command without a 
 
 ```scrut
 $ cc-sessions list --skill nope 2>&1 | cc_test_rel; cc-sessions list --skill gamma-helper 2>&1 | cc_test_rel; cc-sessions list --skill effort 2>&1 | cc_test_rel
-cc-sessions: no sessions with --skill nope --origin cli; 13 sessions checked in <root>/projects
-cc-sessions: no sessions with --skill gamma-helper --origin cli; 13 sessions checked in <root>/projects
-cc-sessions: no sessions with --skill effort --origin cli; 13 sessions checked in <root>/projects
+cc-sessions: no sessions with --skill nope --origin cli; 12 sessions checked in <root>/projects
+cc-sessions: no sessions with --skill gamma-helper --origin cli; 12 sessions checked in <root>/projects
+cc-sessions: no sessions with --skill effort --origin cli; 12 sessions checked in <root>/projects
 ```
 
 `SKILLS` is a copy of the fixtures where BETA has one sub-agent that loads `beta-helper` and an internal compaction
@@ -299,7 +299,7 @@ b2d4f6a8-1c3e-4a5b-8d7f-9e0a1b2c3d4e\texplore-helper - +1 agents (escaped)
 
 ```scrut
 $ CLAUDE_CONFIG_DIR=$SKILLS cc-sessions list --skill hidden-helper 2>&1 | cc_test_rel "$SKILLS"
-cc-sessions: no sessions with --skill hidden-helper --origin cli; 13 sessions checked in <root>/projects
+cc-sessions: no sessions with --skill hidden-helper --origin cli; 12 sessions checked in <root>/projects
 ```
 
 A data root without any agent transcript still finds main-transcript loads.
@@ -330,7 +330,7 @@ f6b8d0e2-4a6c-4e8a-b0c2-d4e6f8a0b2c4\tList the files with spaces in their names.
 
 ```scrut
 $ cc-sessions list --cwd /tmp/sessions-fixture/bet 2>&1 | cc_test_rel
-cc-sessions: no sessions with --cwd /tmp/sessions-fixture/bet --origin cli; 13 sessions checked in <root>/projects
+cc-sessions: no sessions with --cwd /tmp/sessions-fixture/bet --origin cli; 12 sessions checked in <root>/projects
 ```
 
 Any cwd of the transcript counts: RELOC moved to `elsewhere` mid-session; its `cwd` field is still the first one.
@@ -533,7 +533,17 @@ An empty answer exits 0 with nothing on stdout and a notice naming the filters a
 ```scrut
 $ out=$(cc-sessions list zzz-none --since 2026-10-01 2> err.txt); echo "exit $? stdout ${#out}"; cc_test_rel < err.txt
 exit 0 stdout 0
-cc-sessions: no sessions match "zzz-none" with --since 2026-10-01 --origin cli; 6 sessions checked in <root>/projects
+cc-sessions: no sessions match "zzz-none" with --since 2026-10-01 --origin cli; 5 sessions checked in <root>/projects
+```
+
+The number checked counts sessions as listings do, whatever their origin: STUB, a stub modified in that window, is
+not one.
+
+```scrut
+$ cc-sessions list zzz-none --since 2026-10-01 2>&1 | sed 's/.*; \([0-9]*\) sessions checked.*/\1/'
+> cc-sessions list --origin all --since 2026-10-01 --limit 0 | wc -l | tr -d ' '
+5
+5
 ```
 
 A session that a rule cannot read is left out with a notice, and the listing goes on. `BAD` holds three sessions,

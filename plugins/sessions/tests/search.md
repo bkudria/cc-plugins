@@ -96,7 +96,7 @@ Text that appears only in harness copies (skill listing, instructions, request b
 ```scrut
 $ out=$(cc-sessions search NOISE_ONLY_TERM 2> err.txt); echo "exit $? stdout ${#out}"; cc_test_rel < err.txt
 exit 0 stdout 0
-cc-sessions: no session has "NOISE_ONLY_TERM" in the default kinds with --origin cli; 13 sessions searched in <root>/projects
+cc-sessions: no session has "NOISE_ONLY_TERM" in the default kinds with --origin cli; 12 sessions searched in <root>/projects
 ```
 
 A file the user edited is content of kind `file`.
@@ -149,8 +149,8 @@ Internal agents are left out of corpus search: the transcripts fork and the prom
 
 ```scrut
 $ cc-sessions search '[cc-sessions:transcripts-fork]' 2>&1 | cc_test_rel; cc-sessions search 'SUGGESTION MODE' 2>&1 | cc_test_rel
-cc-sessions: no session has "[cc-sessions:transcripts-fork]" in the default kinds with --origin cli; 13 sessions searched in <root>/projects
-cc-sessions: no session has "SUGGESTION MODE" in the default kinds with --origin cli; 13 sessions searched in <root>/projects
+cc-sessions: no session has "[cc-sessions:transcripts-fork]" in the default kinds with --origin cli; 12 sessions searched in <root>/projects
+cc-sessions: no session has "SUGGESTION MODE" in the default kinds with --origin cli; 12 sessions searched in <root>/projects
 ```
 
 A flat-layout sub-agent's hits count toward its session; the copies in `progress` entries do not.
@@ -490,6 +490,17 @@ cc-sessions: output stopped at --limit 2 after 2 records; 3 more left out; conti
 L70\tmain\tassistant (escaped)
 L71\tmain\tprompt (escaped)
 L2\tadoes-the-lexer-0a1b2c3d4e5f6a7b\tfrom-parent (escaped)
+```
+
+That holds on every page of a search of several files, also one whose hits all come from one session: here BETA's
+hits at L12 and L13 come before the bound, and `--since L7` would show them again.
+
+```scrut
+$ cc-sessions search include b2d4 b9e1 --since 2026-07-20T14:00:03Z --limit 1 2> notice.txt | hits; grep 'output stopped' notice.txt
+> cc-sessions search include b2d4 b9e1 --since 2026-07-20T14:00:05Z 2>/dev/null | hits
+L6\tb9e1c3a5-7d2f-4e6a-8b0c-1d3e5f7a9b2c\tprompt (escaped)
+cc-sessions: output stopped at --limit 1 after 1 record; 1 more left out; continue with --since 2026-07-20T14:00:05Z
+L7\tb9e1c3a5-7d2f-4e6a-8b0c-1d3e5f7a9b2c\tassistant (escaped)
 ```
 
 An unknown session is a usage error.

@@ -22,7 +22,7 @@ def _agent($calls; $journals):
      id: (.agent // (if .kind == "main" then .session else null end)),
      internal: s::is_internal,
      agent_kind: s::agent_kind,
-     call: (if .kind == "workflow-agent" then null else s::matching_call($calls) | if . then .id else null end end),
+     call: s::started_by($calls),
      journal: $j,
      label: (s::agent_label($j.label) | if . then .text else null end),
      models: (s::models | if length > 0 then join(",") else null end),
@@ -116,9 +116,7 @@ def _rows:
   . as $c
   | ($c.subject.lines + 1) as $after
   | ([$c.subject.calls[] | . as $call
-      | {call: $call,
-         agent: (first($c.agents[] | select(.call == $call.id))
-                 // first($c.agents[] | select($call.agent_id != null and .id == $call.agent_id)) // null)}]
+      | {call: $call, agent: ($call | s::started_agent($c.agents))}]
      | _groups(if .agent then "file:" + .agent.file elif .call.agent_id then "id:" + .call.agent_id else "call:" + .call.id end)) as $agent_groups
   | ($c.subject.workflows | map(select(.run_id != null)) | _groups(.run_id)) as $run_groups
   | [ ($agent_groups[] | _call_row([.items[].call]; .items[0].agent)),

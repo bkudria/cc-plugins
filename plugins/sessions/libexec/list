@@ -42,7 +42,7 @@ When --limit or --max-chars stops the listing, it stops before sessions that sha
 time, or shows them all when they alone fill the page; a notice says to continue with --until
 <modified of the next session>. A session that cannot be read is left out with a notice.
 Empty answer: nothing on stdout; a notice names the pattern, the options and how many sessions
-were checked.
+were checked: those modified inside --since and --until, of any origin.
 Exit status: 0 answered, also when empty; 1 no transcripts directory, or rg missing; 2 usage
 error (unknown option, bad value).
 EOF
@@ -170,20 +170,17 @@ human_re='"type":"user","message":\{"role":"user","content":(?:"|\[\{"type":"(?:
 local_command_re='"type":"system","subtype":"local_command"'
 titles_re='^\{"type":"(?:custom-title|ai-title|agent-name|summary)"'
 sdk_res=(-e '"entrypoint":"sdk' -e '"promptSource":"sdk"')
-content_re='"type":"(?:user","message|assistant",")'
 
 since_from=${since%% *} until_to=${until##* }
 cands=$(cc_sessions_by_mtime "$since_from" "$until_to")
-total=0
-[ -n "$cands" ] && total=$(($(printf '%s\n' "$cands" | wc -l)))
 work=$(mktemp -d "${TMPDIR:-/tmp}/cc-sessions-list.XXXXXX") || cc_fail "cannot create a temporary directory" "check TMPDIR"
 trap 'rm -rf "$work"' EXIT
+printf '%s\n' "$cands" | cut -f 4- > "$work/mains.txt"
 batch_agents=$work/batch-agents.tsv
 if [ -n "$skill" ] && [ -n "$cands" ]; then
   skill_hits=$work/hits.tsv
   # The candidates and their agents, also those their calls name in another session's directory, as
   # "<main>TAB<file>" lines whose file left a load marker.
-  printf '%s\n' "$cands" | cut -f 4- > "$work/mains.txt"
   cc_corpus_agent_map > "$work/agents.tsv"
   { awk '{ print $0 "\t" $0 }' "$work/mains.txt"
     awk -F '\t' 'FILENAME == ARGV[1] { want[$0] = 1; next } $1 in want' "$work/mains.txt" "$work/agents.tsv"; } > "$work/pairs.tsv"
@@ -227,7 +224,8 @@ cc_list_batch() {
     cc_list_paths
   fi
   [ ${#paths[@]} -gt 0 ] || return 0
-  cc_list_keep "$(cc_rg -l -m 1 -e "$content_re" -- "${paths[@]}")"
+  printf '%s\n' "${paths[@]}" > "$work/batch-paths.txt"
+  cc_list_keep "$(cc_sessions_among "$work/batch-paths.txt")"
   cc_list_paths
   : > "$batch_agents"
   if [ -n "$skill" ] && [ ${#paths[@]} -gt 0 ]; then
@@ -265,6 +263,7 @@ done
 cc_page_end
 
 if [ -z "$CC_PAGE_STOP" ] && [ "$CC_PAGE_SHOWN" -eq 0 ]; then
-  cc_notice "no sessions${pattern:+ match \"$pattern\"} with$filters --origin $origin; $total sessions checked in $root"
+  checked=$(cc_sessions_among "$work/mains.txt" | wc -l)
+  cc_notice "no sessions${pattern:+ match \"$pattern\"} with$filters --origin $origin; $((checked)) sessions checked in $root"
 fi
 exit 0

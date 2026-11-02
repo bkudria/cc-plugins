@@ -244,9 +244,10 @@ rejected it: the result starts `The user doesn't want to proceed with this tool 
 error.
 
 The status is the call's own outcome. An Agent, Task or Workflow call's result in `tools` names the agent or run it
-started and that one's status by `s::lifecycle_status`, the rule `agents` uses (see Sub-agents): the agent is linked by
-its id, its meta's `toolUseId`, or a teammate's team and name, and only its last lines are read for the transcript's
-end. An agent killed or failed after its call returned is therefore not an error of the call.
+started and that one's status by `s::lifecycle_status`, whatever the call's own status, as `agents` gives them (see
+Sub-agents). The agent is linked as `agents` links it, through `s::started_by` and `s::started_agent`: by its id, its
+meta's `toolUseId`, a teammate's team and name, or its delegation prompt. Only an agent's first user entry and its
+last lines are read. An agent killed or failed after its call returned is therefore not an error of the call.
 
 A tool result is persisted only when its text **starts** with:
 
@@ -270,7 +271,9 @@ the marker mid-result is not a persisted output.
 - Sub-agent label: its `.meta.json` `description` or `name`, else its journal label, else its delegation prompt, truncated.
 - Origin: `sdk` when `entrypoint` starts with `sdk` or a prompt's `promptSource` is `sdk`; otherwise the `entrypoint`
   value, or `cli` when there is none. Listings show `cli` sessions unless asked for others.
-- Stub sessions (no user or assistant entry) are left out of listings.
+- Stub sessions (no user or assistant entry) are left out of listings, and of the number of sessions that the
+  empty answer of `list` or `search` across sessions says it read: those modified inside `--since` and `--until`,
+  of any origin.
 - The current session is the one whose id is `CLAUDE_CODE_SESSION_ID`: `current` names its main transcript, and
   `list` and `search` mark its row.
 
@@ -297,10 +300,11 @@ the marker mid-result is not a persisted output.
 - Output budget: stdout stops at a record boundary after `--max-chars` characters (default 20000; 0 removes the limit;
   characters, not bytes, whatever the locale; a record counts its newline) or `--limit` records (no default unless the
   command's help names one). A one-line stderr notice then states how many records were left out and how to continue:
-  - records from one file whose handles, shown and left out, run forward: `--since L<next>`;
-  - records shown and left out from several files: `--since <time of the next record>`, unless a record left out has
-    an earlier time or none; `--since` is inclusive, so the notice says how many records already shown carry that
-    second and will repeat;
+  - the output of a command that read one file, when its handles, shown and left out, run forward: `--since L<next>`;
+  - the output of a command that read several files: `--since <time of the next record>` on every page, also on one
+    whose records all come from one of them, unless a record left out has an earlier time or none; `--since` is
+    inclusive, so the notice says how many records already shown carry that second and will repeat. Such a command
+    says so with `cc_several_files` before its first record;
   - otherwise a larger `--limit` or `--max-chars`.
 - A cross-session command with a default limit applies `--limit` and `--max-chars` itself, stops reading at a row
   boundary and writes past the dispatcher's filter. A page never ends inside the sessions that share one modified

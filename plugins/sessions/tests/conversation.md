@@ -598,6 +598,18 @@ L2\ta7c3e9b2d4f6a8c01\t2026-10-30T10:20:10Z\tevent (escaped)
 same
 ```
 
+So does a page whose records, shown and left out, all come from one agent: a handle bound would apply to the
+session's transcript as well.
+
+```scrut {output_stream: combined}
+$ cc-sessions conversation a7c3e9f --agents --since 2026-10-30T10:22:00Z --until 2026-10-30T10:22:30Z --limit 1 2>&1 | cut -f1-3
+> cc-sessions conversation a7c3e9f --agents --since 2026-10-30T10:22:05Z --until 2026-10-30T10:22:30Z | cut -f1-3
+L1\ta0f1e2d3c4b5a6978\t2026-10-30T10:22:03Z (escaped)
+cc-sessions: output stopped at --limit 1 after 1 record; 2 more left out; continue with --since 2026-10-30T10:22:05Z
+L2\ta0f1e2d3c4b5a6978\t2026-10-30T10:22:05Z (escaped)
+L4\ta0f1e2d3c4b5a6978\t2026-10-30T10:22:10Z (escaped)
+```
+
 With jq 1.7 first on PATH the records are the same.
 
 ```scrut

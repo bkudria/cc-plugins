@@ -916,6 +916,14 @@ def matching_call($calls):
       ($calls[] | select($prompt != null and .prompt == $prompt))
     ) // null;
 
+#: The id of the call in $calls (from s::agent_calls) that started this agent transcript, by s::matching_call; null when none did and for a workflow agent, which its run started.
+def started_by($calls): if .kind == "workflow-agent" then null else matching_call($calls) | if . then .id else null end end;
+
+#: The agent that this call (a record of s::agent_calls) started, among $agents ([{id, call}], call being the agent's s::started_by): the first whose call it is, else the first whose id is the call's agent id; null if none.
+def started_agent($agents):
+  . as $call
+  | first($agents[] | select(.call == $call.id)) // first($agents[] | select($call.agent_id != null and .id == $call.agent_id)) // null;
+
 def _last_entry(f): [entries[] | select(f)] | last;
 
 #: An agent transcript's label: {text, source, l}: its meta description or name (source meta), else $journal_label (journal), else its delegation prompt (prompt); null if none.

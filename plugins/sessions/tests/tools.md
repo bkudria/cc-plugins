@@ -367,7 +367,34 @@ L4\ta4b5c6d completed (escaped)
 L6\ta7e8f9a completed (escaped)
 L11\ta0b1c2d completed (escaped)
 L13\ta0b1c2d completed (escaped)
-L15\t[Request interrupted by user for tool use] (escaped)
+L15\ta3c4d5e killed (escaped)
+```
+
+A call is linked to its agent as `agents` links it, also by the agent's delegation prompt alone, as for the
+interrupted call at L15, and the result names that agent whatever the call's own status. In `LINK`, `11110001`'s
+Agent call at L2 was rejected, yet its agent ran: its meta holds no `toolUseId` and its prompt is the call's. The
+call at L4 has no result, and its agent's meta names it.
+
+```scrut
+$ LINK=$CC_TEST_TMP/link && LS=$LINK/projects/-tmp-link/11110001-0000-4000-8000-000000000001 && mkdir -p "$LS/subagents"
+> e='"sessionId":"11110001-0000-4000-8000-000000000001","cwd":"/tmp/link"'
+> printf '%s\n' '{"type":"user","message":{"role":"user","content":"Survey the trees."},"uuid":"11111001-0000-4000-8000-000000000001","timestamp":"2026-09-20T10:00:01.000Z",'"$e"'}' \
+>   '{"type":"assistant","message":{"id":"msg_link1","role":"assistant","model":"claude-opus-5-5","content":[{"type":"tool_use","id":"toolu_link1","name":"Agent","input":{"subagent_type":"Explore","description":"Survey the first tree","prompt":"Survey the first tree."}}],"usage":{"input_tokens":1,"output_tokens":1}},"uuid":"11111001-0000-4000-8000-000000000002","timestamp":"2026-09-20T10:00:02.000Z",'"$e"'}' \
+>   '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_link1","content":"The user doesn'"'"'t want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.","is_error":true}]},"uuid":"11111001-0000-4000-8000-000000000003","timestamp":"2026-09-20T10:00:30.000Z",'"$e"'}' \
+>   '{"type":"assistant","message":{"id":"msg_link2","role":"assistant","model":"claude-opus-5-5","content":[{"type":"tool_use","id":"toolu_link2","name":"Agent","input":{"subagent_type":"Explore","description":"Survey the second tree","prompt":"Survey the second tree."}}],"usage":{"input_tokens":1,"output_tokens":1}},"uuid":"11111001-0000-4000-8000-000000000004","timestamp":"2026-09-20T10:00:31.000Z",'"$e"'}' \
+>   > "$LS.jsonl"
+> for n in 1 2; do a=a111100000000000$n; printf '%s\n' \
+>   '{"type":"user","isSidechain":true,"agentId":"'"$a"'","message":{"role":"user","content":"Survey the '"$([ $n = 1 ] && echo first || echo second)"' tree."},"uuid":"1111a00'"$n"'-0000-4000-8000-000000000001","timestamp":"2026-09-20T10:00:0'"$((n * 2 + 1))"'.000Z",'"$e"'}' \
+>   '{"type":"assistant","isSidechain":true,"agentId":"'"$a"'","message":{"id":"msg_link_a'"$n"'","role":"assistant","model":"claude-haiku-5-5","content":[{"type":"text","text":"Tree '"$n"' surveyed."}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":5}},"uuid":"1111a00'"$n"'-0000-4000-8000-000000000002","timestamp":"2026-09-20T10:00:2'"$n"'.000Z",'"$e"'}' \
+>   > "$LS/subagents/agent-$a.jsonl"; done
+> printf '%s\n' '{"agentType":"Explore","description":"Survey the first tree"}' > "$LS/subagents/agent-a1111000000000001.meta.json"
+> printf '%s\n' '{"agentType":"Explore","description":"Survey the second tree","toolUseId":"toolu_link2"}' > "$LS/subagents/agent-a1111000000000002.meta.json"
+> CLAUDE_CONFIG_DIR=$LINK cc-sessions tools 11110001 | cut -f1,4,5,8
+> CLAUDE_CONFIG_DIR=$LINK cc-sessions agents 11110001 | awk -F '\t' '$1 ~ /^L/ { print $1 "\t" $3 " " $5 }'
+L2\tAgent\tdenied\ta1111000000000001 denied (escaped)
+L4\tAgent\tnone\ta1111000000000002 completed (escaped)
+L2\ta1111000000000001 denied (escaped)
+L4\ta1111000000000002 completed (escaped)
 ```
 
 An agent transcript given as the operand has its id as src.
@@ -587,6 +614,16 @@ cc-sessions: output stopped at --limit 13 after 13 records; 3 more left out; con
 L2\ta7c3e9b2d4f6a8c01 (escaped)
 L2\ta0f1e2d3c4b5a6978 (escaped)
 L3\ta9e8d7c6b5a4f3e21 (escaped)
+```
+
+Whether the calls come from several files is a property of the command, not of one page: a page whose calls, shown
+and left out, all come from the session's own transcript continues by time too.
+
+```scrut {output_stream: combined}
+$ cc-sessions tools a7c3e9f --agents --until 2026-10-30T10:01:00Z --limit 2 2>&1 | cut -f1-3
+L12\tmain\t2026-10-30T10:00:13Z (escaped)
+L15\tmain\t2026-10-30T10:00:20Z (escaped)
+cc-sessions: output stopped at --limit 2 after 2 records; 4 more left out; continue with --since 2026-10-30T10:00:24Z
 ```
 
 With jq 1.7 first on PATH the records are the same.

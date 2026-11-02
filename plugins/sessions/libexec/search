@@ -190,6 +190,7 @@ if [ ${#sessions[@]} -gt 0 ]; then
       done
     done
   fi
+  [ ${#files[@]} -eq 1 ] || cc_several_files
   cc_lines "$(cc_rg -l "$rg_case" "${match_res[@]}" -- "${files[@]}")"
   hit_files=(${CC_LINES[@]+"${CC_LINES[@]}"})
   opts=$("$jq_bin" -c --argjson since "${since:-null}" --argjson until "${until:-null}" --argjson width "$width" \
@@ -250,10 +251,9 @@ awk -F '\t' 'FILENAME == ARGV[1] { pos[$2] = $1; print; next } ($1 in pos) { pri
 # transcripts of the sessions at positions <first> up to <end> name but that sit with another session.
 cc_search_elsewhere() {
   sed -n "$(($1 + 1)),$2p" "$work/mains.tsv" > "$work/batch-mains.tsv"
-  cc_lines "$(cut -f 2- "$work/batch-mains.tsv")"
-  [ ${#CC_LINES[@]} -gt 0 ] || return 0
+  cut -f 2- "$work/batch-mains.tsv" > "$work/batch-paths.txt"
   awk -F '\t' 'FILENAME == ARGV[1] { pos[$2] = $1; next } ($1 in pos) { print pos[$1] "\t" $2 }' \
-    "$work/batch-mains.tsv" <(cc_corpus_elsewhere "$work/agents.tsv" "${CC_LINES[@]}")
+    "$work/batch-mains.tsv" <(cc_corpus_elsewhere "$work/agents.tsv" "$work/batch-paths.txt")
 }
 
 # Prints the rows ("<pos>TAB<record>") of the sessions whose files are listed in $1 ("<pos>TAB<file>").
@@ -344,6 +344,8 @@ fi
 cc_page_end
 if [ -z "$CC_PAGE_STOP" ] && [ "$CC_PAGE_SHOWN" -eq 0 ]; then
   filters=${cwd:+ --cwd $cwd}${since_text:+ --since $since_text}${until_text:+ --until $until_text}
-  cc_notice "no session has $("$jq_bin" -n --arg t "$text" '$t') in $kinds_text with$filters --origin $origin; $total sessions searched in $root"
+  cut -f 2- "$work/mains.tsv" > "$work/mains.txt"
+  checked=$(cc_sessions_among "$work/mains.txt" | wc -l)
+  cc_notice "no session has $("$jq_bin" -n --arg t "$text" '$t') in $kinds_text with$filters --origin $origin; $((checked)) sessions searched in $root"
 fi
 exit 0

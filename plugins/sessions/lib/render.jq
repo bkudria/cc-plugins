@@ -101,9 +101,9 @@ def size:
   else .chars end;
 
 def result($w):
-  if .status == "none" then null
+  if (.name | IN("Agent", "Task", "Workflow")) and .started != null then "\(.started.id) \(.started.status)"
+  elif .status == "none" then null
   elif .name == "AskUserQuestion" and .answer != null then .answer | s::trunc($w)
-  elif (.name | IN("Agent", "Task", "Workflow")) and .started != null then "\(.started.id) \(.started.status)"
   elif .status == "denied" and .feedback != null then .feedback | s::trunc($w)
   elif .persisted != null then .persisted.path // .persisted.stated_path
   else .text | s::trunc($w) end;

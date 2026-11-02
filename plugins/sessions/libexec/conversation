@@ -107,6 +107,7 @@ if [ $agents -eq 1 ] && [ "$CC_KIND" = main ]; then
   files+=(${CC_LINES[@]+"${CC_LINES[@]}"})
   [ ${#files[@]} -gt 1 ] && what+=" and its agent transcripts"
 fi
+[ ${#files[@]} -eq 1 ] || cc_several_files
 
 filters=''
 [ -n "$since_text" ] && filters+=" --since $since_text"

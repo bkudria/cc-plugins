@@ -1254,6 +1254,23 @@ $ (. "$CC_TEST_ROOT/lib/common.sh"; cc_corpus_agent_map | wc -l | tr -d ' '; cc_
 <root>/projects/-tmp-sessions-fixture-flat/c4e6a8b0-2d4f-4a6c-9e8a-0b2c4d6e8f1a.jsonl\t<root>/projects/-tmp-sessions-fixture-flat/agent-9a0b1c2d.jsonl (escaped)
 ```
 
+`cc_corpus_elsewhere <agent-map> <mains> [<files>]` reads its lists from files, one path per line: the main
+transcripts to look in and, when given, the only agent files to look for. It prints, as `<main>TAB<file>`, the files
+of the map that a listed main transcript names but that the map gives to another session: RESUMED's copy of BETA's
+call names BETA's Explore agent. Past `CC_SESSIONS_RG_FILES` main transcripts it reads the data root once instead,
+with the same answer.
+
+```scrut
+$ (. "$CC_TEST_ROOT/lib/common.sh"; cc_corpus_agent_map --journals > map.tsv; printf '%s\n' "$BETA.jsonl" "$RESUMED.jsonl" "$ALPHA.jsonl" > mains.txt
+>   printf '%s\n' "$BETA/subagents/agent-a4c6e8f0a2b4c6d8e.jsonl" > files.txt; : > none.txt
+>   cc_corpus_elsewhere map.tsv mains.txt | cc_test_rel; cc_corpus_elsewhere map.tsv mains.txt files.txt | cc_test_rel
+>   CC_SESSIONS_RG_FILES=0 cc_corpus_elsewhere map.tsv mains.txt files.txt | cc_test_rel; cc_corpus_elsewhere map.tsv mains.txt none.txt | wc -l | tr -d ' ')
+<root>/projects/-tmp-sessions-fixture-beta/b9e1c3a5-7d2f-4e6a-8b0c-1d3e5f7a9b2c.jsonl\t<root>/projects/-tmp-sessions-fixture-beta/b2d4f6a8-1c3e-4a5b-8d7f-9e0a1b2c3d4e/subagents/agent-a4c6e8f0a2b4c6d8e.jsonl (escaped)
+<root>/projects/-tmp-sessions-fixture-beta/b9e1c3a5-7d2f-4e6a-8b0c-1d3e5f7a9b2c.jsonl\t<root>/projects/-tmp-sessions-fixture-beta/b2d4f6a8-1c3e-4a5b-8d7f-9e0a1b2c3d4e/subagents/agent-a4c6e8f0a2b4c6d8e.jsonl (escaped)
+<root>/projects/-tmp-sessions-fixture-beta/b9e1c3a5-7d2f-4e6a-8b0c-1d3e5f7a9b2c.jsonl\t<root>/projects/-tmp-sessions-fixture-beta/b2d4f6a8-1c3e-4a5b-8d7f-9e0a1b2c3d4e/subagents/agent-a4c6e8f0a2b4c6d8e.jsonl (escaped)
+0
+```
+
 `cc_rg <rg-option>... -- <file>...` runs rg over any number of files without hitting the argument limit, and finding
 nothing is not an error; `cc_lines <text>` puts the non-empty lines of a text in the array `CC_LINES`, unglobbed.
 

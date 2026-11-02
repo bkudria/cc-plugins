@@ -77,6 +77,16 @@ none
 --agents
 ```
 
+The index says how a field's text is escaped, as every command writes it: CR and the other control characters too.
+
+```scrut
+$ sed -n '/^Output:/,/^Per-session/p' long.txt
+Output: one record per line, fields separated by TAB. Inside a field TAB, newline, CR and backslash
+are written \t, \n, \r and \\, and the other control characters and DEL as \u00XX (lowercase hex);
+an empty field is "-"; no header (each command's --help names its fields).
+Per-session records start with a handle L<line> into the transcript, or into the file named by
+```
+
 Per-session records name their file in the `src` field, as every command's help calls it.
 
 ```scrut
@@ -435,7 +445,7 @@ A relative `CLAUDE_CONFIG_DIR` is made absolute, even one whose name starts with
 $ mkdir -p "$CC_TEST_TMP/-cfg" && cp -Rp "$CLAUDE_CONFIG_DIR/." "$CC_TEST_TMP/-cfg/"
 > (cd "$HOME" && CLAUDE_CONFIG_DIR=.claude cc-sessions list no-session-has-this 2>&1) | cc_test_rel "$HOME"
 > (cd "$CC_TEST_TMP" && CLAUDE_CONFIG_DIR=-cfg cc-sessions list --origin all) | wc -l | tr -d ' '
-cc-sessions: no sessions match "no-session-has-this" with --origin cli; 13 sessions checked in <root>/.claude/projects
+cc-sessions: no sessions match "no-session-has-this" with --origin cli; 12 sessions checked in <root>/.claude/projects
 12
 ```
 
@@ -709,48 +719,69 @@ L1\ta (escaped)
 cc-sessions: output stopped at --limit 1 after 1 record; 2 more left out; continue with a larger --limit (0 removes the limit)
 ```
 
-Records whose first fields are a handle, a `src` and a time can come from several files, where a handle bound applies
-to each file's own lines. When the records shown and left out come from more than one file, the notice continues
-with the next record's time instead. `--since` is inclusive, so the notice says how many records already shown carry
-that second and will repeat.
+A command whose records come from several files says so before its first record, with `cc_several_files` from
+`lib/common.sh`. A handle bound applies to each file's own lines, so its notices continue with the next record's time
+instead, on every page, even one whose records all come from one of the files. `--since` is inclusive, so the notice
+says how many records already shown carry that second and will repeat. `recprobe` prints its operands as records,
+after `cc_several_files` when the first operand is `several`.
+
+```scrut
+$ printf '%s\n' '#!/bin/bash' '. "${0%/*}/../lib/common.sh"' 'case $1 in --synopsis) echo "recprobe  print records"; exit 0 ;; several) cc_several_files ;; esac' \
+>   'shift' 'printf "%b\n" "$@"' > "$PLUGIN/libexec/recprobe" && chmod +x "$PLUGIN/libexec/recprobe"
+```
 
 ```scrut {output_stream: combined}
-$ cc-sessions jq '"L1\tmain\t2026-10-30T10:00:01Z\ta", "L1\tagent\t2026-10-30T10:00:02Z\tb", "L2\tmain\t2026-10-30T10:00:02Z\tc", "L2\tagent\t2026-10-30T10:00:03Z\td"' --limit 2 -- -n -r 2>&1
+$ "$PLUGIN/bin/cc-sessions" recprobe several 'L1\tmain\t2026-10-30T10:00:01Z\ta' 'L1\tagent\t2026-10-30T10:00:02Z\tb' 'L2\tmain\t2026-10-30T10:00:02Z\tc' 'L2\tagent\t2026-10-30T10:00:03Z\td' --limit 2 2>&1
 L1\tmain\t2026-10-30T10:00:01Z\ta (escaped)
 L1\tagent\t2026-10-30T10:00:02Z\tb (escaped)
 cc-sessions: output stopped at --limit 2 after 2 records; 2 more left out; continue with --since 2026-10-30T10:00:02Z, which repeats the 1 record already shown at that second
 ```
 
 ```scrut {output_stream: combined}
-$ cc-sessions jq '"L1\tmain\t2026-10-30T10:00:01Z\ta", "L1\tagent\t2026-10-30T10:00:02Z\tb", "L2\tmain\t2026-10-30T10:00:03Z\tc"' --limit 1 -- -n -r 2>&1
+$ "$PLUGIN/bin/cc-sessions" recprobe several 'L1\tmain\t2026-10-30T10:00:01Z\ta' 'L1\tagent\t2026-10-30T10:00:02Z\tb' 'L2\tmain\t2026-10-30T10:00:03Z\tc' --limit 1 2>&1
 L1\tmain\t2026-10-30T10:00:01Z\ta (escaped)
 cc-sessions: output stopped at --limit 1 after 1 record; 2 more left out; continue with --since 2026-10-30T10:00:02Z
+```
+
+A page whose records, shown and left out, all come from one of the files continues by time too.
+
+```scrut {output_stream: combined}
+$ "$PLUGIN/bin/cc-sessions" recprobe several 'L5\tmain\t2026-10-30T10:00:01Z\ta' 'L6\tmain\t2026-10-30T10:00:02Z\tb' --limit 1 2>&1
+L5\tmain\t2026-10-30T10:00:01Z\ta (escaped)
+cc-sessions: output stopped at --limit 1 after 1 record; 1 more left out; continue with --since 2026-10-30T10:00:02Z
 ```
 
 A record left out with an earlier time, or with none, would be lost by a time bound: the notice asks for a larger
 budget instead.
 
 ```scrut {output_stream: combined}
-$ cc-sessions jq '"L1\tmain\t2026-10-30T10:00:01Z\ta", "L1\tagent\t2026-10-30T10:00:05Z\tb", "L2\tmain\t2026-10-30T10:00:03Z\tc"' --limit 1 -- -n -r 2>&1
-> cc-sessions jq '"L1\tmain\t2026-10-30T10:00:01Z\ta", "L1\tagent\t2026-10-30T10:00:05Z\tb", "L5\trun\t-\tc"' --limit 1 -- -n -r 2>&1 >/dev/null
+$ "$PLUGIN/bin/cc-sessions" recprobe several 'L1\tmain\t2026-10-30T10:00:01Z\ta' 'L1\tagent\t2026-10-30T10:00:05Z\tb' 'L2\tmain\t2026-10-30T10:00:03Z\tc' --limit 1 2>&1
+> "$PLUGIN/bin/cc-sessions" recprobe several 'L1\tmain\t2026-10-30T10:00:01Z\ta' 'L1\tagent\t2026-10-30T10:00:05Z\tb' 'L5\trun\t-\tc' --limit 1 2>&1 >/dev/null
 L1\tmain\t2026-10-30T10:00:01Z\ta (escaped)
 cc-sessions: output stopped at --limit 1 after 1 record; 2 more left out; continue with a larger --limit (0 removes the limit)
 cc-sessions: output stopped at --limit 1 after 1 record; 2 more left out; continue with a larger --limit (0 removes the limit)
-```
-
-Records of that shape that all come from one file continue with `--since L<next>`.
-
-```scrut {output_stream: combined}
-$ cc-sessions jq '"L1\tmain\t2026-10-30T10:00:01Z\ta", "L2\tmain\t2026-10-30T10:00:01Z\tb"' --limit 1 -- -n -r 2>&1
-L1\tmain\t2026-10-30T10:00:01Z\ta (escaped)
-cc-sessions: output stopped at --limit 1 after 1 record; 1 more left out; continue with --since L2
 ```
 
 A first record over the budget gives the size that fits it and, with several files, its time.
 
 ```scrut {output_stream: combined}
-$ cc-sessions jq '"L7\tmain\t2026-10-30T10:00:01Z\t" + ("x" * 100), "L1\tagent\t2026-10-30T10:00:02Z\tsmall"' --max-chars 50 -- -n -r 2>&1
+$ "$PLUGIN/bin/cc-sessions" recprobe several "L7\tmain\t2026-10-30T10:00:01Z\t$(printf 'x%.0s' $(seq 1 100))" 'L1\tagent\t2026-10-30T10:00:02Z\tsmall' --max-chars 50 2>&1
 cc-sessions: output stopped at --max-chars 50 after 0 records; 2 more left out; the next record is 130 characters; continue with --max-chars 130 --since 2026-10-30T10:00:01Z
+```
+
+Output of a command that read one file continues with `--since L<next>`, whatever its records hold.
+
+```scrut {output_stream: combined}
+$ "$PLUGIN/bin/cc-sessions" recprobe one 'L1\tmain\t2026-10-30T10:00:01Z\ta' 'L2\tmain\t2026-10-30T10:00:01Z\tb' --limit 1 2>&1
+L1\tmain\t2026-10-30T10:00:01Z\ta (escaped)
+cc-sessions: output stopped at --limit 1 after 1 record; 1 more left out; continue with --since L2
+```
+
+The dispatcher leaves no file of its own behind.
+
+```scrut
+$ ls "$TMPDIR" | grep -c '^cc-sessions' || true
+0
 ```
 
 `--max-chars` counts characters, not bytes, whatever the locale (this suite runs under `LC_ALL=C`): a record of 100

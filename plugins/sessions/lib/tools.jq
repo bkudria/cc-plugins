@@ -2,8 +2,8 @@ import "sessions" as s;
 import "render" as r;
 
 # $ARGS.named.__ends holds cc_agent_ends and cc_run_records lines. Each agent transcript becomes a
-# transcript object of its last user and assistant lines, enough to link it to a call and to tell how it
-# ended; each run record gives its run's status.
+# transcript object of its first user line and its last lines, enough to link it to a call as agents
+# does and to tell how it ended; each run record gives its run's status.
 def _ends:
   ($ARGS.named.__ends // "") | split("\n")
   | map(select(length > 0) | split("\t") | select(length >= 3) | {path: .[0], what: .[1], json: (.[2:] | join("\t"))})
@@ -11,19 +11,16 @@ def _ends:
   | map((.[0].path | s::path_info)
       + {meta: ([.[] | select(.what == "meta") | .json] | if length > 0 then join(" ") | try fromjson catch null else null end),
          record: ([.[] | select(.what == "record") | .json] | if length > 0 then join(" ") | try fromjson catch null else null end),
-         rows: ([.[] | select(.what == "line") | .json | try fromjson catch empty] | to_entries | map({l: (.key + 1), e: .value}))})
-  | {agents: [.[] | select(.kind != "file")
-              | {id: (.agent // .session), agent, tool_use_id: (.meta.toolUseId? // null), teammate: s::teammate, end: s::end_status}],
+         rows: ([(.[] | select(.what == "first")), (.[] | select(.what == "line")) | .json | try fromjson catch empty]
+                | to_entries | map({l: (.key + 1), e: .value}))})
+  | {agents: [.[] | select(.kind != "file") | s::memo | . + {id: (.agent // .session), end: s::end_status}],
      runs: ([.[] | select(.record != null)
              | {key: (.record.runId // (.file | sub("^.*/"; "") | sub("\\.json$"; ""))), value: .record.status}] | from_entries)};
 
-# The agent a call started, as agents links it: by agent id, by the meta's toolUseId, or by a
-# teammate's team and name.
-def _started_agent($ends):
+# $agents: the ends' agents, each with the id of its call among this transcript's (s::started_by).
+def _started_agent($agents):
   . as $call
-  | (first($ends.agents[]
-      | select((.agent != null and .agent == $call.agent_id) or (.tool_use_id != null and .tool_use_id == $call.id)
-          or ($call.team_name != null and .teammate.team? == $call.team_name and .teammate.name? == $call.teammate_name))) // null) as $file
+  | s::started_agent($agents) as $file
   | ($file.id // $call.agent_id) as $id
   | if $id == null then null else {id: $id, status: ($call | s::lifecycle_status(null; $file.end))} end;
 
@@ -34,13 +31,15 @@ def _started_run($ends):
 # lookup is another pass over a large transcript.
 def _calls($ends):
   [s::tool_calls] as $calls
-  | (if any($calls[]; .name == "Agent" or .name == "Task") then [s::agent_calls] | INDEX(.id) else {} end) as $agents
+  | (if any($calls[]; .name == "Agent" or .name == "Task") then [s::agent_calls] else [] end) as $agent_calls
+  | ($agent_calls | INDEX(.id)) as $agents
+  | (if ($agent_calls | length) > 0 then [$ends.agents[] | . + {call: s::started_by($agent_calls)}] else [] end) as $linkable
   | (if any($calls[]; .name == "Workflow") then [s::workflow_calls] | INDEX(.id) else {} end) as $runs
   | (if any($calls[]; .name == "AskUserQuestion") then
        [s::human_inputs | select(.kind == "answer" and .tool_use_id != null)] | INDEX(.tool_use_id)
      else {} end) as $answers
   | $calls[]
-  | . + {started: (if .name == "Agent" or .name == "Task" then $agents[.id] | if . then _started_agent($ends) else null end
+  | . + {started: (if .name == "Agent" or .name == "Task" then $agents[.id] | if . then _started_agent($linkable) else null end
                    elif .name == "Workflow" then $runs[.id] | if . then _started_run($ends) else null end
                    else null end),
          answer: $answers[.id].text};

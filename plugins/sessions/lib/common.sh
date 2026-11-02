@@ -520,9 +520,11 @@ cc_session_elsewhere_files() {
 
 # cc_agent_ends <transcript>...: enough of each agent transcript to link it to its call and to tell how
 # it ended, without reading it whole: "<path>TAB<what>TAB<json>" lines, what being meta (the line of
-# its .meta.json) or line (in file order). An agent transcript ends with its last message, so its last
-# line is enough; a split-pane teammate's session ends with up to a few dozen bookkeeping lines, so
-# its last lines that can be user or assistant entries are kept, at most 4.
+# its .meta.json), first (an agent transcript's first user entry) or line (in file order). The first
+# user entry is the delegation prompt, which links an agent whose call and meta name no id. An agent
+# transcript ends with its last message, so its last line is enough; a split-pane teammate's session
+# ends with up to a few dozen bookkeeping lines, so its last lines that can be user or assistant
+# entries are kept, at most 4.
 cc_agent_ends() {
   local file metas=() agent_transcripts=() teammate_sessions=()
   for file in "$@"; do
@@ -532,6 +534,9 @@ cc_agent_ends() {
   # shellcheck disable=SC2016 # awk program text
   [ ${#metas[@]} -eq 0 ] || printf '%s\0' "${metas[@]}" |
     xargs -0 awk '{ f = FILENAME; sub(/\.meta\.json$/, ".jsonl", f); print f "\tmeta\t" $0 }' 2> /dev/null
+  [ ${#agent_transcripts[@]} -eq 0 ] ||
+    cc_rg --no-heading --with-filename --no-line-number --field-match-separator=$'\t' -m 1 -e '"type":"user"' -- "${agent_transcripts[@]}" |
+    awk '{ k = index($0, "\t"); print substr($0, 1, k - 1) "\tfirst\t" substr($0, k + 1) }'
   # /dev/null comes first so that tail heads every file's lines with its name, even a file alone.
   {
     [ ${#agent_transcripts[@]} -eq 0 ] || printf '%s\0' "${agent_transcripts[@]}" | xargs -0 tail -n 1 /dev/null 2> /dev/null
@@ -613,6 +618,13 @@ cc_find_utf8_locale() {
       return 0
     fi
   done
+}
+
+# cc_several_files: says, before the first record, that this command's records come from several
+# files, so that the dispatcher's budget continues its output by time on every page: a handle bound
+# applies to each file's own lines.
+cc_several_files() {
+  [ -z "${CC_SESSIONS_SOURCES-}" ] || printf 'several\n' > "$CC_SESSIONS_SOURCES"
 }
 
 # cc_print_line <text>: prints one line of output. When the reader has closed stdout, the command ends
@@ -715,6 +727,12 @@ cc_sessions_by_mtime() {
     awk -F '\t' -v lo="${1:-x}" -v hi="${2:-x}" '(lo == "x" || $1 >= lo + 0) && (hi == "x" || $1 <= hi + 0) { print n++ "\t" $0 }'
 }
 
+# cc_sessions_among <mains>: those of the main transcripts listed in the file <mains> that are sessions
+# rather than stubs: the ones holding a user or an assistant entry, which listings show.
+cc_sessions_among() {
+  cc_rg_mains -l -m 1 -e '"type":"(?:user","message|assistant",")' -- "$1"
+}
+
 # cc_corpus_agent_map [--journals]: every agent transcript under the data root (with --journals, every run
 # journal too) with the main transcript it belongs to, as "<main>TAB<file>" lines sorted by file: nested
 # ones by their session directory, flat ones by their first sessionId.
@@ -731,40 +749,37 @@ cc_corpus_agent_map() {
   } | LC_ALL=C sort -t $'\t' -k 2
 }
 
-# cc_corpus_elsewhere <agent-map> <main>... [-- <file>...]: the files of the map (cc_corpus_agent_map's)
-# that the mains name by agentId (the agent's transcript) or runId (the run's files) but that the map
-# gives to another session, as "<main>TAB<file>" lines: a resumed copy's agents stay in the original's
-# directory. With files after --, only those are looked for, which spares reading every id the mains
-# name. Only JSON keys name an id, as quotes inside text are escaped. Where the map holds an agent or a
-# run twice, the one first in path order is taken.
+# cc_corpus_elsewhere <agent-map> <mains> [<files>]: the files of the map (cc_corpus_agent_map's) that the
+# main transcripts listed in the file <mains> name by agentId (the agent's transcript) or runId (the
+# run's files) but that the map gives to another session, as "<main>TAB<file>" lines: a resumed copy's
+# agents stay in the original's directory. With the file <files>, only the agent files it lists are
+# looked for, which spares reading every id the mains name. The lists are files of one path per line,
+# as bash takes time growing with the square of their number to walk that many arguments. Only JSON
+# keys name an id, as quotes inside text are escaped. Where the map holds an agent or a run twice, the
+# one first in path order is taken.
 cc_corpus_elsewhere() {
-  local map=$1 mains=() files=() ids named
-  shift
-  while [ $# -gt 0 ] && [ "$1" != -- ]; do
-    mains+=("$1")
-    shift
-  done
-  [ $# -gt 0 ] && shift && files=("$@")
-  [ ${#mains[@]} -gt 0 ] || return 0
-  if [ ${#files[@]} -gt 0 ]; then
+  local map=$1 mains=$2 files=${3-} ids named
+  [ -s "$mains" ] || return 0
+  if [ -n "$files" ]; then
+    [ -s "$files" ] || return 0
     ids=$(mktemp "${TMPDIR:-/tmp}/cc-sessions-ids.XXXXXX") || return 1
     # shellcheck disable=SC2016 # awk program text
-    printf '%s\n' "${files[@]}" | awk '{
+    awk '{
         base = $0
         sub(/^.*\//, "", base)
         if (base ~ /^agent-.*\.jsonl$/) print "\"agentId\":\"" substr(base, 7, length(base) - 12) "\""
         if (match($0, /\/subagents\/workflows\/[^\/]+\//)) print "\"runId\":\"" substr($0, RSTART + 21, RLENGTH - 22) "\""
-      }' | LC_ALL=C sort -u > "$ids"
-    named=$(cc_rg_mains -o --no-heading --with-filename -N --field-match-separator=$'\t' -F -f "$ids" -- "${mains[@]}")
+      }' "$files" | LC_ALL=C sort -u > "$ids"
+    named=$(cc_rg_mains -o --no-heading --with-filename -N --field-match-separator=$'\t' -F -f "$ids" -- "$mains")
     rm -f "$ids"
   else
-    named=$(cc_rg_mains -o --no-heading --with-filename -N --field-match-separator=$'\t' -e '"(?:agentId|runId)":"[A-Za-z0-9_-]+"' -- "${mains[@]}")
+    named=$(cc_rg_mains -o --no-heading --with-filename -N --field-match-separator=$'\t' -e '"(?:agentId|runId)":"[A-Za-z0-9_-]+"' -- "$mains")
   fi
   named=$(printf '%s\n' "$named" | sed -E 's/\t"agentId":"(.*)"$/\tagent:\1/; s/\t"runId":"(.*)"$/\trun:\1/' | LC_ALL=C sort -u)
   [ -n "$named" ] || return 0
   # Only the map's lines of the ids named reach awk, which reads a long map slowly.
   # shellcheck disable=SC2016 # awk program text
-  LC_ALL=C awk -F '\t' -v wanted_only=$((${#files[@]} > 0)) '
+  LC_ALL=C awk -F '\t' -v wanted_only="$([ -n "$files" ] && echo 1 || echo 0)" '
     FILENAME == ARGV[1] {
       file = $2
       base = file
@@ -796,24 +811,25 @@ cc_corpus_elsewhere() {
       for (i = 1; i <= n; i++) if ((!wanted_only || list[i] in wanted) && !seen[$1 SUBSEP list[i]]++) print $1 "\t" list[i]
     }' <(rg --no-config --text --no-messages -F -f <(printf '%s\n' "$named" |
       sed -E 's|^.*\tagent:(.*)$|/agent-\1.jsonl|; s|^.*\trun:(.*)$|/workflows/\1/|' | LC_ALL=C sort -u) -- "$map" 2> /dev/null < /dev/null) \
-    <(printf '%s\n' ${files[@]+"${files[@]}"}) <(printf '%s\n' "$named")
+    "${files:-/dev/null}" <(printf '%s\n' "$named")
 }
 
-# cc_rg_mains <rg-option>... -- <main>...: cc_rg over main transcripts, for output whose lines start with
-# the path and a tab. Past CC_SESSIONS_RG_FILES of them (5000), one rg over every main transcript under
-# the data root, keeping the lines of those given, is faster.
+# cc_rg_mains <rg-option>... -- <mains>: cc_rg over the main transcripts listed in the file <mains>, for
+# output whose lines start with the path and a tab. Past CC_SESSIONS_RG_FILES of them (5000), one rg over
+# every main transcript under the data root, keeping the lines of those listed, is faster.
 cc_rg_mains() {
-  local options=()
+  local options=() list
   while [ $# -gt 0 ] && [ "$1" != -- ]; do
     options+=("$1")
     shift
   done
-  shift
-  if [ $# -le "${CC_SESSIONS_RG_FILES:-5000}" ]; then
-    cc_rg "${options[@]}" -- "$@"
+  list=$2
+  if [ "$(awk 'NF { n++ } END { print n + 0 }' "$list")" -le "${CC_SESSIONS_RG_FILES:-5000}" ]; then
+    cc_lines "$(< "$list")"
+    cc_rg "${options[@]}" -- ${CC_LINES[@]+"${CC_LINES[@]}"}
     return 0
   fi
-  awk -F '\t' 'FILENAME == ARGV[1] { want[$0] = 1; next } $1 in want' <(printf '%s\n' "$@") \
+  awk -F '\t' 'FILENAME == ARGV[1] { want[$0] = 1; next } $1 in want' "$list" \
     <(cc_rg --max-depth 2 --no-ignore --hidden --glob '*.jsonl' --glob '!agent-*.jsonl' "${options[@]}" -- "$(cc_data_root)")
 }
 
@@ -823,24 +839,24 @@ cc_rg_mains() {
 # files (5000) are read as they are; past that, one rg over the data root is faster than rg over them in
 # groups, and the mains are read for ids only when an agent file matched.
 cc_corpus_matching() {
-  local pairs=$1 map=$2 mains=() agent_files=() extra='' matching
+  local pairs=$1 map=$2 lists extra='' matching
   shift 2
   [ -s "$pairs" ] || return 0
+  lists=$(mktemp -d "${TMPDIR:-/tmp}/cc-sessions-matching.XXXXXX") || return 1
   if [ "$(awk -F '\t' '!seen[$2]++ { n++ } END { print n + 0 }' "$pairs")" -le "${CC_SESSIONS_RG_FILES:-5000}" ]; then
-    cc_lines "$(cut -f 1 "$pairs" | awk '!seen[$0]++')"
-    extra=$(cc_corpus_elsewhere "$map" "${CC_LINES[@]}")
+    cut -f 1 "$pairs" | awk '!seen[$0]++' > "$lists/mains"
+    extra=$(cc_corpus_elsewhere "$map" "$lists/mains")
     cc_lines "$({ cut -f 2- "$pairs"; printf '%s\n' "$extra" | cut -f 2-; } | awk 'NF && !seen[$0]++')"
     matching=$(cc_rg -l "$@" -- "${CC_LINES[@]}")
   else
     matching=$(cc_rg -l --no-ignore --hidden --glob '*.jsonl' "$@" -- "$(cc_data_root)")
-    cc_lines "$(awk -F '\t' 'FILENAME == ARGV[1] { want[$0] = 1; next } ($2 in want) && !seen[$2]++ { print $2 }' <(printf '%s\n' "$matching") "$map")"
-    agent_files=(${CC_LINES[@]+"${CC_LINES[@]}"})
-    if [ ${#agent_files[@]} -gt 0 ]; then
-      cc_lines "$(cut -f 1 "$pairs" | awk '!seen[$0]++')"
-      mains=("${CC_LINES[@]}")
-      extra=$(cc_corpus_elsewhere "$map" "${mains[@]}" -- "${agent_files[@]}")
+    awk -F '\t' 'FILENAME == ARGV[1] { want[$0] = 1; next } ($2 in want) && !seen[$2]++ { print $2 }' <(printf '%s\n' "$matching") "$map" > "$lists/agents"
+    if [ -s "$lists/agents" ]; then
+      cut -f 1 "$pairs" | awk '!seen[$0]++' > "$lists/mains"
+      extra=$(cc_corpus_elsewhere "$map" "$lists/mains" "$lists/agents")
     fi
   fi
+  rm -rf "$lists"
   [ -n "$matching" ] || return 0
   awk -F '\t' 'FILENAME == ARGV[1] { want[$0] = 1; next } ($2 in want) && !seen[$0]++' <(printf '%s\n' "$matching") "$pairs" <(printf '%s\n' "$extra")
 }
