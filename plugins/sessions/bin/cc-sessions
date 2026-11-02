@@ -158,20 +158,20 @@ cc_need_budget_value() {
 
 # cc_budget <limit> <max-chars> <paging-fd>: copies stdin to stdout up to the budget, then counts what is
 # left and says on stderr how to continue. Handle-first records (L<line>TAB...) continue with --since
-# L<next> while every handle, shown or left out, runs forward. When the next handle is also the first
-# one shown, or the page shows none, that would print the same page again, so the notice asks for a
-# larger budget from that handle instead. On the descriptor <paging-fd> the filter reads what the
-# command said about its output: "several" (cc_several_files), that its records come from several files
-# and start with a handle, a src and a time; a handle bound applies to each file's own lines, so they
-# continue with --since <the next record's time>, which is inclusive, unless a record left out has an
-# earlier time or none; "no-since" (cc_takes_no_since), that the command takes no --since, so its
+# L<next> while every handle, shown or left out, runs forward. On the descriptor <paging-fd> the filter
+# reads what the command said about its output: "several" (cc_several_files), that its records come
+# from several files and start with a handle, a src and a time; a handle bound applies to each file's
+# own lines, so they continue with --since <the next record's time>, which is inclusive, unless a record
+# left out has an earlier time or none. A bound that is also the first handle or time shown, or a page
+# that shows none, would print the same page again, so the notice asks for a larger budget from that
+# bound instead. "no-since" (cc_takes_no_since), that the command takes no --since, so its
 # output continues with a larger budget only. When stdout goes away, SIGPIPE ends this filter and then
 # the command, quietly. Where SIGPIPE is ignored the rest is drained unread instead, so the command
 # never meets a broken pipe.
 cc_budget() {
   local limit=$1 max=$2 paging=$3 line size used=0 shown=0 first=-1 last=-1 forward=1 reason='' handle time
   local next_size=0 next_handle=-1 next_time='' times=() rest left earlier back bound='' place='' repeats=0
-  local several=0 no_since=0 word notice
+  local several=0 no_since=0 word notice first_time
   local handle_re=$'^L([0-9]+)\t' record_re=$'^L[0-9]+\t[^\t]+\t([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z|-)(\t|$)'
   cc_find_utf8_locale
   [ -z "$CC_UTF8_LOCALE" ] || local LC_ALL=$CC_UTF8_LOCALE
@@ -218,9 +218,15 @@ cc_budget() {
     :
   elif [ $several -eq 1 ]; then
     if [ -n "$next_time" ] && [ "$next_time" != - ] && [ "$earlier" -eq 0 ]; then
-      bound="--since $next_time"
+      first_time=''
       [ ${#times[@]} -eq 0 ] ||
+        first_time=$(printf '%s\n' "${times[@]}" | LC_ALL=C awk '$0 != "-" { print; exit }')
+      if [ -n "$first_time" ] && [ "$first_time" \< "$next_time" ]; then
+        bound="--since $next_time"
         repeats=$(printf '%s\n' "${times[@]}" | LC_ALL=C awk -v t="$next_time" '$0 != "-" && $0 >= t { n++ } END { print n + 0 }')
+      else
+        place="--since $next_time"
+      fi
     fi
   elif [ $forward -eq 1 ] && [ "$next_handle" -ge 0 ] && [ "$next_handle" -ge "$last" ] && [ "$back" -eq 0 ]; then
     if [ "$first" -ge 0 ] && [ "$next_handle" -gt "$first" ]; then

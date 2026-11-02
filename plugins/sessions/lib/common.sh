@@ -766,9 +766,9 @@ cc_corpus_agent_map() {
 # main transcripts listed in the file <mains> name by agentId (the agent's transcript) or runId (the
 # run's files) but that the map gives to another session, as "<main>TAB<file>" lines: a resumed copy's
 # agents stay in the original's directory. With the file <files>, only the agent files it lists are
-# looked for, by their ids, which it writes to <files>.ids beside it. Past CC_SESSIONS_RG_IDS of them
-# (2000), rg is several times slower over a set of fixed strings that large than over the one pattern
-# for every id, so every id the mains name is read and those are kept. The lists are files of one
+# looked for, by their ids, which it writes to <files>.ids beside it. rg over a set of fixed strings
+# becomes several times slower than the one pattern for every id once the set nears 3000, so past
+# CC_SESSIONS_RG_IDS of them (2000) every id the mains name is read and those are kept. The lists are files of one
 # path per line, as bash takes time growing with the square of their number to walk that many
 # arguments. Only JSON keys name an id, as quotes inside text are escaped. Where the map holds an
 # agent or a run twice, the one first in path order is taken.

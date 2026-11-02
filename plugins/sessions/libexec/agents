@@ -36,9 +36,9 @@ Fields:
   result         the last call's notification result, else the journal's, else structured output,
                  else the last text
 
-No default limit; a page cut inside a run's rows, which all carry its call's handle, continues with
-a larger --limit or --max-chars. A stderr notice says when output_tokens draw on Claude Code 2.0.50
-to 2.1.56, which often did not record a message's final count: they are lower bounds there.
+No default limit; a page that starts at a run and cannot hold all its rows (all at its call's
+handle) continues with a larger --limit or --max-chars. A stderr notice says when output_tokens
+draw on Claude Code 2.0.50 to 2.1.56, which often did not record a final count: lower bounds there.
 Empty answer: nothing on stdout; on stderr
 "cc-sessions: no sub-agent or workflow calls in <transcript> and no agent files under <dir>".
 Exit status: 0 answered, also when empty; 1 a transcript cannot be read; 2 usage error

@@ -308,8 +308,10 @@ the marker mid-result is not a persisted output.
     `--limit` or `--max-chars`, and `--since L<next>` to keep the place;
   - the output of a command that read several files: `--since <time of the next record>` on every page, also on one
     whose records all come from one of them, unless a record left out has an earlier time or none; `--since` is
-    inclusive, so the notice says how many records already shown carry that second and will repeat. Such a command
-    says so with `cc_several_files` before its first record;
+    inclusive, so the notice says how many records already shown carry that second and will repeat. When every
+    record shown carries that second, `--since` would print the same page again: a larger `--limit` or
+    `--max-chars`, and `--since <time>` to keep the place. Such a command says so with `cc_several_files` before its
+    first record;
   - otherwise, and always for `cc-sessions jq`, which takes no `--since` and says so with `cc_takes_no_since`, a
     larger `--limit` or `--max-chars`.
 - A cross-session command with a default limit applies `--limit` and `--max-chars` itself, stops reading at a row

@@ -788,6 +788,19 @@ L5\tmain\t2026-10-30T10:00:01Z\ta (escaped)
 cc-sessions: output stopped at --limit 1 after 1 record; 1 more left out; continue with --since 2026-10-30T10:00:02Z
 ```
 
+A time bound, like a handle bound, is offered only when it moves forward: when every record shown carries the next
+record's second, `--since` would print the same page again, so the notice asks for a larger budget and names the time
+that keeps the place.
+
+```scrut {output_stream: combined}
+$ "$PLUGIN/bin/cc-sessions" recprobe several 'L1\tmain\t2026-10-30T10:00:02Z\ta' 'L1\tagent\t2026-10-30T10:00:02Z\tb' 'L2\tmain\t2026-10-30T10:00:02Z\tc' 'L3\tmain\t2026-10-30T10:00:03Z\td' --limit 2 2>&1
+> "$PLUGIN/bin/cc-sessions" recprobe several 'L1\tmain\t2026-10-30T10:00:02Z\ta' 'L1\tagent\t2026-10-30T10:00:02Z\tb' 'L2\tmain\t2026-10-30T10:00:02Z\tc' 'L3\tmain\t2026-10-30T10:00:03Z\td' --max-chars 80 2>&1 >/dev/null
+L1\tmain\t2026-10-30T10:00:02Z\ta (escaped)
+L1\tagent\t2026-10-30T10:00:02Z\tb (escaped)
+cc-sessions: output stopped at --limit 2 after 2 records; 2 more left out; continue with a larger --limit (0 removes the limit) and --since 2026-10-30T10:00:02Z
+cc-sessions: output stopped at --max-chars 80 after 2 records; 2 more left out; continue with a larger --max-chars (0 removes the limit) and --since 2026-10-30T10:00:02Z
+```
+
 A record left out with an earlier time, or with none, would be lost by a time bound: the notice asks for a larger
 budget instead.
 
