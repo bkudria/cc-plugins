@@ -32,6 +32,8 @@ jq options go after -- and reach jq unchanged; output is compact (-c) unless --i
 Refused, because operands are always transcripts: --args, --jsonargs, -f/--from-file, -R/--raw-input,
 --stream, --stream-errors, --seq.
 
+Output cut by --limit or --max-chars continues with a larger one: this command takes no --since.
+
 Exit status: jq's own (0, 1 with -e, 2 usage, 3 compile error, 5 runtime error); 2 for a usage error
 of this command; 1 when an operand cannot be read.
 
@@ -152,4 +154,5 @@ else
   program="import \"sessions\" as s; s::transcripts | ($filter"$'\n'")"
 fi
 
+cc_takes_no_since
 cc_jq_program "$program" ${passed[@]+"${passed[@]}"} -- ${files[@]+"${files[@]}"}

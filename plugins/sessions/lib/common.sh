@@ -620,11 +620,24 @@ cc_find_utf8_locale() {
   done
 }
 
+# cc_paging <word>: tells the dispatcher's budget filter, on the descriptor CC_SESSIONS_PAGING_FD, how
+# this command's output continues past the budget.
+cc_paging() {
+  [[ ${CC_SESSIONS_PAGING_FD-} =~ ^[0-9]+$ ]] || return 0
+  { printf '%s\n' "$1" >&"$CC_SESSIONS_PAGING_FD"; } 2> /dev/null
+}
+
 # cc_several_files: says, before the first record, that this command's records come from several
 # files, so that the dispatcher's budget continues its output by time on every page: a handle bound
 # applies to each file's own lines.
 cc_several_files() {
-  [ -z "${CC_SESSIONS_SOURCES-}" ] || printf 'several\n' > "$CC_SESSIONS_SOURCES"
+  cc_paging several
+}
+
+# cc_takes_no_since: says that this command takes no --since, so that the dispatcher's budget continues
+# its output with a larger budget only, whatever its records hold.
+cc_takes_no_since() {
+  cc_paging no-since
 }
 
 # cc_print_line <text>: prints one line of output. When the reader has closed stdout, the command ends
@@ -753,16 +766,19 @@ cc_corpus_agent_map() {
 # main transcripts listed in the file <mains> name by agentId (the agent's transcript) or runId (the
 # run's files) but that the map gives to another session, as "<main>TAB<file>" lines: a resumed copy's
 # agents stay in the original's directory. With the file <files>, only the agent files it lists are
-# looked for, which spares reading every id the mains name. The lists are files of one path per line,
-# as bash takes time growing with the square of their number to walk that many arguments. Only JSON
-# keys name an id, as quotes inside text are escaped. Where the map holds an agent or a run twice, the
-# one first in path order is taken.
+# looked for, by their ids, which it writes to <files>.ids beside it. Past CC_SESSIONS_RG_IDS of them
+# (2000), rg is several times slower over a set of fixed strings that large than over the one pattern
+# for every id, so every id the mains name is read and those are kept. The lists are files of one
+# path per line, as bash takes time growing with the square of their number to walk that many
+# arguments. Only JSON keys name an id, as quotes inside text are escaped. Where the map holds an
+# agent or a run twice, the one first in path order is taken.
 cc_corpus_elsewhere() {
-  local map=$1 mains=$2 files=${3-} ids named
+  local map=$1 mains=$2 files=${3-} ids named id_re='"(?:agentId|runId)":"[A-Za-z0-9_-]+"'
+  local named_options=(-o --no-heading --with-filename -N --field-match-separator=$'\t')
   [ -s "$mains" ] || return 0
   if [ -n "$files" ]; then
     [ -s "$files" ] || return 0
-    ids=$(mktemp "${TMPDIR:-/tmp}/cc-sessions-ids.XXXXXX") || return 1
+    ids=$files.ids
     # shellcheck disable=SC2016 # awk program text
     awk '{
         base = $0
@@ -770,10 +786,14 @@ cc_corpus_elsewhere() {
         if (base ~ /^agent-.*\.jsonl$/) print "\"agentId\":\"" substr(base, 7, length(base) - 12) "\""
         if (match($0, /\/subagents\/workflows\/[^\/]+\//)) print "\"runId\":\"" substr($0, RSTART + 21, RLENGTH - 22) "\""
       }' "$files" | LC_ALL=C sort -u > "$ids"
-    named=$(cc_rg_mains -o --no-heading --with-filename -N --field-match-separator=$'\t' -F -f "$ids" -- "$mains")
-    rm -f "$ids"
+    if [ "$(wc -l < "$ids")" -le "${CC_SESSIONS_RG_IDS:-2000}" ]; then
+      named=$(cc_rg_mains "${named_options[@]}" -F -f "$ids" -- "$mains")
+    else
+      named=$(cc_rg_mains "${named_options[@]}" -e "$id_re" -- "$mains" |
+        LC_ALL=C awk -F '\t' 'FILENAME == ARGV[1] { want[$0] = 1; next } $2 in want' "$ids" -)
+    fi
   else
-    named=$(cc_rg_mains -o --no-heading --with-filename -N --field-match-separator=$'\t' -e '"(?:agentId|runId)":"[A-Za-z0-9_-]+"' -- "$mains")
+    named=$(cc_rg_mains "${named_options[@]}" -e "$id_re" -- "$mains")
   fi
   named=$(printf '%s\n' "$named" | sed -E 's/\t"agentId":"(.*)"$/\tagent:\1/; s/\t"runId":"(.*)"$/\trun:\1/' | LC_ALL=C sort -u)
   [ -n "$named" ] || return 0
@@ -837,26 +857,25 @@ cc_rg_mains() {
 # (sessions' main transcripts, each paired with itself, and the agent files the map gives them) and of
 # those cc_corpus_elsewhere adds, the ones whose file rg finds a match in. Up to CC_SESSIONS_RG_FILES
 # files (5000) are read as they are; past that, one rg over the data root is faster than rg over them in
-# groups, and the mains are read for ids only when an agent file matched.
+# groups, and the mains are read for ids only when an agent file matched. The lists it passes on go
+# beside <pairs> (<pairs>.mains, <pairs>.agents), in the caller's directory, so that they go with it.
 cc_corpus_matching() {
-  local pairs=$1 map=$2 lists extra='' matching
+  local pairs=$1 map=$2 extra='' matching
   shift 2
   [ -s "$pairs" ] || return 0
-  lists=$(mktemp -d "${TMPDIR:-/tmp}/cc-sessions-matching.XXXXXX") || return 1
-  if [ "$(awk -F '\t' '!seen[$2]++ { n++ } END { print n + 0 }' "$pairs")" -le "${CC_SESSIONS_RG_FILES:-5000}" ]; then
-    cut -f 1 "$pairs" | awk '!seen[$0]++' > "$lists/mains"
-    extra=$(cc_corpus_elsewhere "$map" "$lists/mains")
+  if awk -F '\t' -v most="${CC_SESSIONS_RG_FILES:-5000}" '!seen[$2]++ && ++n > most { exit 1 }' "$pairs"; then
+    cut -f 1 "$pairs" | awk '!seen[$0]++' > "$pairs.mains"
+    extra=$(cc_corpus_elsewhere "$map" "$pairs.mains")
     cc_lines "$({ cut -f 2- "$pairs"; printf '%s\n' "$extra" | cut -f 2-; } | awk 'NF && !seen[$0]++')"
     matching=$(cc_rg -l "$@" -- "${CC_LINES[@]}")
   else
     matching=$(cc_rg -l --no-ignore --hidden --glob '*.jsonl' "$@" -- "$(cc_data_root)")
-    awk -F '\t' 'FILENAME == ARGV[1] { want[$0] = 1; next } ($2 in want) && !seen[$2]++ { print $2 }' <(printf '%s\n' "$matching") "$map" > "$lists/agents"
-    if [ -s "$lists/agents" ]; then
-      cut -f 1 "$pairs" | awk '!seen[$0]++' > "$lists/mains"
-      extra=$(cc_corpus_elsewhere "$map" "$lists/mains" "$lists/agents")
+    awk -F '\t' 'FILENAME == ARGV[1] { want[$0] = 1; next } ($2 in want) && !seen[$2]++ { print $2 }' <(printf '%s\n' "$matching") "$map" > "$pairs.agents"
+    if [ -s "$pairs.agents" ]; then
+      cut -f 1 "$pairs" | awk '!seen[$0]++' > "$pairs.mains"
+      extra=$(cc_corpus_elsewhere "$map" "$pairs.mains" "$pairs.agents")
     fi
   fi
-  rm -rf "$lists"
   [ -n "$matching" ] || return 0
   awk -F '\t' 'FILENAME == ARGV[1] { want[$0] = 1; next } ($2 in want) && !seen[$0]++' <(printf '%s\n' "$matching") "$pairs" <(printf '%s\n' "$extra")
 }

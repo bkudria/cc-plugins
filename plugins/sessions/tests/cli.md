@@ -654,10 +654,17 @@ list 0
 
 ## Output budget
 
-`--max-chars` stops stdout at a record boundary; the notice says how many records were left out and, for records that start with a handle, where to continue.
+`--max-chars` stops stdout at a record boundary; the notice says how many records were left out and, for records that
+start with a handle, where to continue. `recprobe` prints its operands as records, after `cc_several_files` when the
+first operand is `several`.
 
 ```scrut
-$ cc-sessions jq 'range(1; 31) | "L\(.)\tabcdefgh"' --max-chars 50 -- -n -r
+$ printf '%s\n' '#!/bin/bash' '. "${0%/*}/../lib/common.sh"' 'case $1 in --synopsis) echo "recprobe  print records"; exit 0 ;; several) cc_several_files ;; esac' \
+>   'shift' 'printf "%b\n" "$@"' > "$PLUGIN/libexec/recprobe" && chmod +x "$PLUGIN/libexec/recprobe"
+```
+
+```scrut
+$ "$PLUGIN/bin/cc-sessions" recprobe one $(seq -f 'L%g\\tabcdefgh' 1 30) --max-chars 50
 L1\tabcdefgh (escaped)
 L2\tabcdefgh (escaped)
 L3\tabcdefgh (escaped)
@@ -665,14 +672,14 @@ L4\tabcdefgh (escaped)
 ```
 
 ```scrut {output_stream: stderr}
-$ cc-sessions jq 'range(1; 31) | "L\(.)\tabcdefgh"' --max-chars 50 -- -n -r
+$ "$PLUGIN/bin/cc-sessions" recprobe one $(seq -f 'L%g\\tabcdefgh' 1 30) --max-chars 50
 cc-sessions: output stopped at --max-chars 50 after 4 records; 26 more left out; continue with --since L5
 ```
 
 `--limit` stops after that many records.
 
 ```scrut {output_stream: combined}
-$ cc-sessions jq 'range(1; 31) | "L\(.)\tabcdefgh"' --limit 3 -- -n -r 2>&1
+$ "$PLUGIN/bin/cc-sessions" recprobe one $(seq -f 'L%g\\tabcdefgh' 1 30) --limit 3 2>&1
 L1\tabcdefgh (escaped)
 L2\tabcdefgh (escaped)
 L3\tabcdefgh (escaped)
@@ -682,7 +689,7 @@ cc-sessions: output stopped at --limit 3 after 3 records; 27 more left out; cont
 The default budget is 20000 characters; records without a handle continue with a larger budget.
 
 ```scrut
-$ cc-sessions jq 'range(2000) | "record-\(. + 1000)"' -- -n -r 2> notice.txt | wc -l | tr -d ' '; cat notice.txt
+$ "$PLUGIN/bin/cc-sessions" recprobe one $(seq -f 'record-%g' 1000 2999) 2> notice.txt | wc -l | tr -d ' '; cat notice.txt
 1666
 cc-sessions: output stopped at --max-chars 20000 after 1666 records; 334 more left out; continue with a larger --max-chars (0 removes the limit)
 ```
@@ -698,14 +705,14 @@ $ cc-sessions jq 'range(2000) | "record-\(. + 1000)"' --max-chars 0 -- -n -r 2> 
 A record that alone is over the budget is not printed; the notice gives the size that fits it.
 
 ```scrut {output_stream: combined}
-$ cc-sessions jq '"L7\t" + ("x" * 100), "L8\tsmall"' --max-chars 50 -- -n -r 2>&1
+$ "$PLUGIN/bin/cc-sessions" recprobe one "L7\t$(printf 'x%.0s' $(seq 1 100))" 'L8\tsmall' --max-chars 50 2>&1
 cc-sessions: output stopped at --max-chars 50 after 0 records; 2 more left out; the next record is 104 characters; continue with --max-chars 104 --since L7
 ```
 
 Records whose handles do not run forward continue with a larger budget instead of `--since`.
 
 ```scrut {output_stream: combined}
-$ cc-sessions jq '"L9\ta", "L2\tb", "L3\tc"' --limit=2 -- -n -r 2>&1
+$ "$PLUGIN/bin/cc-sessions" recprobe one 'L9\ta' 'L2\tb' 'L3\tc' --limit=2 2>&1
 L9\ta (escaped)
 L2\tb (escaped)
 cc-sessions: output stopped at --limit 2 after 2 records; 1 more left out; continue with a larger --limit (0 removes the limit)
@@ -714,21 +721,51 @@ cc-sessions: output stopped at --limit 2 after 2 records; 1 more left out; conti
 So do handles that run forward in what was shown but not in what was left out.
 
 ```scrut {output_stream: combined}
-$ cc-sessions jq '"L1\ta", "L5\tb", "L3\tc"' --limit 1 -- -n -r 2>&1
+$ "$PLUGIN/bin/cc-sessions" recprobe one 'L1\ta' 'L5\tb' 'L3\tc' --limit 1 2>&1
 L1\ta (escaped)
 cc-sessions: output stopped at --limit 1 after 1 record; 2 more left out; continue with a larger --limit (0 removes the limit)
+```
+
+A handle bound is offered only when it moves forward: when the next record carries the first handle shown, `--since`
+would print the same page again, so the notice asks for a larger budget and names the handle that keeps the place. A
+page that shows no handle at all is in the same case.
+
+```scrut {output_stream: combined}
+$ "$PLUGIN/bin/cc-sessions" recprobe one 'L5\ta' 'L5\tb' 'L5\tc' 'L6\td' --limit 2 2>&1
+> "$PLUGIN/bin/cc-sessions" recprobe one 'L5\ta' 'L5\tb' 'L5\tc' 'L6\td' --max-chars 10 2>&1 >/dev/null
+> "$PLUGIN/bin/cc-sessions" recprobe one 'dir\tx' 'L2\ta' 'L2\tb' --limit 1 2>&1 >/dev/null
+L5\ta (escaped)
+L5\tb (escaped)
+cc-sessions: output stopped at --limit 2 after 2 records; 2 more left out; continue with a larger --limit (0 removes the limit) and --since L5
+cc-sessions: output stopped at --max-chars 10 after 2 records; 2 more left out; continue with a larger --max-chars (0 removes the limit) and --since L5
+cc-sessions: output stopped at --limit 1 after 1 record; 2 more left out; continue with a larger --limit (0 removes the limit) and --since L2
+```
+
+A page that ends inside records sharing a later handle continues with that handle, which shows them again.
+
+```scrut {output_stream: combined}
+$ "$PLUGIN/bin/cc-sessions" recprobe one 'L4\ta' 'L5\tb' 'L5\tc' 'L6\td' --limit 2 2>&1
+L4\ta (escaped)
+L5\tb (escaped)
+cc-sessions: output stopped at --limit 2 after 2 records; 2 more left out; continue with --since L5
+```
+
+`cc-sessions jq` takes no `--since`, so its output, whatever its records hold, continues with a larger budget.
+
+```scrut {output_stream: combined}
+$ cc-sessions jq 'range(1; 31) | "L\(.)\tabcdefgh"' --limit 3 -- -n -r 2>&1
+> cc-sessions jq '"L7\t" + ("x" * 100), "L8\tsmall"' --max-chars 50 -- -n -r 2>&1
+L1\tabcdefgh (escaped)
+L2\tabcdefgh (escaped)
+L3\tabcdefgh (escaped)
+cc-sessions: output stopped at --limit 3 after 3 records; 27 more left out; continue with a larger --limit (0 removes the limit)
+cc-sessions: output stopped at --max-chars 50 after 0 records; 2 more left out; the next record is 104 characters; continue with --max-chars 104
 ```
 
 A command whose records come from several files says so before its first record, with `cc_several_files` from
 `lib/common.sh`. A handle bound applies to each file's own lines, so its notices continue with the next record's time
 instead, on every page, even one whose records all come from one of the files. `--since` is inclusive, so the notice
-says how many records already shown carry that second and will repeat. `recprobe` prints its operands as records,
-after `cc_several_files` when the first operand is `several`.
-
-```scrut
-$ printf '%s\n' '#!/bin/bash' '. "${0%/*}/../lib/common.sh"' 'case $1 in --synopsis) echo "recprobe  print records"; exit 0 ;; several) cc_several_files ;; esac' \
->   'shift' 'printf "%b\n" "$@"' > "$PLUGIN/libexec/recprobe" && chmod +x "$PLUGIN/libexec/recprobe"
-```
+says how many records already shown carry that second and will repeat.
 
 ```scrut {output_stream: combined}
 $ "$PLUGIN/bin/cc-sessions" recprobe several 'L1\tmain\t2026-10-30T10:00:01Z\ta' 'L1\tagent\t2026-10-30T10:00:02Z\tb' 'L2\tmain\t2026-10-30T10:00:02Z\tc' 'L2\tagent\t2026-10-30T10:00:03Z\td' --limit 2 2>&1
@@ -777,10 +814,17 @@ L1\tmain\t2026-10-30T10:00:01Z\ta (escaped)
 cc-sessions: output stopped at --limit 1 after 1 record; 1 more left out; continue with --since L2
 ```
 
-The dispatcher leaves no file of its own behind.
+The dispatcher leaves no file of its own behind, even when it is stopped while the command runs on: `slowprobe` says
+that its records come from several files a second after it starts, after the dispatcher has gone.
 
 ```scrut
 $ ls "$TMPDIR" | grep -c '^cc-sessions' || true
+> printf '%s\n' '#!/bin/bash' '. "${0%/*}/../lib/common.sh"' 'case $1 in --synopsis) echo "slowprobe  print a record late"; exit 0 ;; esac' \
+>   'sleep 1' 'cc_several_files' 'printf "L1\tmain\t-\tx\n"' > "$PLUGIN/libexec/slowprobe" && chmod +x "$PLUGIN/libexec/slowprobe"
+> T=$CC_TEST_TMP/stopped && mkdir -p "$T"
+> (TMPDIR=$T "$PLUGIN/bin/cc-sessions" slowprobe > /dev/null 2>&1 & pid=$!; sleep 0.3; kill -TERM $pid; wait $pid; sleep 1.5) 2> /dev/null
+> ls -A "$T" | wc -l | tr -d ' '
+0
 0
 ```
 
@@ -799,7 +843,7 @@ Global options are accepted before the command too, and their values are checked
 ```scrut {output_stream: combined}
 $ cc-sessions --max-chars=12 jq '"L1\tone", "L2\ttwo"' -- -n -r 2>&1
 L1\tone (escaped)
-cc-sessions: output stopped at --max-chars 12 after 1 record; 1 more left out; continue with --since L2
+cc-sessions: output stopped at --max-chars 12 after 1 record; 1 more left out; continue with a larger --max-chars (0 removes the limit)
 ```
 
 ```scrut {output_stream: stderr}

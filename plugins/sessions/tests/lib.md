@@ -1258,17 +1258,24 @@ $ (. "$CC_TEST_ROOT/lib/common.sh"; cc_corpus_agent_map | wc -l | tr -d ' '; cc_
 transcripts to look in and, when given, the only agent files to look for. It prints, as `<main>TAB<file>`, the files
 of the map that a listed main transcript names but that the map gives to another session: RESUMED's copy of BETA's
 call names BETA's Explore agent. Past `CC_SESSIONS_RG_FILES` main transcripts it reads the data root once instead,
-with the same answer.
+and past `CC_SESSIONS_RG_IDS` agent files to look for it reads every id the mains name and keeps theirs, each with
+the same answer. It writes the ids it looks for to `<files>.ids`, beside its list, in the caller's directory.
 
 ```scrut
 $ (. "$CC_TEST_ROOT/lib/common.sh"; cc_corpus_agent_map --journals > map.tsv; printf '%s\n' "$BETA.jsonl" "$RESUMED.jsonl" "$ALPHA.jsonl" > mains.txt
 >   printf '%s\n' "$BETA/subagents/agent-a4c6e8f0a2b4c6d8e.jsonl" > files.txt; : > none.txt
 >   cc_corpus_elsewhere map.tsv mains.txt | cc_test_rel; cc_corpus_elsewhere map.tsv mains.txt files.txt | cc_test_rel
->   CC_SESSIONS_RG_FILES=0 cc_corpus_elsewhere map.tsv mains.txt files.txt | cc_test_rel; cc_corpus_elsewhere map.tsv mains.txt none.txt | wc -l | tr -d ' ')
+>   CC_SESSIONS_RG_FILES=0 cc_corpus_elsewhere map.tsv mains.txt files.txt | cc_test_rel
+>   CC_SESSIONS_RG_IDS=0 cc_corpus_elsewhere map.tsv mains.txt files.txt | cc_test_rel
+>   CC_SESSIONS_RG_IDS=0 CC_SESSIONS_RG_FILES=0 cc_corpus_elsewhere map.tsv mains.txt files.txt | cc_test_rel
+>   cc_corpus_elsewhere map.tsv mains.txt none.txt | wc -l | tr -d ' '; cat files.txt.ids)
+<root>/projects/-tmp-sessions-fixture-beta/b9e1c3a5-7d2f-4e6a-8b0c-1d3e5f7a9b2c.jsonl\t<root>/projects/-tmp-sessions-fixture-beta/b2d4f6a8-1c3e-4a5b-8d7f-9e0a1b2c3d4e/subagents/agent-a4c6e8f0a2b4c6d8e.jsonl (escaped)
+<root>/projects/-tmp-sessions-fixture-beta/b9e1c3a5-7d2f-4e6a-8b0c-1d3e5f7a9b2c.jsonl\t<root>/projects/-tmp-sessions-fixture-beta/b2d4f6a8-1c3e-4a5b-8d7f-9e0a1b2c3d4e/subagents/agent-a4c6e8f0a2b4c6d8e.jsonl (escaped)
 <root>/projects/-tmp-sessions-fixture-beta/b9e1c3a5-7d2f-4e6a-8b0c-1d3e5f7a9b2c.jsonl\t<root>/projects/-tmp-sessions-fixture-beta/b2d4f6a8-1c3e-4a5b-8d7f-9e0a1b2c3d4e/subagents/agent-a4c6e8f0a2b4c6d8e.jsonl (escaped)
 <root>/projects/-tmp-sessions-fixture-beta/b9e1c3a5-7d2f-4e6a-8b0c-1d3e5f7a9b2c.jsonl\t<root>/projects/-tmp-sessions-fixture-beta/b2d4f6a8-1c3e-4a5b-8d7f-9e0a1b2c3d4e/subagents/agent-a4c6e8f0a2b4c6d8e.jsonl (escaped)
 <root>/projects/-tmp-sessions-fixture-beta/b9e1c3a5-7d2f-4e6a-8b0c-1d3e5f7a9b2c.jsonl\t<root>/projects/-tmp-sessions-fixture-beta/b2d4f6a8-1c3e-4a5b-8d7f-9e0a1b2c3d4e/subagents/agent-a4c6e8f0a2b4c6d8e.jsonl (escaped)
 0
+"agentId":"a4c6e8f0a2b4c6d8e"
 ```
 
 `cc_rg <rg-option>... -- <file>...` runs rg over any number of files without hitting the argument limit, and finding

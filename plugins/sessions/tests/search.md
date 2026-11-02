@@ -574,6 +574,21 @@ $ CLAUDE_CONFIG_DIR=$GEN CC_SESSIONS_RG_FILES=0 cc-sessions search 'prompt 10' |
 00000000-0000-4000-8000-000000000010\t1 (escaped)
 ```
 
+A search stopped during that pass leaves no file behind. Here rg takes five seconds to list the files that hold the
+text, and the search, in a process group of its own, is stopped in the meantime.
+
+```scrut {timeout: 60s}
+$ SLOW=$CC_TEST_TMP/slowrg && mkdir -p "$SLOW/bin" "$SLOW/tmp" && real=$(command -v rg)
+> printf '%s\n' '#!/bin/bash' 'case " $* " in *" -l "*slowmarker*) sleep 5 ;; esac' "exec \"$real\" \"\$@\"" > "$SLOW/bin/rg" && chmod +x "$SLOW/bin/rg"
+> for files in 5000 0; do
+>   ( set -m; PATH=$SLOW/bin:$PATH TMPDIR=$SLOW/tmp CLAUDE_CONFIG_DIR=$GEN CC_SESSIONS_RG_FILES=$files cc-sessions search slowmarker > /dev/null 2>&1 &
+>     pid=$!; sleep 2; kill -TERM -- -$pid; wait $pid; sleep 0.5 ) 2> /dev/null
+>   ls -A "$SLOW/tmp" | wc -l | tr -d ' '; rm -rf "$SLOW/tmp"/*
+> done
+0
+0
+```
+
 That pass also finds the agents and runs that a session's calls name in another session's directory: `GENODD` is
 `GEN` with `ODD`'s first two sessions added, older than the rest.
 
@@ -585,6 +600,17 @@ $ GENODD=$CC_TEST_TMP/genodd && cp -R "$GEN" "$GENODD" && cp -R "$OP"/0dd00001-0
 0dd00002-0000-4000-8000-000000000002\t1\tagent-result,agent (escaped)
 0dd00001-0000-4000-8000-000000000001\t1\tagent-result,agent (escaped)
 0dd00002-0000-4000-8000-000000000002\t1\tagent-result,agent (escaped)
+```
+
+A search stopped while it reads the main transcripts for the ids of the agents that matched leaves no file behind
+either.
+
+```scrut {timeout: 60s}
+$ printf '%s\n' '#!/bin/bash' 'case " $* " in *" -f "*) sleep 5 ;; esac' "exec \"$real\" \"\$@\"" > "$SLOW/bin/rg"
+> ( set -m; PATH=$SLOW/bin:$PATH TMPDIR=$SLOW/tmp CLAUDE_CONFIG_DIR=$GENODD CC_SESSIONS_RG_FILES=0 cc-sessions search 'the tree' > /dev/null 2>&1 &
+>   pid=$!; sleep 2; kill -TERM -- -$pid; wait $pid; sleep 0.5 ) 2> /dev/null
+> ls -A "$SLOW/tmp" | wc -l | tr -d ' '
+0
 ```
 
 Only the first 100 matching lines of a file are read in corpus search, and `hits` then ends with `+`; within a session every hit counts.

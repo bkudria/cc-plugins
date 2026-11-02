@@ -316,6 +316,20 @@ L62\tteammate\taplanner-5e1f0a2b3c4d5e6f (escaped)
 cc-sessions: output stopped at --limit 3 after 3 records; 7 more left out; continue with --since L64
 ```
 
+A workflow run's rows all carry its call's handle, so a page that cannot hold them continues with a larger budget from
+that handle, not with a `--since` that would print the same page again.
+
+```scrut {output_stream: combined}
+$ cc-sessions agents a7c3e9f --since L64 --limit 3 2>&1 | cut -f 1-3 | cc_test_rel
+> n=$(($(cc-sessions agents a7c3e9f --since L64 | head -n 2 | wc -c) + 50))
+> cc-sessions agents a7c3e9f --since L64 --max-chars $n 2>&1 >/dev/null | sed "s/ $n / N /"
+dir\t<root>/projects/-tmp-sessions-fixture-alpha/a7c3e9f1-2b4d-4c6e-8f0a-1b3d5f7a9c2e (escaped)
+L64\tworkflow\twf_5d1c9a7e-3b2 (escaped)
+L64\tworkflow-agent\ta0f1e2d3c4b5a6978 (escaped)
+cc-sessions: output stopped at --limit 3 after 3 records; 5 more left out; continue with a larger --limit (0 removes the limit) and --since L64
+cc-sessions: output stopped at --max-chars N after 2 records; 6 more left out; continue with a larger --max-chars (0 removes the limit) and --since L64
+```
+
 A cut among the rows without a call continues with a larger budget.
 
 ```scrut

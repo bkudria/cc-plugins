@@ -300,12 +300,18 @@ the marker mid-result is not a persisted output.
 - Output budget: stdout stops at a record boundary after `--max-chars` characters (default 20000; 0 removes the limit;
   characters, not bytes, whatever the locale; a record counts its newline) or `--limit` records (no default unless the
   command's help names one). A one-line stderr notice then states how many records were left out and how to continue:
-  - the output of a command that read one file, when its handles, shown and left out, run forward: `--since L<next>`;
+  - the output of a command that read one file, when its handles, shown and left out, run forward and the next
+    record's handle is later than the first one shown: `--since L<next>`, which shows again the records already shown
+    at that handle;
+  - such output whose next record has the first handle shown, or whose page shows no handle, where `--since` would
+    print the same page again (the rows of a workflow run in `agents` all carry its call's handle): a larger
+    `--limit` or `--max-chars`, and `--since L<next>` to keep the place;
   - the output of a command that read several files: `--since <time of the next record>` on every page, also on one
     whose records all come from one of them, unless a record left out has an earlier time or none; `--since` is
     inclusive, so the notice says how many records already shown carry that second and will repeat. Such a command
     says so with `cc_several_files` before its first record;
-  - otherwise a larger `--limit` or `--max-chars`.
+  - otherwise, and always for `cc-sessions jq`, which takes no `--since` and says so with `cc_takes_no_since`, a
+    larger `--limit` or `--max-chars`.
 - A cross-session command with a default limit applies `--limit` and `--max-chars` itself, stops reading at a row
   boundary and writes past the dispatcher's filter. A page never ends inside the sessions that share one modified
   second: it ends before them, or holds them all when they alone fill it. The notice says that older sessions were not
