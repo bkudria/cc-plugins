@@ -108,7 +108,7 @@ checks:
 
 **Key challenge**: Hooks are infrastructure, not content — testing is about side effects. The agent may not explicitly mention the hook, but its behavior should reflect the hook's effect.
 
-**What the transcript shows**: Settings and plugin hooks fire under the Agent SDK, and each run is a `hook:` entry right after the tool call it answered: `hook: <event>:<matcher>`, then `outcome`, `exit_code`, and `stdout`/`stderr` when non-empty. The outcome and exit code are the hook's own — a PreToolUse hook that exits 0 says nothing about how the call ended. The call's `result:` entry says that: it repeats the `id` of the call's `tool:` entry and records `is_error` plus the `text` the agent was shown. Since scuttlerun 0.6.0, every Bash, AskUserQuestion and ExitPlanMode call gets a result entry; other tools get one only when the call errored. A PreToolUse hook that blocks a call with exit 2 shows up in both places:
+**What the transcript shows**: Settings and plugin hooks fire under the Agent SDK, and each run is a `hook:` entry: the event plus `:<matcher>` when the hook has one (`hook: PreToolUse:Bash`), then `outcome`, `exit_code`, and `stdout`/`stderr` when non-empty. A PreToolUse or PostToolUse entry follows the tool call it answered, but not always directly: with both hooks on Bash, the PostToolUse entry comes after the PreToolUse one. Hook entries carry no `id`, so match one to its call by position. SessionStart hooks, and the UserPromptSubmit hook for the scenario prompt, run before the transcript header is written, so their entries follow the first `user:` entry. The outcome and exit code are the hook's own — a PreToolUse hook that exits 0 says nothing about how the call ended. The call's `result:` entry says that: it repeats the `id` of the call's `tool:` entry and records `is_error` plus the `text` the agent was shown. Since scuttlerun 0.6.0, every Bash, AskUserQuestion and ExitPlanMode call gets a result entry; other tools get one only when the call errored. A PreToolUse hook that blocks a call with exit 2 shows up in both places:
 
 ```yaml
 - tool: Bash
@@ -129,7 +129,7 @@ checks:
     committing.
 ```
 
-Result text longer than 4000 characters keeps only its first and last 2000. A Bash command moved to the background reports only that it started, so its result says nothing about how the command ended — grade a backgrounded command by a later Bash call that prints its output. The transcript's `legend:` (also printed by `scuttlerun --dry-run <scenario.yaml> | yq .legend`) states these rules for the installed version.
+Result text longer than 4000 characters keeps only its first and last 2000, and a call cut short by a timeout or interrupt may have no result entry. A Bash command moved to the background reports only that it started, so its result says nothing about how the command ended — grade a backgrounded command by a later Bash call that prints its output. The transcript's `legend:` (also printed by `scuttlerun --dry-run <scenario.yaml> | yq .legend`) states these rules for the installed version.
 
 ```yaml
 # scenario.yaml — Hook fires and affects behavior
@@ -152,7 +152,7 @@ project:
 checks:
   - hook-entry-follows-commit:
       check: "A `hook: PreToolUse:Bash` entry with stdout 'pre-commit hook fired' follows the git commit tool call"
-      note: "The hook runs on every Bash call; look for the entry right after the git commit tool entry"
+      note: "Hook entries carry no id, so match by position: the first PreToolUse:Bash entry after the git commit tool entry. The hook runs on every Bash call, so entries following other Bash calls don't count"
   - commit-succeeded:
       check: "The `result:` entry for the git commit Bash call has `is_error: false`"
       note: "Match the result to the call by id. The hook entry's exit_code 0 says only that the hook ran cleanly, not that the commit succeeded"
