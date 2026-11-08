@@ -3,11 +3,10 @@ prompt: |
   (the current directory is the plugin root; evals.yaml is already there).
   The case: the plugin's PreToolUse hook on Bash blocks `git commit` (exit 2,
   reason on stderr) until `npm test` has run. The eval should prove the
-  commit is blocked first and succeeds after the tests run, and that the
-  agent never ran a destructive command. Write the eval files; don't run the
-  eval. When you're done, print the checks file you wrote with `cat`.
-
-max_budget_usd: 8.0
+  commit is blocked first and succeeds after the tests run, that the run has
+  no errors, and that the agent never ran a destructive command. Write the
+  eval files; don't run the eval. When you're done, print the checks file
+  you wrote with `cat`.
 
 project:
   files:

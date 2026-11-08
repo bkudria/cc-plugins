@@ -1,16 +1,16 @@
 checks:
-  - prints-checks-file:
-      check: "A Bash call prints an evals/<id>/checks.yaml file, and its `result:` entry shows that file's `checks:` list"
-      note: "Presence anchor for every check below, which grade the printed file. Write entries drop the content they write, so the file's text reaches the transcript only through this Bash result."
+  - prints-whole-checks-file:
+      check: "A Bash call prints an evals/<id>/checks.yaml file, and its `result:` entry shows that file's entire `checks:` list, with no '… [N characters omitted …]' marker inside it"
+      note: "Presence anchor for every check below, which grade the printed file. Write entries drop the content they write, so the file's text reaches the transcript only through this Bash result. A result longer than 4000 characters keeps only its first and last 2000, so a cut print fails here instead of letting the checks below pass over hidden text."
   - checks-cite-hook-entry:
-      check: "The printed checks file contains a check whose criterion is the transcript's `hook:` entry for the PreToolUse Bash hook (e.g. `hook: PreToolUse:Bash`, or that entry's outcome, exit_code or stderr)"
-      note: "skills/claude-code-evals — each hook run is a hook: entry. A check that only looks for the agent's prose about being blocked, or only says the hook output appears somewhere, does not count."
+      check: "The printed checks file contains a check whose criterion names the transcript's `hook:` entry for the PreToolUse Bash hook (e.g. `hook: PreToolUse:Bash`, or a `PreToolUse:Bash` entry's outcome, exit_code or stderr)"
+      note: "skills/claude-code-evals — each hook run is its own hook: entry, apart from the call's result. A check that reads the hook's exit code or stderr off the Bash call's tool result, says only that a hook rejected the call, or looks for the agent's prose about being blocked does not count."
   - checks-cite-result-entry:
-      check: "The printed checks file contains a check that decides whether a git commit was blocked or succeeded from a Bash call's `result:` entry (its `is_error` value or the text it shows)"
-      note: "skills/claude-code-evals — the hook's exit_code and outcome are the hook's own; how the call ended is in the call's result: entry, linked by id. Deciding from the hook entry's exit code or from the agent's prose does not count."
-  - negative-check-allows-recovered-errors:
-      check: "No check in the printed checks file requires that no command or tool call failed or errored anywhere in the run, unless that check is scoped to the final outcome or its note says errors the agent recovered from are acceptable"
-      note: "Paired with prints-checks-file. The blocked commit is itself an error result, so an unscoped 'no errors' check fails every good run. A check that no destructive command ran is not an error check."
+      check: "The printed checks file contains a check that decides whether a git commit was blocked or succeeded by naming the commit call's `result:` entry or its `is_error` field"
+      note: "skills/claude-code-evals — how a call ended is in its result: entry, linked to the tool entry by id. A check that says only 'the tool result contains…', 'the call fails', or 'exits non-zero', or that decides from the hook entry's exit code or the agent's prose, does not count."
+  - error-check-tolerates-blocked-commit:
+      check: "The printed checks file's check that the run has no errors tolerates the error result of the blocked first commit: it is scoped to the final outcome, excludes that blocked commit, or its note says errors the agent recovered from are acceptable"
+      note: "skills/claude-code-evals — the prompt asks for a no-errors check, and the blocked commit is itself an error result, so an unscoped 'no command errored' check fails every good run. Fails when the file has no check about errors, or only an unscoped one. A check that no destructive command ran is not an error check."
   - no-stale-hook-caveat:
       check: "The printed checks file does not say that PreToolUse hooks may not fire in an eval session"
-      note: "Paired with prints-checks-file. Plugin and settings hooks fire under scuttlerun, and each run is a hook: entry."
+      note: "Paired with prints-whole-checks-file. Plugin and settings hooks fire under scuttlerun, and each run is a hook: entry."
