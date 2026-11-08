@@ -67,6 +67,8 @@ craboodle (orchestrator)
 
 Run `<tool> --help` for CLI flags, YAML schemas, and field references.
 
+Before designing checks, read the `legend:` at the top of a scuttlerun transcript, or `scuttlerun --dry-run <scenario.yaml> | yq .legend`: it says what each entry records. Since scuttlerun 0.6.0, each `tool:` entry carries an `id`, and a `result:` entry with the same `id` shows how the call ended — see `references/check-design.md` § Read the Legend.
+
 ## Quick Start
 
 Evaluate whether a CLAUDE.md instruction changes behavior:

@@ -22,6 +22,14 @@ If yes, the check tests baseline behavior, not config value. Revise it to target
 - Weak: `"Output contains a function"` — Claude writes functions without any instruction
 - Strong: `"Output validates input before processing, including edge cases like empty string and null"` — tests whether the instruction changed behavior
 
+## Read the Legend
+
+Every scuttlerun transcript opens with a `legend:` block that says what each entry kind records and what the transcript leaves out; `scuttlerun --dry-run <scenario.yaml> | yq .legend` prints the same block without running a session. Read it before writing checks, and design each check against fields the legend says are recorded. The entries checks most often lean on:
+
+- **`tool:`** — one per call, with an `id` counting tool entries from 1, and only the fields the legend lists for that tool.
+- **`result:`** — how a call ended, linked to its `tool:` entry by the same `id`: `is_error` and the `text` the agent was shown. Written for every Bash, AskUserQuestion and ExitPlanMode call, and for any other call that errored (scuttlerun 0.6.0+).
+- **`hook:`** — a hook run, with the hook's own `outcome` and `exit_code`; the call's `result:` entry, not the hook's exit code, says whether the call succeeded.
+
 ---
 
 ## Check Patterns
@@ -41,7 +49,9 @@ Most scenarios need 2-3 different pattern types.
 
 **When presence IS the signal, declare it in `note:`.** Two check designs are deliberate WHETHER checks: the Presence *anchor* added for the pairing above, and a *regression baseline* ("the baseline task still completes with this config loaded" — it fails when the config breaks the behavior). Both look like lint's tautological/always_passes targets, so say what the check is for in its `note:` in plain prose — e.g. `note: "Presence anchor paired with no-edit-without-ask"` or `note: "Regression baseline — the config must not break plain file edits"`. Lint reads notes and honors declared intent; there is no special syntax. The declaration settles only the WHETHER objection — a vague, compound, or unverifiable check is still flagged.
 
-Presence-only is also frequently the *correct* form, not a fallback: scuttlerun transcripts drop the content written by Write/Edit (`content`, `old_string`, `new_string`) by design, so a content-level assertion forces the grader to infer the written text from prose and grades flakily run-to-run. Asserting the write occurred (by path), constrained by a paired negative or ordering check, is the gradeable design.
+Presence-only is also frequently the *correct* form for written files, not a fallback: scuttlerun transcripts drop the content written by Write/Edit (`content`, `old_string`, `new_string`) by design, so an assertion about a written file's content forces the grader to infer the text from prose and grades flakily run-to-run. Asserting the write occurred (by path), constrained by a paired negative or ordering check, is the gradeable design. Command output is different: a Bash call's `result:` entry records what the agent was shown, so an assertion about what a command printed — a test run's failure count, the text of an error — is gradeable from the transcript.
+
+**Negative checks and recovered errors.** Result entries record every call that errored, including errors the agent later recovered from: a test run that failed before the fix, a commit a hook blocked until the tests ran. A check like `"No command failed"` fails those runs even though the task succeeded. Scope a negative check to the final outcome — `"The last npm test result has is_error: false"` — or say in its `note:` that errors the agent recovered from are acceptable.
 
 ---
 
@@ -101,7 +111,7 @@ After (split — syntax validity and jq avoidance tested separately):
 | "Handles errors well" | "Output includes a try/catch or error check before the file read" |
 | "Uses the right approach" | "Uses .[] \| select(.age > 18) pattern, not map(select(...))" |
 | "CLAUDE.md was followed" | "Tests were written before production code, matching the TDD instruction" |
-| "Hook worked" | "Pre-commit output appears in the transcript before the commit completes" |
+| "Hook worked" | "The `result:` entry of the git commit call made before any npm test run has `is_error: true`" |
 
 ---
 
@@ -121,7 +131,7 @@ Different configuration types add value in different ways. Target checks accordi
 |-------------|-----------------|------------------|----------------------|
 | Skills | Generic approach | Specific method, domain knowledge | The taught method appears, generic shortcuts are avoided |
 | CLAUDE.md | Follows request as stated | Consistent behavioral rules | Rules are followed even when not explicitly asked |
-| Hooks | No side effects | Pre/post processing, gates | Side effects are visible in transcript, gates block when they should |
+| Hooks | No side effects | Pre/post processing, gates | A `hook:` entry shows the hook ran; the gated call's `result:` entry shows it was blocked when it should be |
 | MCP Servers | No external tools | Domain-specific tool access | Agent discovers and uses the MCP tool, results are incorporated |
 | Settings | Default tool/model config | Constrained or expanded capabilities | Behavior reflects the constraint (e.g., limited tools, specific model) |
 
