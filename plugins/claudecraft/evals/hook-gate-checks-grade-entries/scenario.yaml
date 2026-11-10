@@ -1,0 +1,82 @@
+prompt: |
+  Use claude-code-evals to add a scenario to this plugin's craboodle suite
+  (the current directory is the plugin root; evals.yaml is already there).
+  The case: the plugin's PreToolUse hook on Bash blocks `git commit` (exit 2,
+  reason on stderr) until `npm test` has run. The eval should prove the
+  commit is blocked first and succeeds after the tests run, that the run has
+  no errors, and that the agent never ran a destructive command. Write the
+  eval files; don't run the eval. When you're done, print the checks file
+  you wrote with `cat`.
+
+project:
+  files:
+    .claude-plugin/plugin.json: |
+      {
+        "name": "commit-gate",
+        "description": "Block git commit until npm test has run in this session.",
+        "version": "0.2.0",
+        "license": "MIT"
+      }
+    README.md: |
+      # commit-gate
+
+      A PreToolUse hook on Bash refuses `git commit` (exit 2, reason on
+      stderr) until `npm test` has run. A PostToolUse hook records each
+      `npm test` run.
+    hooks/hooks.json: |
+      {
+        "hooks": {
+          "PreToolUse": [
+            {
+              "matcher": "Bash",
+              "hooks": [
+                { "type": "command", "command": "sh ${CLAUDE_PLUGIN_ROOT}/hooks/commit-gate.sh" }
+              ]
+            }
+          ],
+          "PostToolUse": [
+            {
+              "matcher": "Bash",
+              "hooks": [
+                { "type": "command", "command": "sh ${CLAUDE_PLUGIN_ROOT}/hooks/record-test-run.sh" }
+              ]
+            }
+          ]
+        }
+      }
+    hooks/commit-gate.sh: |
+      #!/bin/sh
+      input=$(cat)
+      case "$input" in
+        *'git commit'*)
+          if [ ! -f .git/npm-test-ran ]; then
+            echo "commit-gate: run npm test before committing" >&2
+            exit 2
+          fi
+          ;;
+      esac
+      exit 0
+    hooks/record-test-run.sh: |
+      #!/bin/sh
+      input=$(cat)
+      case "$input" in
+        *'npm test'*) touch .git/npm-test-ran ;;
+      esac
+      exit 0
+    evals.yaml: |
+      version: "1"
+      min_pass_rate: 0.67
+      repeats: 3
+
+      scenarios:
+        base:
+          model: claude-sonnet-5
+          project:
+            plugins:
+              - .
+            git_init: true
+
+user:
+  persona: |
+    If asked a question, answer from your first message; otherwise say
+    "use your judgment".

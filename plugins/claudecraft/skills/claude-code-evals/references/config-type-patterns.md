@@ -108,7 +108,28 @@ checks:
 
 **Key challenge**: Hooks are infrastructure, not content — testing is about side effects. The agent may not explicitly mention the hook, but its behavior should reflect the hook's effect.
 
-**Known limitation**: PreToolUse hooks configured via `project.settings` may not fire in all Agent SDK modes. The SDK uses `canUseTool` callbacks internally, which don't map directly to settings.json hook definitions. Test hooks carefully and verify they actually execute in the scuttlerun environment before relying on hook checks.
+**What the transcript shows**: Settings and plugin hooks fire under the Agent SDK, and each run is a `hook:` entry: the event plus `:<matcher>` when the hook has one (`hook: PreToolUse:Bash`), then `outcome`, `exit_code`, and `stdout`/`stderr` when non-empty. A PreToolUse or PostToolUse entry follows the tool call it answered, but not always directly: with both hooks on Bash, the PostToolUse entry comes after the PreToolUse one. Hook entries carry no `id`, so match one to its call by position. SessionStart hooks, and the UserPromptSubmit hook for the scenario prompt, run before the transcript header is written, so their entries follow the first `user:` entry. The outcome and exit code are the hook's own — a PreToolUse hook that exits 0 says nothing about how the call ended. The call's `result:` entry says that: it repeats the `id` of the call's `tool:` entry and records `is_error` plus the `text` the agent was shown. Since scuttlerun 0.6.0, every Bash, AskUserQuestion and ExitPlanMode call gets a result entry; other tools get one only when the call errored. A PreToolUse hook that blocks a call with exit 2 shows up in both places:
+
+```yaml
+- tool: Bash
+  id: 4
+  command: git commit -m "Update file"
+
+- hook: PreToolUse:Bash
+  outcome: error
+  exit_code: 2
+  stderr: |
+    Run the tests before committing.
+
+- result: Bash
+  id: 4
+  is_error: true
+  text: |
+    PreToolUse:Bash hook error: [./check-tests.sh]: Run the tests before
+    committing.
+```
+
+Result text longer than 4000 characters keeps only its first and last 2000, and a call cut short by a timeout or interrupt may have no result entry. A Bash command moved to the background reports only that it started, so its result says nothing about how the command ended — grade a backgrounded command by a later Bash call that prints its output. The transcript's `legend:` (also printed by `scuttlerun --dry-run <scenario.yaml> | yq .legend`) states these rules for the installed version.
 
 ```yaml
 # scenario.yaml — Hook fires and affects behavior
@@ -129,9 +150,12 @@ project:
 ```yaml
 # checks.yaml — Hook fires and affects behavior
 checks:
-  - hook-output-in-transcript:
-      check: "The pre-commit hook output appears in the transcript"
-      note: "Look for the hook's echo output before the commit completes"
+  - hook-entry-follows-commit:
+      check: "A `hook: PreToolUse:Bash` entry with stdout 'pre-commit hook fired' follows the git commit tool call"
+      note: "Hook entries carry no id, so match by position: the first PreToolUse:Bash entry after the git commit tool entry. The hook runs on every Bash call, so entries following other Bash calls don't count"
+  - commit-succeeded:
+      check: "The `result:` entry for the git commit Bash call has `is_error: false`"
+      note: "Match the result to the call by id. The hook entry's exit_code 0 says only that the hook ran cleanly, not that the commit succeeded"
   - no-bypass-no-verify:
       check: "Agent does not bypass the hook with --no-verify"
 ```
@@ -154,7 +178,7 @@ checks:
       note: "With restricted tools, agent should find alternatives to shell commands"
 ```
 
-**Check strategy**: For hooks, assert on observable side effects (hook output in transcript, behavioral change). For settings, assert that the constraint is respected (agent works within limited tools, uses the configured model).
+**Check strategy**: For hooks, assert that the hook ran on its `hook:` entry, and decide what it did to the call — blocked or let through — from the call's `result:` entry rather than the hook's exit code. A gate eval expects an error result on the blocked attempt, so scope any "no errors" check to the final outcome (see `check-design.md` § Check Patterns, "Negative checks and recovered errors"). For settings, assert that the constraint is respected (agent works within limited tools, uses the configured model).
 
 ---
 
