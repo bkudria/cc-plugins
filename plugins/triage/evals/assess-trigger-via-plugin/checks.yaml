@@ -1,0 +1,30 @@
+checks:
+  - assess-skill-invoked:
+      check: >-
+        A Skill tool call whose skill argument references the assess skill
+        (e.g. "assess" or "triage:assess") appears in the transcript.
+      note: >-
+        Discoverability — the plugin's load surface: the request matches
+        assess's description ("investigating", "auditing configuration",
+        "reporting findings") without naming the skill or using a slash
+        command, so this call only happens if the plugin registered the skill
+        and its trigger description fires autonomously.
+  - no-iterate-collision:
+      check: >-
+        No Skill tool call whose skill argument references the iterate skill
+        appears in the transcript.
+      note: >-
+        Declared absence — trigger-collision guard between the plugin's two
+        skills: an investigate-and-report request must not pull in iterate,
+        whose description targets working through an existing list. Anchored by
+        assess-skill-invoked, which shows a Skill invocation does occur in this
+        session.
+  - request-routed-into-args:
+      check: >-
+        The Skill tool call invoking the assess skill has an input.args value
+        containing "config" or "configuration" (case-insensitive).
+      note: >-
+        Discoverability — the auto-trigger handoff: the agent routes the
+        user's conversational request into the skill's argument surface, which
+        is what assess's Phase 0 resolves into the workflow's scope. Observed
+        in transcripts as input.args on the Skill tool entry.

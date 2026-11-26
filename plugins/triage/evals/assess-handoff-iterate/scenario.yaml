@@ -1,0 +1,69 @@
+# Composition: assess's output format consumed by iterate in the same session.
+# The prompt carries a verbatim renderAssessment-format document (the exact
+# shape workflows/investigate.js emits: ## Assessment / **Scope** / **Areas
+# covered** / ## Findings / "### N. Title" + "**Significance**:" / ## Summary)
+# and invokes iterate against it — the handoff the plugin exists to provide.
+prompt: |
+  Earlier I ran /triage:assess over this repo's operational configuration and it
+  produced the assessment below. Run /triage:iterate to work through its findings.
+
+  ## Assessment: Operational configuration review
+
+  **Scope**: Deployment configuration and backup tooling in this repository
+  **Areas covered**: configuration defaults, backup scripting
+
+  ## Findings
+
+  ### 1. Debug mode enabled in the deployed configuration
+  **Significance**: high
+
+  The settings file `config/settings.yaml` sets `debug: true`. The file's own
+  header comment describes it as the configuration used for deployed
+  environments, where verbose debug output can expose internal paths and slow
+  request handling. The flag's current value dates to the file's initial
+  commit, suggesting it was never revisited after early development.
+
+  ### 2. Backup script continues past failed commands
+  **Significance**: medium
+
+  `scripts/backup.sh` runs its archive and prune steps as a plain command
+  sequence with no failure handling — there is no `set -e`, no exit-status
+  checks, and the prune step runs even when the preceding archive step fails.
+  A failed archive followed by a successful prune would silently reduce the
+  number of retained backups.
+
+  ## Summary
+
+  Two operational risks stand out: a debug flag left on in deployed
+  configuration, and a backup script whose steps do not halt on failure. Both
+  are small, contained files where the current state is clearly observable.
+
+project:
+  files:
+    config/settings.yaml: |
+      # Settings used for deployed environments.
+      app_name: orders-service
+      debug: true
+      log_level: info
+      request_timeout_seconds: 30
+    scripts/backup.sh: |
+      #!/bin/sh
+      # Archive the data directory, then prune old archives.
+      tar -czf /var/backups/data-$(date +%Y%m%d).tar.gz ./data
+      ls -1t /var/backups/data-*.tar.gz | tail -n +8 | xargs rm -f
+    README.md: |
+      # orders-service
+
+      Internal order-processing service. See config/settings.yaml for runtime
+      settings and scripts/backup.sh for the nightly backup job.
+
+user:
+  persona: |
+    You ran an assessment earlier and now want its findings processed one at a
+    time. When the agent presents the debug-mode finding (finding 1) and asks
+    how to proceed with options like Implement / Plan first / Skip, choose
+    "Implement". After finding 1 is implemented, when the agent checks in about
+    continuing to the backup-script finding (finding 2) with options like
+    Continue / Skip / Pause, choose "Skip" — you do not want the backup script
+    touched right now. Answer any other question as briefly as possible; do not
+    volunteer extra requirements.

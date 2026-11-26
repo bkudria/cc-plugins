@@ -1,0 +1,21 @@
+# Regression: loading the triage plugin must not change behavior on a task
+# that matches neither skill. A plain typo fix should complete normally — no
+# skill auto-fires, no approval gate appears before the edit.
+prompt: |
+  Fix the typo in README.md — "recieve" should be "receive".
+
+timeout: 240
+
+project:
+  files:
+    README.md: |
+      # parcel-tracker
+
+      A small service that records when parcels recieve a scan event at each
+      depot and exposes a tracking timeline per parcel.
+
+user:
+  max_turns: 4
+  persona: |
+    You want the typo fixed, nothing else. If the agent asks you anything,
+    give the briefest possible answer that lets it proceed.

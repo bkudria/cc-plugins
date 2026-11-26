@@ -1,0 +1,22 @@
+version: "1"
+min_pass_rate: 0.67
+max_budget_usd: 10.0
+repeats: 1
+
+scenarios:
+  base:
+    model: claude-sonnet-5
+    # Composition scenarios walk the iterate loop (sub-agent investigation per
+    # item plus two user gates); 600s matches the per-skill iterate suite.
+    timeout: 600
+    additional_tools:
+      - Workflow      # assess's delegation surface; granted everywhere so its
+                      #   absence in composition transcripts is meaningful
+      - TaskCreate    # iterate Phase 0 task tracking
+      - TaskUpdate
+    project:
+      plugins:
+        - .
+    user:
+      oracle_model: claude-haiku-4-5
+      max_turns: 15
