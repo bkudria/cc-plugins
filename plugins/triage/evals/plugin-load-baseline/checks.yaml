@@ -1,0 +1,29 @@
+checks:
+  - typo-fix-lands:
+      check: >-
+        README.md is modified during the session — an Edit, Write, or Bash
+        tool call that rewrites or edits that file appears in the transcript.
+      note: >-
+        Regression baseline — loading the triage plugin must not break a plain
+        edit task. Deliberate WHETHER check; also the presence anchor for the
+        no-triage-skill-invoked and no-gate-before-edit guards in this
+        scenario.
+  - no-triage-skill-invoked:
+      check: >-
+        No Skill tool call invoking either of the plugin's skills (assess or
+        iterate) appears in the transcript.
+      note: >-
+        Declared absence — neither skill's trigger description should fire on
+        an unrelated single-file typo fix; over-triggering would wrap trivial
+        tasks in investigation or approval machinery. Anchored by
+        typo-fix-lands, which shows the session completed real work.
+  - no-gate-before-edit:
+      check: >-
+        No AskUserQuestion tool call appears in the transcript before the
+        first tool call that modifies README.md.
+      note: >-
+        Declared ordering guard — iterate's per-item approval gate must not
+        leak onto plain tasks when the plugin is merely loaded; a gate-first
+        transcript is the leak signature. Paired with the presence anchor
+        typo-fix-lands, which guarantees the modifying call this ordering is
+        measured against actually occurs.

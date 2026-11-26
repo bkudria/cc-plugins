@@ -1,0 +1,43 @@
+checks:
+  - finding-count-stated:
+      check: >-
+        An agent message states how many findings were identified from the
+        assessment — the count two, as a digit ("2") or word ("two"), in a
+        sentence about what was found (e.g. "I found 2 findings in the
+        assessment").
+      note: >-
+        Composition: skills/assess document format -> skills/iterate Phase 0
+        source identification. iterate/SKILL.md Phase 0 requires stating what
+        was found and where before creating tasks; the count proves the agent
+        parsed the assess-format findings list rather than skimming it.
+  - significance-surfaced:
+      check: >-
+        When presenting the debug-mode finding or asking how to proceed with
+        it, the agent's message or AskUserQuestion question text states that
+        finding's significance level — the word "high" used as the finding's
+        significance or severity rating.
+      note: >-
+        Composition: assess emits a "**Significance**:" line under each finding
+        heading and iterate/SKILL.md step 3 mandates surfacing that level in
+        the presentation and gate. The contract only exists across the two
+        skills, so this is the bundle's core cross-component check.
+  - task-per-finding:
+      check: >-
+        At least two TaskCreate tool calls appear in the transcript.
+      note: >-
+        Composition + presence anchor: iterate Phase 0 creates one task per
+        finding by parsing assess's "### N." numbered headings — two findings
+        in the fixture, so two TaskCreate calls. Also the presence anchor
+        showing real iterate processing occurred, paired with the
+        no-assess-refire absence check. TaskCreate is granted via
+        additional_tools in evals.yaml.
+  - no-assess-refire:
+      check: >-
+        No Workflow tool call appears in the transcript.
+      note: >-
+        Declared absence — composition guard: iterate must consume the
+        assessment document already in the conversation, not re-launch assess's
+        background investigation workflow. The Workflow tool is deliberately
+        granted in this suite's tools so this absence is a real choice by the
+        agent, and task-per-finding anchors that the session did real iterate
+        work rather than nothing.

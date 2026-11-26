@@ -1,0 +1,41 @@
+# Discoverability: with the whole plugin loaded, an assess-shaped request —
+# phrased without naming the skill or using a slash command — should fire the
+# assess skill (and not iterate).
+#
+# Workflow is deliberately withheld in this scenario (overriding the suite
+# base, which grants it): on auto-trigger the agent goes prompt -> Skill ->
+# Workflow in a single turn with no user gate, so a synthetic-user abort can
+# never bound the cost — a probe run burned $3 demonstrating this. The checks
+# here target only pre-Workflow behavior (skill selection and the args
+# handoff), so withholding the delegation surface cannot misattribute a
+# composition failure to the plugin.
+prompt: |
+  I'd like a review of this repo's configuration — can you investigate it for
+  problems and report your findings when you're done?
+
+max_budget_usd: 0.75
+disallowed_tools:
+  - Workflow
+
+project:
+  files:
+    config/auth.yaml: |
+      auth:
+        secret: "changeme"
+        session_timeout_seconds: 999999
+        allow_anonymous: true
+        require_ssl: false
+    config/deploy.yaml: |
+      deploy:
+        replicas: 1
+        health_check: disabled
+        rollback_on_failure: false
+
+user:
+  max_turns: 4
+  persona: |
+    You asked for a configuration review, but you do not need a deep or
+    expensive investigation. If the agent asks you anything, or reports that
+    it cannot run its background investigation workflow, reply: "That's fine —
+    stop here, I don't need the full investigation." Do not volunteer extra
+    context.
