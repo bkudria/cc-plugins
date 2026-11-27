@@ -2,9 +2,15 @@ checks:
   - investigates-notes-before-ask:
       check: "At least one Agent tool call whose prompt argument contains the substring 'notes.md' appears in the transcript before the first AskUserQuestion tool call or advanced-ask Skill invocation"
       note: "The iterate skill mandates sub-agent delegation for per-item investigation (iterate/SKILL.md:72-78). The delegated sub-agent's prompt must reference notes.md so the investigation is scope-fenced to the specific finding."
+  - no-main-agent-reads-before-delegating:
+      check: "Before the first Agent tool call, the transcript contains no tool call without `subagent_of` that reads, searches or lists files in the project (e.g. a Read of notes.md, a Grep or Glob over the project, or a Bash cat, grep or ls)"
+      note: "iterate/SKILL.md Phase 1 step 2 forbids investigating an item via direct Read/Grep/Glob/Bash calls, even a one-file item like this; a call without `subagent_of` is the main agent's. This suite has no pressure to skip delegation, so it is the baseline for the same check in investigation-before-presenting. Paired with investigates-notes-before-ask, which asserts the Agent call this window ends at."
+  - no-main-agent-exploration-before-asking:
+      check: "Between the first Agent tool call and the first AskUserQuestion tool call or advanced-ask Skill invocation, the transcript contains no Grep, Glob or Bash call without `subagent_of`"
+      note: "iterate/SKILL.md Phase 1 step 2 lets the main agent Read files a sub-agent cited, only to verify them, and forbids fresh Grep, Glob or Bash exploration; so a main-agent Read of notes.md in this window passes. Sub-agent calls (those carrying `subagent_of`) do not count. Paired with investigates-notes-before-ask, which asserts the Agent call that opens this window."
   - no-edit-before-ask:
-      check: "No Edit or Write tool call targeting notes.md appears in the transcript before the first AskUserQuestion tool call or advanced-ask Skill invocation"
-      note: "The iterate skill requires the approval gate to precede implementation. An edit before any approval prompt violates the gate, even in a single-item iteration."
+      check: "No tool call that modifies notes.md (an Edit, Write or MultiEdit targeting it, or a Bash command whose command argument writes to it, e.g. a redirect or sed -i), whether the main agent's or a sub-agent's (one carrying `subagent_of`), appears in the transcript before the first AskUserQuestion tool call or advanced-ask Skill invocation"
+      note: "The iterate skill requires the approval gate to precede implementation. An edit before any approval prompt violates the gate, even in a single-item iteration, and a sub-agent's edit is still implementation before approval. Paired with notes-md-modified, which asserts the edit this check constrains."
   - notes-md-modified:
       check: "The transcript contains at least one Edit, Write, or MultiEdit tool call targeting notes.md (or a Bash command whose command argument writes to that path, e.g. a redirect to notes.md or sed -i)"
       note: "Sanity guard that the single item is actually processed — an edit to notes.md lands (paired with no-edit-before-ask, which constrains it to after the approval gate). Presence-only rather than asserting the heading content because scuttlerun's transcript drops Write/Edit content (content/old_string/new_string) by design (scuttlerun.allium TranscriptToolFieldContract); a content-level assertion forces the grader to infer the written text from prose and is flaky run-to-run."
