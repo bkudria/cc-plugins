@@ -1,0 +1,49 @@
+prompt: |
+  Use claude-code-evals to add a scenario to this skill's craboodle suite
+  (the current directory is the skill root; evals.yaml is already there).
+  The case: asked to review src/app.py, the skill must hand the file to an
+  Explore sub-agent and must not read the file itself before presenting the
+  findings. The eval should prove the file was reviewed through a sub-agent
+  and that the main agent never read it directly. Write the eval files;
+  don't run the eval. When you're done, print the checks file you wrote
+  with `cat`.
+
+project:
+  files:
+    SKILL.md: |
+      ---
+      name: review-file
+      description: Review one source file for bugs. Use when asked to review a file.
+      ---
+
+      # Review File
+
+      ## When to Use
+
+      When the user asks for a review of one source file.
+
+      ## Steps
+
+      1. Hand the file to an Explore sub-agent with the Agent tool, asking
+         for bugs with line numbers.
+      2. Do not Read, Grep or cat the file in the main conversation: the
+         sub-agent's report is the only source.
+      3. Present the sub-agent's findings with their line numbers.
+    evals.yaml: |
+      version: "1"
+      min_pass_rate: 0.67
+      repeats: 3
+
+      scenarios:
+        base:
+          model: claude-sonnet-5
+          additional_tools:
+            - Agent
+          project:
+            skills:
+              - .
+
+user:
+  persona: |
+    If asked a question, answer from your first message; otherwise say
+    "use your judgment".

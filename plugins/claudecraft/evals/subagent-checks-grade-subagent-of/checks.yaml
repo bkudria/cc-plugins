@@ -1,0 +1,10 @@
+checks:
+  - prints-whole-checks-file:
+      check: "A Bash call prints an evals/<id>/checks.yaml file, and its `result:` entry shows that file's entire `checks:` list, with no '… [N characters omitted …]' marker inside it"
+      note: "Presence anchor for every check below, which grade the printed file. Write entries drop the content they write, so the file's text reaches the transcript only through this Bash result. A result longer than 4000 characters keeps only its first and last 2000, so a cut print fails here instead of letting the checks below pass over hidden text."
+  - main-agent-check-names-subagent-of:
+      check: "The printed checks file contains a check forbidding the main agent from reading src/app.py whose criterion names the `subagent_of` field, e.g. by counting only calls that lack it"
+      note: "skills/claude-code-evals — a sub-agent's calls are in the transcript, each carrying subagent_of, so the sub-agent's own Read of src/app.py is recorded too. A check like 'no Read tool call targets src/app.py' therefore fails every run where the skill works. A check that tells the two apart some other way (e.g. 'reads outside the Agent call', 'the main agent's own Read') without naming subagent_of does not count."
+  - no-claim-subagent-calls-unrecorded:
+      check: "The printed checks file does not say that a sub-agent's tool calls are missing from the transcript or cannot be seen by the grader"
+      note: "Paired with prints-whole-checks-file. Since scuttlerun 0.7.0 an Agent sub-agent's tool and result entries are streamed into the transcript, marked with subagent_of; only agents a Workflow starts leave no entries."
